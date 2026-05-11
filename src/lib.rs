@@ -240,7 +240,7 @@ where
     S: State + ?Sized,
     S::Repr: Debug + Send + Sync,
 {
-    /// Erases the state type, returning an opaque `dyn Error`.
+    /// Erases the state type, returning an opaque [`Error`][error::Error].
     ///
     /// The returned error implements `std::error::Error`, `Send`, and `Sync`,
     /// making it suitable for propagation through `?` or storage in `Box<dyn Error>`.
@@ -248,7 +248,7 @@ where
         ImplError::<S>(self.0)
     }
 
-    /// Returns a reference to an opaque `dyn Error` without consuming `self`.
+    /// Returns a reference to an opaque [`Error`][error::Error] without consuming `self`.
     pub fn erase_ref(&self) -> &(impl error::Error + Send + Sync + 'static) {
         // Safety: `ImplError<S>` is `#[repr(transparent)]` over `RawError<S::Repr>`,
         // so `&RawError<S::Repr>` and `&ImplError<S>` have identical layout.
