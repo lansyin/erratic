@@ -2,6 +2,7 @@
 name = "erratic"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.95.0"
 authors = ["Little Lan <lansyin@foxmail.com>"]
 categories = ["rust-patterns"]
 description = "Handling errors in an efficient way. "
