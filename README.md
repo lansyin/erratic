@@ -43,6 +43,7 @@ When returning an error that may require special handling, you can supply a gene
 alongside it. The state must be explicitly erased (via `erase()`) before it can be propagated
 upward with `?`. If the state type implements `Default`, other errors can be wrapped and returned
 directly through `?`.
+
 When no error is wrapped and no context/payload is attached, the state object is inlined
 without triggering any heap allocation. On 32-bit targets, the error stays at 1 usize when the
 state is no larger than 2 bytes; on 64-bit targets, it stays at 1 usize when the state is no
@@ -78,8 +79,8 @@ This makes it possible to avoid heap allocation when not needed.
 (32-bit platform, little-endian)
 (Context)
 [XXXXXX00|XXXXXXXX|XXXXXXXX|XXXXXXXX]
-                                 \
-                                  `rodata-> [&'static str] --rodata--> [ ~ str ~ ]
+                                     \
+                                      `rodata-> [&'static str] --rodata--> [ ~ str ~ ]
 (Error, Payload, or State & Context)
 [XXXXXX01|XXXXXXXX|XXXXXXXX|XXXXXXXX]
           \

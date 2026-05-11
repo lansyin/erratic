@@ -76,8 +76,8 @@
 //! (32-bit platform, little-endian)
 //! (Context)
 //! [XXXXXX00|XXXXXXXX|XXXXXXXX|XXXXXXXX]
-//!                                  \
-//!                                   `rodata-> [&'static str] --rodata--> [ ~ str ~ ]
+//!                                      \
+//!                                       `rodata-> [&'static str] --rodata--> [ ~ str ~ ]
 //! (Error, Payload, or State & Context)
 //! [XXXXXX01|XXXXXXXX|XXXXXXXX|XXXXXXXX]
 //!           \
