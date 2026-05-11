@@ -78,11 +78,11 @@ the discriminant. This design allows heap allocation to be avoided when unnecess
 (Context)
 [XXXXXX00|XXXXXXXX|XXXXXXXX|XXXXXXXX]
                                      \
-                                      `rodata-> [&'static str] --rodata--> [ ~ str ~ ]
+                                      `rodata-> [&'static str]
 (Error, Payload, or State & Context)
 [XXXXXX01|XXXXXXXX|XXXXXXXX|XXXXXXXX]
-          \
-           `heap-> [ ~ State/() ~ | ~ VTable ~ | ~ Error ~ | ~ Payload/() ~ |&'static str/()]
+       \
+        `heap-> [ ~ State ~ |&'static VTable| ~ Error ~ | ~ Payload ~ |&'static str/()]
 (State)
 [00000010|     ~    State     ~     ]
 ```
