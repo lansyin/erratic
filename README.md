@@ -1,13 +1,15 @@
 # Erratic
 
-This library provides the `Error<S = Stateless>` type, enabling applications to handle errors uniformly
+[![GitHub License](https://img.shields.io/github/license/lansyin/erratic)](https://github.com/lansyin/erratic)
+[![Crates.io](https://img.shields.io/crates/v/erratic?style=flat-square)](https://crates.io/crates/erratic)
+[![docs.rs](https://img.shields.io/docsrs/erratic)](https://docs.rs/erratic/latest/erratic/)
+
+This library provides the [`Error<S = Stateless>`][Error] type, enabling applications to handle errors uniformly
 across different contexts.
 
-## Basic Usage
-
+### Basic Usage
 In most cases, `Error` can serve as a drop-in replacement for `Box<dyn Error>`.
 Compared to the latter, it occupies only 1 usize, making the happy path faster.
-
 ```rust
 use erratic::*;
 
@@ -17,12 +19,11 @@ fn write_log(filename: String) -> Result<()> {
 }
 ```
 
-## Attaching Context & Payload
-
+### Attaching Context & Payload
 When constructing an error, you can optionally attach a static context and/or a dynamic payload.
-If attached, their memory is merged into a single allocation when the upstream error type is
-erased. If omitted, no extra memory is allocated for them. If only context is provided, no heap
-allocation occurs at all.
+If attached, their memory is merged into a single allocation when the upstream error is erased.
+If omitted, no extra memory is allocated for them. If only context is provided, no heap allocation
+occurs at all.
 
 ```rust
 use erratic::*;
@@ -37,14 +38,13 @@ fn write_log(filename: String) -> Result<()> {
 }
 ```
 
-## Binding State
+### Binding State
+When propagating an error that needs special handling, you can supply a generic state
+alongside it. For the consumer handling this error, the state must be explicitly
+erased via `erase()` before it can be further propagated upward. If the state
+implements `Default`, other errors can be wrapped and returned directly through `?`.
 
-When returning an error that may require special handling, you can supply a generic state object
-alongside it. The state must be explicitly erased (via `erase()`) before it can be propagated
-upward with `?`. If the state type implements `Default`, other errors can be wrapped and returned
-directly through `?`.
-
-When no error is wrapped and no context/payload is attached, the state object is inlined
+When no error is wrapped and no context/payload is attached, the state is inlined
 without triggering any heap allocation. On 32-bit targets, the error stays at 1 usize when the
 state is no larger than 2 bytes; on 64-bit targets, it stays at 1 usize when the state is no
 larger than 4 bytes.
@@ -69,8 +69,7 @@ fn write_log(filename: String) -> std::result::Result<(), Error<WriteLog>> {
 }
 ```
 
-## Representation
-
+### Representation
 Type-wise, `Error<S>` is a internal tagged union, and it requires pointers to constant or
 heap-allocated data to be aligned to 4 bytes, freeing up the lower 2 bits to encode discriminant.
 This makes it possible to avoid heap allocation when not needed.
@@ -89,6 +88,8 @@ This makes it possible to avoid heap allocation when not needed.
 [00000010|     ~    State     ~     ]
 ```
 
-## Contribution
 
-Contributions are warmly welcomed! Whether you have a bug report, feature request, or an improvement in mind, feel free to open an issue or submit a pull request. All ideas—big or small—help make this library better for everyone.
+## Contribution
+Contributions are warmly welcomed! Whether you have a bug report, feature request, or 
+an improvement in mind, feel free to open an issue or submit a pull request. 
+All ideas—big or small—help make this library better for everyone.
