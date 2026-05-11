@@ -448,6 +448,24 @@ where
     }
 }
 
+impl<S> From<Error<S>> for Error
+where
+    S: State,
+    S::Repr: Debug + Send + Sync + 'static,
+{
+    fn from(err: Error<S>) -> Self {
+        let Err(err) = match_else!(rtti::concretize::<Error<S>, Error<()>>(err),
+            Ok(err_unit) => return Error(err_unit.0),
+        );
+
+        Error(RawError::new_boxed::<_, _, context::Blank>(
+            (),
+            err.erase(),
+            payload::Empty,
+        ))
+    }
+}
+
 impl<S> From<Error> for Error<S>
 where
     S: State + Default,
