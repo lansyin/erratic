@@ -1,0 +1,20 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - erratic-[0-9]+.*
+
+jobs:
+  create-release:
+    name: Publish to crates.io
+    # only publish from the origin repository
+    if: github.repository_owner == 'lansyin'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Login into crates.io
+        run: cargo login ${{ secrets.CRATES_IO }}
+      - name: "Publish to crates.io"
+        run: cargo publish
