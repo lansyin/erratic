@@ -63,14 +63,3 @@ jobs:
         with:
           toolchain: ${{ matrix.toolchain }}
       - run: cargo test --verbose
-
-  publish:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Login into crates.io
-        run: cargo login ${{ secrets.CRATES_IO }}
-      - name: Publish to crates.io
-        run: cargo publish
