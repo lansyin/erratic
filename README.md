@@ -1,13 +1,13 @@
 # Erratic
 
-[![GitHub License](https://img.shields.io/github/license/lansyin/erratic)](https://github.com/lansyin/erratic)
-[![Crates.io](https://img.shields.io/crates/v/erratic?style=flat-square)](https://crates.io/crates/erratic)
+[![license](https://img.shields.io/github/license/lansyin/erratic)](https://github.com/lansyin/erratic)
+[![crates.io](https://img.shields.io/crates/v/erratic)](https://crates.io/crates/erratic)
 [![docs.rs](https://img.shields.io/docsrs/erratic)](https://docs.rs/erratic/latest/erratic/)
 
-This library provides the [`Error<S = Stateless>`][Error] type, enabling applications to handle errors uniformly
+This library provides the `Error<S = Stateless>` type, enabling applications to handle errors uniformly
 across different contexts.
 
-### Basic Usage
+## Basic Usage
 In most cases, `Error` can serve as a drop-in replacement for `Box<dyn Error>`.
 Compared to the latter, it occupies only 1 usize, making the happy path faster.
 ```rust
@@ -19,7 +19,7 @@ fn write_log(filename: String) -> Result<()> {
 }
 ```
 
-### Attaching Context & Payload
+## Attaching Context & Payload
 When constructing an error, you can optionally attach a static context and/or a dynamic payload.
 If attached, their memory is merged into a single allocation when the upstream error is erased.
 If omitted, no extra memory is allocated for them. If only context is provided, no heap allocation
@@ -38,7 +38,7 @@ fn write_log(filename: String) -> Result<()> {
 }
 ```
 
-### Binding State
+## Binding State
 When propagating an error that needs special handling, you can supply a generic state
 alongside it. For the consumer handling this error, the state must be explicitly
 erased via `erase()` before it can be further propagated upward. If the state
@@ -69,8 +69,8 @@ fn write_log(filename: String) -> std::result::Result<(), Error<WriteLog>> {
 }
 ```
 
-### Representation
-Type-wise, `Error<S>` is a internal tagged union, and it requires pointers to constant or
+## Representation
+Type-wise, `Error<S>` is an internal tagged union, and it requires pointers to constant or
 heap-allocated data to be aligned to 4 bytes, freeing up the lower 2 bits to encode discriminant.
 This makes it possible to avoid heap allocation when not needed.
 

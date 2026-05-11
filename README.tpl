@@ -1,7 +1,7 @@
 # Erratic
 
-[![GitHub License](https://img.shields.io/github/license/lansyin/erratic)](https://github.com/lansyin/erratic)
-[![Crates.io](https://img.shields.io/crates/v/erratic?style=flat-square)](https://crates.io/crates/erratic)
+[![license](https://img.shields.io/github/license/lansyin/erratic)](https://github.com/lansyin/erratic)
+[![crates.io](https://img.shields.io/crates/v/erratic)](https://crates.io/crates/erratic)
 [![docs.rs](https://img.shields.io/docsrs/erratic)](https://docs.rs/erratic/latest/erratic/)
 
 {{readme}}
