@@ -88,3 +88,7 @@ This makes it possible to avoid heap allocation when not needed.
 (State)
 [00000010|     ~    State     ~     ]
 ```
+
+## Contribution
+
+Contributions are warmly welcomed! Whether you have a bug report, feature request, or an improvement in mind, feel free to open an issue or submit a pull request. All ideas—big or small—help make this library better for everyone.
