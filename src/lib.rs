@@ -1,0 +1,1064 @@
+//!
+//! This library provides the [`Error<S = Stateless>`][Error] type, enabling applications to handle errors uniformly
+//! across different contexts.
+//!
+//! # Basic Usage
+//! In most cases, `Error` can serve as a drop-in replacement for `Box<dyn Error>`.
+//! Compared to the latter, it occupies only 1 usize, making the happy path faster.
+//! ```
+//! # use std::{fs::File, io::Write};
+//! use erratic::*;
+//!
+//! fn write_log(filename: String) -> Result<()> {
+//!     File::open(&filename)?.write_all(b"Hello, World!")?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! # Attaching Context & Payload
+//! When constructing an error, you can optionally attach a static context and/or a dynamic payload.
+//! If attached, their memory is merged into a single allocation when the upstream error type is
+//! erased. If omitted, no extra memory is allocated for them. If only context is provided, no heap
+//! allocation occurs at all.
+//!
+//! ```
+//! # use std::{fs::File, io::Write};
+//! use erratic::*;
+//!
+//! fn write_log(filename: String) -> Result<()> {
+//!     File::open(&filename)
+//!         .or_context(literal!("failed to open the log file"))? // No alloc.
+//!         .write_all(b"Hello, World!")
+//!         .with_context(literal!("while writing file"))
+//!         .with_payload(|| filename)?; // One alloc to store both `io::Error` and `filename`.
+//!     Ok(())
+//! }
+//! ```
+//!
+//! # Binding State
+//! When returning an error that may require special handling, you can supply a generic state object
+//! alongside it. The state must be explicitly erased (via `erase()`) before it can be propagated
+//! upward with `?`. If the state type implements `Default`, other errors can be wrapped and returned
+//! directly through `?`.
+//!
+//! When no error is wrapped and no context/payload is attached, the state object is inlined
+//! without triggering any heap allocation. On 32-bit targets, the error stays at 1 usize when the
+//! state is no larger than 2 bytes; on 64-bit targets, it stays at 1 usize when the state is no
+//! larger than 4 bytes.
+//!
+//! ```
+//! # use std::{fs::File, io::Write, fmt::Debug};
+//! use erratic::*;
+//!
+//! #[derive(Debug, Default)]
+//! enum WriteLog {
+//!     FileNotFound,
+//!     #[default]
+//!     Other,
+//! }
+//!
+//! fn write_log(filename: String) -> std::result::Result<(), Error<WriteLog>> {
+//!     File::open(&filename)
+//!         .or_state(WriteLog::FileNotFound)? // No alloc.
+//!         .write_all(b"Hello, World!")
+//!         .with_context(literal!("while writing to"))
+//!         .with_payload(|| filename)?; // Falls back to the default state value.
+//!     Ok(())
+//! }
+//! ```
+//!
+//! # Representation
+//! Type-wise, `Error<S>` is a internal tagged union, and it requires pointers to constant or
+//! heap-allocated data to be aligned to 4 bytes, freeing up the lower 2 bits to encode discriminant.
+//! This makes it possible to avoid heap allocation when not needed.
+//!
+//! ```plaintext
+//! (32-bit platform, little-endian)
+//! (Context)
+//! [XXXXXX00|XXXXXXXX|XXXXXXXX|XXXXXXXX]
+//!                                  \
+//!                                   `rodata-> [&'static str] --rodata--> [ ~ str ~ ]
+//! (Error, Payload, or State & Context)
+//! [XXXXXX01|XXXXXXXX|XXXXXXXX|XXXXXXXX]
+//!           \
+//!            `heap-> [ ~ State/() ~ | ~ VTable ~ | ~ Error ~ | ~ Payload/() ~ |&'static str/()]
+//! (State)
+//! [00000010|     ~    State     ~     ]
+//! ```
+//!
+
+#![allow(clippy::type_complexity)]
+
+mod ptr;
+mod raw;
+mod rtti;
+
+#[doc(hidden)]
+pub mod macros;
+
+pub mod context;
+pub mod nae;
+pub mod payload;
+pub mod state;
+
+use std::{
+    self, error,
+    fmt::{self, Debug, Display},
+    marker::PhantomData,
+    mem, result,
+};
+
+use crate::{
+    context::{Context, Literal},
+    nae::Nae,
+    raw::RawError,
+    state::{State, Stateless},
+};
+
+pub type Result<T> = result::Result<T, Error>;
+
+/// An error type that can carry optional state, source, context, and payload.
+#[repr(transparent)]
+pub struct Error<S = Stateless>(RawError<S::Repr>)
+where
+    S: State + ?Sized;
+
+impl Error {
+    /// Creates an `Error` from any [`Error`][std::error::Error].
+    ///
+    /// Equivalent to `E::into()` via the blanket `From` impl.
+    pub fn from_error<E>(err: E) -> Self
+    where
+        E: error::Error + Send + Sync + 'static,
+    {
+        err.into()
+    }
+
+    /// Creates an `Error` from a typed literal context.
+    pub fn from_context<L>(_ty: L) -> Self
+    where
+        L: Literal,
+    {
+        Error(RawError::new_const::<L>())
+    }
+
+    /// Creates an `Error` from a literal context type, inferred at the call site.
+    pub fn from_context_ty<L>() -> Self
+    where
+        L: Literal,
+    {
+        Error(RawError::new_const::<L>())
+    }
+
+    /// Creates an `Error` with a dynamic payload.
+    pub fn from_payload<P>(payload: P) -> Self
+    where
+        P: Display + Send + Sync + 'static,
+    {
+        Error(RawError::new_boxed::<_, P, context::Blank>(
+            (),
+            Nae,
+            payload,
+        ))
+    }
+
+    /// Starts building an `Error` from a source error.
+    pub fn with_error<E>(
+        err: E,
+    ) -> Builder<E, Stateless, fn() -> payload::Empty, payload::Empty, context::Blank> {
+        Builder {
+            err,
+            context: PhantomData,
+            state: (),
+            load_payload: || payload::Empty,
+        }
+    }
+
+    /// Starts building an `Error` with a typed state.
+    ///
+    /// The state is inlined when no source or payload is attached.
+    pub fn with_state<S>(
+        state: S,
+    ) -> Builder<Nae, S, fn() -> payload::Empty, payload::Empty, context::Blank>
+    where
+        S: State,
+    {
+        Builder {
+            err: Nae,
+            context: PhantomData,
+            state: state.into_repr(),
+            load_payload: || payload::Empty,
+        }
+    }
+
+    /// Starts building an `Error` with a lazily-evaluated payload.
+    ///
+    /// The closure `load_payload` is called only when the error is materialized.
+    pub fn with_payload<F, P>(load_payload: F) -> Builder<Nae, Stateless, F, P, context::Blank>
+    where
+        F: Fn() -> P,
+    {
+        Builder {
+            err: Nae,
+            context: PhantomData,
+            state: (),
+            load_payload,
+        }
+    }
+
+    /// Starts building an `Error` with a typed literal context.
+    pub fn with_context<L>(
+        _ty: L,
+    ) -> Builder<Nae, Stateless, fn() -> payload::Empty, payload::Empty, L> {
+        Self::with_context_ty::<L>()
+    }
+
+    /// Starts building an `Error` with a literal context type, inferred at the call site.
+    pub fn with_context_ty<L>() -> Builder<Nae, Stateless, fn() -> payload::Empty, payload::Empty, L>
+    {
+        Builder {
+            err: Nae,
+            context: PhantomData,
+            state: (),
+            load_payload: || payload::Empty,
+        }
+    }
+
+    /// Extracts the source error and payload by type.
+    ///
+    /// Returns `(None, None)` when the requested types do not match.
+    pub fn into_parts<E, P>(self) -> (Option<E>, Option<P>)
+    where
+        E: 'static,
+        P: 'static,
+    {
+        let (source, payload, _) = self.0.into_parts::<E, P>();
+        (source, payload)
+    }
+}
+
+impl<S> Error<S>
+where
+    S: State + ?Sized,
+    S::Repr: Debug + Send + Sync,
+{
+    /// Erases the state type, returning an opaque `dyn Error`.
+    ///
+    /// The returned error implements `std::error::Error`, `Send`, and `Sync`,
+    /// making it suitable for propagation through `?` or storage in `Box<dyn Error>`.
+    pub fn erase(self) -> impl error::Error + Send + Sync + 'static {
+        ImplError::<S>(self.0)
+    }
+
+    /// Returns a reference to an opaque `dyn Error` without consuming `self`.
+    pub fn erase_ref(&self) -> &(impl error::Error + Send + Sync + 'static) {
+        // Safety: `ImplError<S>` is `#[repr(transparent)]` over `RawError<S::Repr>`,
+        // so `&RawError<S::Repr>` and `&ImplError<S>` have identical layout.
+        unsafe { mem::transmute::<&RawError<S::Repr>, &ImplError<S>>(&self.0) }
+    }
+}
+
+impl<S> Error<S>
+where
+    S: State + ?Sized,
+{
+    /// Returns a reference to the displayable payload, if present.
+    pub fn payload(&self) -> Option<&(dyn Display + Send + Sync)> {
+        self.0.payload()
+    }
+
+    /// Returns `true` if the wrapped source error is of type `E`.
+    pub fn has_source_of<E>(&self) -> bool
+    where
+        E: 'static,
+    {
+        self.0.downcast_source_ref::<E>().is_some()
+    }
+
+    /// Attempts to downcast the wrapped source error to `E` by shared reference.
+    pub fn downcast_source_ref<E>(&self) -> Option<&E>
+    where
+        E: 'static,
+    {
+        self.0.downcast_source_ref::<E>()
+    }
+
+    /// Attempts to downcast the wrapped source error to `E` by mutable reference.
+    pub fn downcast_source_mut<E>(&mut self) -> Option<&mut E>
+    where
+        E: 'static,
+    {
+        self.0.downcast_source_mut::<E>()
+    }
+
+    /// Returns `true` if the attached payload is of type `P`.
+    pub fn has_payload_of<P>(&self) -> bool
+    where
+        P: 'static,
+    {
+        self.0.downcast_payload_ref::<P>().is_some()
+    }
+
+    /// Attempts to downcast the payload to `P` by shared reference.
+    pub fn downcast_payload_ref<P>(&self) -> Option<&P>
+    where
+        P: 'static,
+    {
+        self.0.downcast_payload_ref::<P>()
+    }
+
+    /// Attempts to downcast the payload to `P` by mutable reference.
+    pub fn downcast_payload_mut<P>(&mut self) -> Option<&mut P>
+    where
+        P: 'static,
+    {
+        self.0.downcast_payload_mut::<P>()
+    }
+
+    /// Consumes `self` and returns the boxed source error, if any.
+    pub fn into_source(self) -> Option<Box<dyn error::Error + Send + Sync + 'static>> {
+        self.0.into_source()
+    }
+
+    /// Iterates over the source error chain, starting from the immediate source.
+    pub fn chain(&self) -> impl Iterator<Item = &(dyn error::Error + 'static)> {
+        self.0.chain()
+    }
+}
+
+impl<S> Error<S>
+where
+    S: State,
+{
+    /// Creates an `Error` with `state` inlined.
+    pub fn from_state(state: S) -> Self {
+        Error(RawError::new_inline(S::into_repr(state)))
+    }
+
+    /// Returns a reference to the attached state.
+    pub fn state(&self) -> &S {
+        S::from_repr_ref(self.0.state())
+    }
+
+    /// Consumes `self` and returns the source error, payload, and state.
+    ///
+    /// Returns `(None, None, state)` when the requested types do not match.
+    pub fn into_parts<E, P>(self) -> (Option<E>, Option<P>, S)
+    where
+        E: 'static,
+        P: 'static,
+    {
+        let (source, payload, state) = self.0.into_parts::<E, P>();
+        (source, payload, S::from_repr(state))
+    }
+
+    /// Consumes `self` and returns the attached state.
+    pub fn into_state(self) -> S {
+        S::from_repr(self.0.into_state())
+    }
+}
+
+impl<S> Debug for Error<S>
+where
+    S: State + ?Sized,
+    S::Repr: Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Debug::fmt(&self.0, f)
+    }
+}
+
+impl<S> Display for Error<S>
+where
+    S: State + ?Sized,
+    S::Repr: Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+#[repr(transparent)]
+struct ImplError<S = Stateless>(RawError<S::Repr>)
+where
+    S: State + ?Sized;
+
+impl<S> Debug for ImplError<S>
+where
+    S: State + ?Sized,
+    S::Repr: Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Debug::fmt(&self.0, f)
+    }
+}
+
+impl<S> Display for ImplError<S>
+where
+    S: State + ?Sized,
+    S::Repr: Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl<S> error::Error for ImplError<S>
+where
+    S: State + ?Sized,
+    S::Repr: Debug,
+{
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        self.0
+            .source()
+            .map(|src| src as &(dyn error::Error + 'static))
+    }
+}
+
+impl<E, S> From<E> for Error<S>
+where
+    E: error::Error + Send + Sync + 'static,
+    S: State + Default,
+{
+    fn from(err: E) -> Self {
+        Error(RawError::new_boxed::<_, _, context::Blank>(
+            S::into_repr(S::default()),
+            err,
+            payload::Empty,
+        ))
+    }
+}
+
+impl<E> From<E> for Error
+where
+    E: error::Error + Send + Sync + 'static,
+{
+    fn from(err: E) -> Self {
+        let Err(err) = match_else!(rtti::concretize::<E, ImplError<()>>(err),
+            Ok(err_unit) => return Error(err_unit.0),
+        );
+        let Err(err) = match_else!(rtti::concretize::<E, ImplError<Stateless>>(err),
+            Ok(err_unit) => return Error(err_unit.0),
+        );
+
+        Error(RawError::new_boxed::<_, _, context::Blank>(
+            (),
+            err,
+            payload::Empty,
+        ))
+    }
+}
+
+impl<S> From<Error> for Error<S>
+where
+    S: State + Default,
+{
+    fn from(value: Error) -> Self {
+        Error::<S>(RawError::new_boxed::<_, _, context::Blank>(
+            S::into_repr(S::default()),
+            value.erase(),
+            payload::Empty,
+        ))
+    }
+}
+
+/// An intermediate builder for constructing an [`Error`].
+///
+/// `Builder` accumulates the error source, state, payload, and context,
+/// then materializes them into an `Error<S>` via [`craft`](Builder::craft) or [`Into`].
+#[derive(Debug)]
+pub struct Builder<E, S, F, P, L>
+where
+    F: FnOnce() -> P,
+    S: State + ?Sized,
+    L: ?Sized,
+{
+    err: E,
+    state: S::Repr,
+    load_payload: F,
+    context: PhantomData<L>,
+}
+
+impl<E, S, F, P, L> Builder<E, S, F, P, L>
+where
+    F: FnOnce() -> P,
+    S: State + ?Sized,
+    E: error::Error + Send + Sync + 'static,
+    P: Display + Send + Sync + 'static,
+    L: Context + ?Sized,
+{
+    /// Materializes the builder into an [`Error<S>`].
+    pub fn craft(self) -> Error<S> {
+        self.into()
+    }
+}
+
+impl<E, S, F, P, L> From<Builder<E, S, F, P, L>> for Error<S>
+where
+    F: FnOnce() -> P,
+    E: error::Error + Send + Sync + 'static,
+    S: State + ?Sized,
+    P: Display + Send + Sync + 'static,
+    L: Context + ?Sized,
+{
+    fn from(value: Builder<E, S, F, P, L>) -> Self {
+        let has_state = !rtti::is_same_ty::<S::Repr, ()>();
+        let has_context = !rtti::is_same_ty::<L, context::Blank>();
+        let has_error = !rtti::is_same_ty::<E, Nae>();
+        let has_payload = !rtti::is_same_ty::<P, payload::Empty>();
+
+        match (has_state, has_context, has_error, has_payload) {
+            (_, false, false, false) => Error::<S>(RawError::new_inline(value.state)),
+            (false, true, false, false) => {
+                let Ok(body) = match_else!(rtti::concretize::<_, RawError<S::Repr>>(RawError::new_const::<L>()),
+                    Err(_) => unreachable!(),
+                );
+                Error(body)
+            }
+            _ => Error::<S>(RawError::new_boxed::<_, _, L>(
+                value.state,
+                value.err,
+                (value.load_payload)(),
+            )),
+        }
+    }
+}
+
+impl<E, S, F, P, L> From<Builder<E, Stateless, F, P, L>> for Error<S>
+where
+    F: FnOnce() -> P,
+    E: error::Error + Send + Sync + 'static,
+    S: State + Default,
+    P: Display + Send + Sync + 'static,
+    L: Context + ?Sized,
+{
+    fn from(value: Builder<E, Stateless, F, P, L>) -> Self {
+        Builder::<E, S, F, P, L> {
+            err: value.err,
+            state: S::into_repr(S::default()),
+            load_payload: value.load_payload,
+            context: PhantomData,
+        }
+        .into()
+    }
+}
+
+impl<E, S, F, P, L> From<Builder<E, S, F, P, L>> for Error
+where
+    F: FnOnce() -> P,
+    E: error::Error + Send + Sync + 'static,
+    P: Display + Send + Sync + 'static,
+    S: State,
+    S::Repr: Debug + Send + Sync,
+    L: Context + ?Sized,
+{
+    fn from(value: Builder<E, S, F, P, L>) -> Self {
+        let has_state = rtti::is_same_ty::<S::Repr, ()>();
+        let has_context = rtti::is_same_ty::<L, context::Blank>();
+        let has_error = rtti::is_same_ty::<E, Nae>();
+        let has_payload = rtti::is_same_ty::<P, payload::Empty>();
+
+        match (has_state, has_context, has_error, has_payload) {
+            (true, false, false, false) => Error(RawError::new_boxed::<_, _, L>(
+                (),
+                ImplError::<S>(RawError::new_inline(value.state)),
+                payload::Empty,
+            )),
+            (false, true, false, false) => Error(RawError::new_const::<L>()),
+            (false, _, _, _) => Error(RawError::new_boxed::<_, _, L>(
+                (),
+                value.err,
+                payload::Empty,
+            )),
+            _ => Error(RawError::new_boxed::<_, _, context::Blank>(
+                (),
+                ImplError::<S>(RawError::new_boxed::<_, _, L>(
+                    value.state,
+                    value.err,
+                    payload::Empty,
+                )),
+                payload::Empty,
+            )),
+        }
+    }
+}
+
+/// Extension trait for [`Result`] and [`Option`] to replace the error with a typed state.
+pub trait StateExt {
+    type Result<E>;
+
+    /// Replaces the error with [`Error<S>`] carrying the given `state`.
+    fn or_state<S>(self, state: S) -> Self::Result<Error<S>>
+    where
+        S: State;
+}
+
+/// Extension trait for [`Result`] and [`Option`] to replace the error with a static context.
+pub trait ContextExt {
+    type Result<E>;
+
+    /// Replaces the error with an [`Error`] carrying the given literal context.
+    fn or_context<L>(self, _ty: L) -> Self::Result<Error>
+    where
+        L: Literal;
+}
+
+/// Extension trait for attaching context, state, or payload to an existing error.
+pub trait BuilderExt {
+    type Result<E>;
+
+    type E;
+    type S: State + ?Sized;
+    type F: FnOnce() -> Self::P;
+    type P;
+    type L: Literal + ?Sized;
+
+    /// Attaches a literal context identified by its type.
+    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, Self::P, L>>;
+
+    /// Attaches a literal context by value.
+    fn with_context<L>(self, _ty: L) -> Self::Result<Builder<Self::E, Self::S, Self::F, Self::P, L>>
+    where
+        Self: Sized,
+    {
+        self.with_context_ty::<L>()
+    }
+
+    /// Attaches a typed state.
+    fn with_state<S>(
+        self,
+        state: S,
+    ) -> Self::Result<Builder<Self::E, S, Self::F, Self::P, Self::L>>
+    where
+        S: State + Sized;
+
+    /// Attaches a lazily-evaluated payload.
+    fn with_payload<F, P>(
+        self,
+        load_payload: F,
+    ) -> Self::Result<Builder<Self::E, Self::S, F, P, Self::L>>
+    where
+        F: FnOnce() -> P;
+}
+
+/// Extension trait for materializing or erasing an error.
+pub trait ErrorExt {
+    type Result<E>;
+    type S: State + ?Sized;
+
+    /// Materializes the final [`Error<Self::S>`].
+    fn craft_error(self) -> Self::Result<Error<Self::S>>;
+
+    /// Materializes and then erases the state, returning an opaque `dyn Error`.
+    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>
+    where
+        <Self::S as State>::Repr: Debug + Send + Sync;
+}
+
+impl<T, E1> StateExt for result::Result<T, E1> {
+    type Result<E> = result::Result<T, E>;
+
+    fn or_state<S>(self, state: S) -> Self::Result<Error<S>>
+    where
+        S: State,
+    {
+        self.map_err(|_| Error::<S>(RawError::new_inline(state.into_repr())))
+    }
+}
+
+impl<T, E1> ContextExt for result::Result<T, E1> {
+    type Result<E> = result::Result<T, E>;
+
+    fn or_context<L>(self, _ty: L) -> Self::Result<Error>
+    where
+        L: Literal,
+    {
+        self.map_err(|_| Error(RawError::new_const::<L>()))
+    }
+}
+
+impl<T, E1> BuilderExt for result::Result<T, E1>
+where
+    E1: error::Error + Send + Sync + 'static,
+{
+    type Result<E> = result::Result<T, E>;
+
+    type E = E1;
+    type S = Stateless;
+    type F = fn() -> payload::Empty;
+    type P = payload::Empty;
+    type L = context::Blank;
+
+    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, Self::P, L>> {
+        self.map_err(|err| Builder {
+            err,
+            context: PhantomData,
+            state: (),
+            load_payload: (|| payload::Empty) as Self::F,
+        })
+    }
+
+    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F, Self::P, Self::L>>
+    where
+        S: State + Sized,
+    {
+        self.map_err(|err| Builder {
+            err,
+            context: PhantomData,
+            state: state.into_repr(),
+            load_payload: (|| payload::Empty) as Self::F,
+        })
+    }
+
+    fn with_payload<F, P>(
+        self,
+        load_payload: F,
+    ) -> Self::Result<Builder<Self::E, Self::S, F, P, Self::L>>
+    where
+        F: FnOnce() -> P,
+    {
+        self.map_err(|err| Builder {
+            err,
+            context: PhantomData,
+            state: (),
+            load_payload,
+        })
+    }
+}
+
+impl<E1, S1, F1, P1, L1> BuilderExt for Builder<E1, S1, F1, P1, L1>
+where
+    F1: FnOnce() -> P1,
+    S1: State + ?Sized,
+    L1: Literal + ?Sized,
+{
+    type Result<E> = E;
+
+    type E = E1;
+    type S = S1;
+    type F = F1;
+    type P = P1;
+    type L = L1;
+
+    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, Self::P, L>> {
+        Builder {
+            err: self.err,
+            context: PhantomData,
+            state: self.state,
+            load_payload: self.load_payload,
+        }
+    }
+
+    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F, Self::P, Self::L>>
+    where
+        S: State + Sized,
+    {
+        Builder {
+            state: state.into_repr(),
+            err: self.err,
+            context: self.context,
+            load_payload: self.load_payload,
+        }
+    }
+
+    fn with_payload<F, P>(
+        self,
+        load_payload: F,
+    ) -> Self::Result<Builder<Self::E, Self::S, F, P, Self::L>>
+    where
+        F: FnOnce() -> P,
+    {
+        Builder {
+            err: self.err,
+            context: self.context,
+            state: self.state,
+            load_payload,
+        }
+    }
+}
+
+impl<T, E1, S1, F1, P1, L1> BuilderExt for result::Result<T, Builder<E1, S1, F1, P1, L1>>
+where
+    F1: FnOnce() -> P1,
+    S1: State + ?Sized,
+    L1: Literal + ?Sized,
+{
+    type Result<E> = result::Result<T, E>;
+
+    type E = E1;
+    type S = S1;
+    type F = F1;
+    type P = P1;
+    type L = L1;
+
+    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, Self::P, L>> {
+        self.map_err(|err| Builder {
+            err: err.err,
+            context: PhantomData,
+            state: err.state,
+            load_payload: err.load_payload,
+        })
+    }
+
+    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F, Self::P, Self::L>>
+    where
+        S: State + Sized,
+    {
+        self.map_err(|err| Builder {
+            state: state.into_repr(),
+            err: err.err,
+            context: err.context,
+            load_payload: err.load_payload,
+        })
+    }
+
+    fn with_payload<F, P>(
+        self,
+        load_payload: F,
+    ) -> Self::Result<Builder<Self::E, Self::S, F, P, Self::L>>
+    where
+        F: FnOnce() -> P,
+    {
+        self.map_err(|err| Builder {
+            err: err.err,
+            context: err.context,
+            state: err.state,
+            load_payload,
+        })
+    }
+}
+
+impl<S> ErrorExt for Error<S>
+where
+    S: State,
+    S::Repr: Debug + Send + Sync,
+{
+    type Result<E> = E;
+    type S = S;
+
+    fn craft_error(self) -> Self::Result<Error<Self::S>> {
+        self
+    }
+
+    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>
+    where
+        <Self::S as State>::Repr: Debug + Send + Sync,
+    {
+        self.erase()
+    }
+}
+
+impl<E1, S, F, P, L> ErrorExt for Builder<E1, S, F, P, L>
+where
+    F: FnOnce() -> P,
+    E1: error::Error + Send + Sync + 'static,
+    S: State + ?Sized,
+    <S as State>::Repr: Debug,
+    P: Display + Send + Sync + 'static,
+    L: Context + ?Sized,
+{
+    type Result<E> = E;
+    type S = S;
+
+    fn craft_error(self) -> Self::Result<Error<Self::S>> {
+        self.into()
+    }
+
+    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>
+    where
+        <Self::S as State>::Repr: Debug + Send + Sync,
+    {
+        self.craft_error().erase()
+    }
+}
+
+impl<S, F, P, L> ErrorExt for Builder<Error, S, F, P, L>
+where
+    F: FnOnce() -> P,
+    S: State + ?Sized,
+    <S as State>::Repr: Debug + 'static,
+    P: Display + Send + Sync + 'static,
+    L: Context + ?Sized,
+{
+    type Result<E> = E;
+    type S = S;
+
+    fn craft_error(self) -> Self::Result<Error<Self::S>> {
+        Builder {
+            err: self.err.erase(),
+            state: self.state,
+            load_payload: self.load_payload,
+            context: self.context,
+        }
+        .craft_error()
+    }
+
+    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>
+    where
+        <Self::S as State>::Repr: Debug + Send + Sync,
+    {
+        self.craft_error().erase()
+    }
+}
+
+impl<T, E1, S, F, P, L> ErrorExt for result::Result<T, Builder<E1, S, F, P, L>>
+where
+    F: FnOnce() -> P,
+    E1: error::Error + Send + Sync + 'static,
+    S: State + ?Sized,
+    <S as State>::Repr: Debug + 'static,
+    P: Display + Send + Sync + 'static,
+    L: Context + ?Sized,
+{
+    type Result<E> = result::Result<T, E>;
+    type S = S;
+
+    fn craft_error(self) -> Self::Result<Error<Self::S>> {
+        self.map_err(Error::from)
+    }
+
+    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>
+    where
+        <Self::S as State>::Repr: Debug + Send + Sync,
+    {
+        self.craft_error().map_err(|err| err.erase())
+    }
+}
+
+impl<T, S, F, P, L> ErrorExt for result::Result<T, Builder<Error, S, F, P, L>>
+where
+    F: FnOnce() -> P,
+    S: State + ?Sized,
+    <S as State>::Repr: Debug + 'static,
+    P: Display + Send + Sync + 'static,
+    L: Context + ?Sized,
+{
+    type Result<E> = result::Result<T, E>;
+    type S = S;
+
+    fn craft_error(self) -> Self::Result<Error<Self::S>> {
+        self.map_err(|err| {
+            Builder {
+                err: err.err.erase(),
+                state: err.state,
+                load_payload: err.load_payload,
+                context: err.context,
+            }
+            .craft_error()
+        })
+    }
+
+    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>
+    where
+        <Self::S as State>::Repr: Debug + Send + Sync,
+    {
+        self.craft_error().map_err(|err| err.erase())
+    }
+}
+
+impl<T, E1> ErrorExt for result::Result<T, E1>
+where
+    E1: error::Error + Send + Sync + 'static,
+{
+    type Result<E> = result::Result<T, E>;
+    type S = Stateless;
+
+    fn craft_error(self) -> Self::Result<Error<Self::S>> {
+        self.map_err(Error::from)
+    }
+
+    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>
+    where
+        <Self::S as State>::Repr: Debug + Send + Sync,
+    {
+        self.craft_error().map_err(|err| err.erase())
+    }
+}
+
+impl<T, S> ErrorExt for result::Result<T, Error<S>>
+where
+    S: State,
+    S::Repr: Debug + Send + Sync,
+{
+    type Result<E> = result::Result<T, E>;
+    type S = S;
+
+    fn craft_error(self) -> Self::Result<Error<Self::S>> {
+        self
+    }
+
+    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>
+    where
+        <Self::S as State>::Repr: Debug + Send + Sync,
+    {
+        self.map_err(|err| err.erase())
+    }
+}
+
+impl<T> StateExt for Option<T> {
+    type Result<E> = result::Result<T, E>;
+
+    fn or_state<S>(self, state: S) -> Self::Result<Error<S>>
+    where
+        S: State,
+    {
+        self.ok_or(Error::<S>(RawError::new_inline(state.into_repr())))
+    }
+}
+
+impl<T> ContextExt for Option<T> {
+    type Result<E> = result::Result<T, E>;
+
+    fn or_context<L>(self, _ty: L) -> Self::Result<Error>
+    where
+        L: Literal,
+    {
+        self.ok_or(Error(RawError::new_const::<L>()))
+    }
+}
+
+impl<T> BuilderExt for Option<T> {
+    type Result<E> = result::Result<T, E>;
+
+    type E = Nae;
+    type S = Stateless;
+    type F = fn() -> payload::Empty;
+    type P = payload::Empty;
+    type L = context::Blank;
+
+    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, Self::P, L>> {
+        self.ok_or(Builder {
+            err: Nae,
+            context: PhantomData,
+            state: (),
+            load_payload: (|| payload::Empty) as Self::F,
+        })
+    }
+
+    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F, Self::P, Self::L>>
+    where
+        S: State + Sized,
+    {
+        self.ok_or(Builder {
+            state: state.into_repr(),
+            err: Nae,
+            context: PhantomData,
+            load_payload: (|| payload::Empty) as Self::F,
+        })
+    }
+
+    fn with_payload<F, P>(
+        self,
+        load_payload: F,
+    ) -> Self::Result<Builder<Self::E, Self::S, F, P, Self::L>>
+    where
+        F: FnOnce() -> P,
+    {
+        self.ok_or(Builder {
+            err: Nae,
+            context: PhantomData,
+            state: (),
+            load_payload,
+        })
+    }
+}

@@ -1,0 +1,12 @@
+[package]
+name = "erratic"
+version = "0.1.0"
+edition = "2024"
+authors = ["Little Lan <lansyin@foxmail.com>"]
+categories = ["rust-patterns"]
+description = "Handling errors in an efficient way. "
+keywords = ["error", "error-handling"]
+license = "MIT"
+repository = "https://github.com/lansyin/erratic"
+
+[dependencies]
