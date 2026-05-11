@@ -69,9 +69,9 @@ fn write_log(filename: String) -> std::result::Result<(), Error<WriteLog>> {
 ```
 
 ## Representation
-Type-wise, `Error<S>` is an internal tagged union, and it requires pointers to constant or
-heap-allocated data to be aligned to 4 bytes, freeing up the lower 2 bits to encode discriminant.
-This makes it possible to avoid heap allocation when not needed.
+Type-wise, `Error<S>` is an internally tagged union, and it requires pointers to constant or
+heap-allocated data to be aligned to 4 bytes, freeing up the lower 2 bits to encode
+the discriminant. This design allows heap allocation to be avoided when unnecessary.
 
 ```plaintext
 (32-bit platform, little-endian)
