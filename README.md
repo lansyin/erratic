@@ -39,10 +39,9 @@ fn write_log(filename: String) -> Result<()> {
 ```
 
 ## Binding State
-When propagating an error that needs special handling, you can supply a generic state
-alongside it. For the consumer handling this error, the state must be explicitly
-erased via `erase()` before it can be further propagated upward. If the state
-implements `Default`, other errors can be wrapped and returned directly through `?`.
+When propagating an error that requires special handling, you can supply a generic state
+alongside it. If the state implements `Default`, other errors can be wrapped and
+returned directly via `?` without explicitly setting the state.
 
 When no error is wrapped and no context/payload is attached, the state is inlined
 without triggering any heap allocation. On 32-bit targets, the error stays at 1 usize when the
