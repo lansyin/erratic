@@ -8,6 +8,7 @@ on:
 jobs:
   create-release:
     name: Publish to crates.io
+    environment: publish
     # only publish from the origin repository
     if: github.repository_owner == 'lansyin'
     runs-on: ubuntu-latest
