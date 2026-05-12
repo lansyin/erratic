@@ -330,7 +330,7 @@ where
 {
     /// Creates an `Error` with `state` inlined.
     pub fn from_state(state: S) -> Self {
-        Error(RawError::new_inline(S::into_repr(state)))
+        Error(RawError::new_inline_or_boxed(S::into_repr(state)))
     }
 
     /// Returns a reference to the attached state.
@@ -524,7 +524,7 @@ where
         let has_payload = !rtti::is_same_ty::<P, payload::Empty>();
 
         match (has_state, has_context, has_error, has_payload) {
-            (_, false, false, false) => Error::<S>(RawError::new_inline(value.state)),
+            (_, false, false, false) => Error::<S>(RawError::new_inline_or_boxed(value.state)),
             (false, true, false, false) => {
                 let Ok(body) = match_else!(rtti::concretize::<_, RawError<S::Repr>>(RawError::new_const::<L>()),
                     Err(_) => unreachable!(),
@@ -577,7 +577,7 @@ where
         match (has_state, has_context, has_error, has_payload) {
             (true, false, false, false) => Error(RawError::new_boxed::<_, _, L>(
                 (),
-                ImplError::<S>(RawError::new_inline(value.state)),
+                ImplError::<S>(RawError::new_inline_or_boxed(value.state)),
                 payload::Empty,
             )),
             (false, true, false, false) => Error(RawError::new_const::<L>()),
@@ -678,7 +678,7 @@ impl<T, E1> StateExt for result::Result<T, E1> {
     where
         S: State,
     {
-        self.map_err(|_| Error::<S>(RawError::new_inline(state.into_repr())))
+        self.map_err(|_| Error::<S>(RawError::new_inline_or_boxed(state.into_repr())))
     }
 }
 
@@ -1018,7 +1018,7 @@ impl<T> StateExt for Option<T> {
     where
         S: State,
     {
-        self.ok_or(Error::<S>(RawError::new_inline(state.into_repr())))
+        self.ok_or(Error::<S>(RawError::new_inline_or_boxed(state.into_repr())))
     }
 }
 

@@ -1,5 +1,6 @@
 use crate::{
     context::{self, Literal},
+    match_else,
     nae::Nae,
     payload,
     ptr::{Align4, Align4Own, Align4PtrCompat, Align4Ref, Metadata, Mut, Ref},
@@ -11,6 +12,7 @@ use std::{
     fmt::{self, Debug, Display},
     mem::{self, ManuallyDrop, MaybeUninit},
     ptr::NonNull,
+    result,
 };
 
 /// Triple-state error storage.
@@ -136,13 +138,17 @@ impl RawError<()> {
 
 impl<S> RawError<S> {
     /// Constructs an inline-variant [`RawError`] with `state` stored directly.
-    pub fn new_inline(state: S) -> Self {
-        Self {
-            inline_body: ManuallyDrop::new(Align4PtrCompat {
-                meta: Self::KIND_INLINE.0,
-                value: state,
-            }),
-        }
+    pub fn new_inline(state: S) -> result::Result<Self, S> {
+        Ok(Self {
+            inline_body: ManuallyDrop::new(Align4PtrCompat::new(Self::KIND_INLINE, state)?),
+        })
+    }
+
+    pub fn new_inline_or_boxed(state: S) -> Self {
+        let Err(state) = match_else!(Self::new_inline(state),
+            Ok(this) => return this,
+        );
+        Self::new_boxed::<Nae, payload::Empty, context::Blank>(state, Nae, payload::Empty)
     }
 
     /// Constructs a boxed-variant [`RawError`] containing source, payload, and context.
@@ -333,7 +339,7 @@ impl<S> RawError<S> {
             },
             SelectRef::Inline(_body) => unsafe {
                 // Safety: Access `InlineBody::value` is safe.
-                &self.inline_body.value
+                &self.inline_body.borrow_value()
             },
             SelectRef::Boxed(body) => unsafe {
                 // Safety: Projection from `DynBody` to `DynBody::state` is safe.
@@ -354,7 +360,7 @@ impl<S> RawError<S> {
                 #[allow(clippy::uninit_assumed_init)]
                 MaybeUninit::<S>::uninit().assume_init()
             },
-            SelectOwn::Inline(body) => body.value,
+            SelectOwn::Inline(body) => body.into_value(),
             SelectOwn::Boxed(body) => unsafe {
                 // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
                 let vtable = body
@@ -397,7 +403,7 @@ impl<S> RawError<S> {
                 #[allow(clippy::uninit_assumed_init)]
                 MaybeUninit::<S>::uninit().assume_init()
             }),
-            SelectOwn::Inline(body) => (None, None, body.value),
+            SelectOwn::Inline(body) => (None, None, body.into_value()),
             SelectOwn::Boxed(body) => unsafe {
                 // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
                 let vtable = body
@@ -868,7 +874,7 @@ mod tests {
 
     #[test]
     fn kind_discriminates_inline() {
-        let err = RawError::new_inline(42u32);
+        let err = RawError::new_inline(4216).unwrap();
         assert_eq!(err.kind(), RawError::<u32>::KIND_INLINE);
     }
 
@@ -912,31 +918,31 @@ mod tests {
 
     #[test]
     fn inline_variant_state() {
-        let err = RawError::new_inline(42u32);
+        let err = RawError::new_inline(42u16).unwrap();
         assert_eq!(*err.state(), 42);
     }
 
     #[test]
     fn inline_variant_into_state() {
-        let err = RawError::new_inline(42u32);
+        let err = RawError::new_inline(42u16).unwrap();
         assert_eq!(err.into_state(), 42);
     }
 
     #[test]
     fn inline_variant_context_is_none() {
-        let err = RawError::new_inline(42u32);
+        let err = RawError::new_inline(42u16).unwrap();
         assert!(err.context().is_none());
     }
 
     #[test]
     fn inline_variant_source_is_none() {
-        let err = RawError::new_inline("hello");
+        let err = RawError::new_inline(42u16).unwrap();
         assert!(err.source().is_none());
     }
 
     #[test]
     fn inline_variant_payload_is_none() {
-        let err = RawError::new_inline("hello");
+        let err = RawError::new_inline(42u16).unwrap();
         assert!(err.payload().is_none());
     }
 
@@ -1064,11 +1070,11 @@ mod tests {
 
     #[test]
     fn inline_variant_into_parts() {
-        let err = RawError::new_inline(99u64);
+        let err = RawError::new_inline(42u16).unwrap();
         let (source, payload, state) = err.into_parts::<TestError, TestPayload>();
         assert!(source.is_none());
         assert!(payload.is_none());
-        assert_eq!(state, 99);
+        assert_eq!(state, 42);
     }
 
     // --- Drop safety (checked via sanitizer / basic leak check) ---
