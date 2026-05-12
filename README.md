@@ -43,10 +43,8 @@ When propagating an error that requires special handling, you can supply a gener
 alongside it. If the state implements `Default`, other errors can be wrapped and
 returned directly via `?` without explicitly setting the state.
 
-When no error is wrapped and no context/payload is attached, the state is inlined
-without triggering any heap allocation. On 32-bit targets, the error stays at 1 usize when the
-state is no larger than 2 bytes; on 64-bit targets, it stays at 1 usize when the state is no
-larger than 4 bytes.
+When the state is small enough and neither a source error nor context/payload is attached,
+the state is inlined without any heap allocation.
 
 ```rust
 use erratic::*;
