@@ -525,10 +525,14 @@ mod tests {
         assert!(Align4PtrCompat::<u16>::store_offset().is_some());
     }
 
-    /// `u32` — alignment 4, can be stored.
+    /// `u32` — alignment 4, can be stored on 32 bit platforms only.
     #[test]
     fn align4_ptr_compat_u32_store_offset() {
-        assert!(Align4PtrCompat::<u32>::store_offset().is_some());
+        if cfg!(target_pointer_width = "64") {
+            assert!(Align4PtrCompat::<u32>::store_offset().is_some());
+        } else {
+            assert!(Align4PtrCompat::<u32>::store_offset().is_none());
+        }
     }
 
     /// `u64` — alignment 8, too large for the store buffer on all platforms.

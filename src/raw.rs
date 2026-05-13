@@ -874,8 +874,8 @@ mod tests {
 
     #[test]
     fn kind_discriminates_inline() {
-        let err = RawError::new_inline(4216).unwrap();
-        assert_eq!(err.kind(), RawError::<u32>::KIND_INLINE);
+        let err = RawError::new_inline(4216u16).unwrap();
+        assert_eq!(err.kind(), RawError::<u16>::KIND_INLINE);
     }
 
     #[test]
