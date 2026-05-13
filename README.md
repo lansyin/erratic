@@ -4,8 +4,8 @@
 [![crates.io](https://img.shields.io/crates/v/erratic)](https://crates.io/crates/erratic)
 [![docs.rs](https://img.shields.io/docsrs/erratic)](https://docs.rs/erratic/latest/erratic/)
 
-This library provides the `Error<S = Stateless>` type, enabling applications to handle errors uniformly
-across different contexts.
+This library provides `Error<S = Stateless>`, an **optionally** dynamic dispatched error type,
+enabling applications to handle errors uniformly across different contexts.
 
 ## Basic Usage
 In most cases, `Error` can serve as a drop-in replacement for `Box<dyn Error>`.
@@ -33,7 +33,7 @@ fn write_log(filename: String) -> Result<()> {
         .or_context(literal!("failed to open the log file"))? // No alloc.
         .write_all(b"Hello, World!")
         .with_context(literal!("while writing file"))
-        .with_payload(|| filename)?; // One alloc to store both `io::Error` and `filename`.
+        .with_payload(|| filename)?; // Alloc once for `io::Error`, `filename`, and `Context`.
     Ok(())
 }
 ```
@@ -77,12 +77,13 @@ the discriminant. This design allows heap allocation to be avoided when unnecess
 [XXXXXX00|XXXXXXXX|XXXXXXXX|XXXXXXXX]
                                      \
                                       `rodata-> [&'static str]
-(Error, Payload, or State & Context)
+(Small State)
+[00000010|     ~    State     ~     ]
+
+(Otherwise)
 [XXXXXX01|XXXXXXXX|XXXXXXXX|XXXXXXXX]
        \
         `heap-> [ ~ State ~ |&'static VTable| ~ Error ~ | ~ Payload ~ |&'static str/()]
-(State)
-[00000010|     ~    State     ~     ]
 ```
 
 
