@@ -22,7 +22,7 @@ fn write_log(filename: String) -> Result<()> {
 ## Attaching Context & Payload
 When constructing an error, you can optionally attach a static context and/or a dynamic payload.
 If attached, their memory is merged into a single allocation when the upstream error is erased.
-If omitted, no extra memory is allocated for them. If only context is provided, no heap allocation
+If omitted, no extra memory is allocated for them. If only a context is provided, no heap allocation
 occurs at all.
 
 ```rust

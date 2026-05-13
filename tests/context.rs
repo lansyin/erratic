@@ -3,6 +3,6 @@ use std::error::Error as _;
 
 #[test]
 fn from_context_creates_const() {
-    let err = Error::from_context(literal!("file not found"));
+    let err = mkerr!("file not found").stateless();
     assert!(err.erase_ref().source().is_none());
 }

@@ -50,15 +50,19 @@ macro_rules! match_else {
 ///
 /// ```
 /// # use erratic::*;
-/// # fn foo() {
-/// Error::from_context(literal!("file not found"));
-///
+/// # fn foo() -> Result<()> {
+/// # let trunc_file = || -> std::result::Result<(), std::io::Error> { unimplemented!() };
 /// literal!{
-///     pub NotFound: "404 not found";
-///     pub InternalServerError: "500 internal server error";
+///     pub NotFound: "file not found";
+///     pub InternalError: "internal error";
 /// }
-/// Error::from_context(NotFound);
-/// Error::from_context_ty::<InternalServerError>();
+/// trunc_file()
+///     .with_context(literal!("file not found"))?;
+/// trunc_file()
+///     .with_context(NotFound)?;
+/// trunc_file()
+///     .with_context_ty::<InternalError>()?;
+/// Ok(())
 /// # }
 /// ```
 #[macro_export]
@@ -89,13 +93,17 @@ macro_rules! literal {
 pub mod __specialization {
     use std::{error, fmt::Display};
 
-    use crate::{Error, ErrorExt};
+    use crate::{Error, state::State};
 
     pub struct FromDisplay;
 
     impl FromDisplay {
-        pub fn from(self, value: impl Display) -> Error {
-            Error::with_payload(|| format!("{}", value)).build_error()
+        pub fn from<S>(self, value: impl Display + Send + Sync + 'static) -> Error<S>
+        where
+            S: State + ?Sized,
+            S::Repr: Default,
+        {
+            Error::from_payload(value)
         }
     }
 
@@ -110,8 +118,12 @@ pub mod __specialization {
     pub struct FromError;
 
     impl FromError {
-        pub fn from(self, err: impl std::error::Error + Send + Sync + 'static) -> Error {
-            Error::with_error(err).build_error()
+        pub fn from<S>(self, err: impl std::error::Error + Send + Sync + 'static) -> Error<S>
+        where
+            S: State + ?Sized,
+            S::Repr: Default,
+        {
+            Error::from_error(err)
         }
     }
 
@@ -141,9 +153,7 @@ pub mod __specialization {
 #[macro_export]
 macro_rules! mkerr {
     ($lit:literal $(,)?) => {
-        $crate::ErrorExt::build_error($crate::Error::with_context(
-            $crate::literal!($lit),
-        ))
+        $crate::Error::from_context($crate::literal!($lit))
     };
     ($exp:expr $(,)?) => {{
         #[allow(unused_imports)]
@@ -154,8 +164,65 @@ macro_rules! mkerr {
         }
     }};
     ($fmt:expr, $($arg:tt)*) => {
-        $crate::ErrorExt::build_error($crate::Error::with_payload(
-            || $crate::macros::__private::std::format!($fmt, $($arg)*)
-        ))
+        $crate::Error::from_payload(
+            $crate::macros::__private::std::format!($fmt, $($arg)*)
+        )
     };
+}
+
+// Equals to `Err(mkerr!(...))`.
+#[macro_export]
+macro_rules! mkres {
+    ($($tt:tt)*) => {
+        $crate::macros::__private::std::result::Result::Err($crate::mkerr!($($tt)*))
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+
+    // Ensure the macros do not require type annotations in the most common cases
+    #[test]
+    fn type_reference_check() {
+        let _ = || -> Result<()> {
+            let err = mkerr!("test");
+            return Err(err);
+        };
+        let _ = || -> Result<()> {
+            return mkres!("test");
+        };
+        let _ = || -> result::Result<(), Error<i32>> {
+            let err = mkerr!("test");
+            return Err(err);
+        };
+        let _ = || -> result::Result<(), Error<i32>> {
+            return mkres!("test");
+        };
+    }
+
+    // Test that the macros can be used with various types of input.
+
+    #[test]
+    fn error_from_literal() {
+        let _ = mkerr!("test").stateless();
+    }
+
+    #[test]
+    fn error_from_error() {
+        let err = mkerr!("test").stateless();
+        let _ = mkerr!(err).stateless();
+    }
+
+    #[test]
+    fn error_from_display() {
+        let text = String::from("foo");
+        let _ = mkerr!(text).stateless();
+    }
+
+    #[test]
+    fn error_from_format_string() {
+        let filename = "file.txt";
+        let _ = mkerr!("{} not found", filename).stateless();
+    }
 }

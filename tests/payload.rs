@@ -5,7 +5,7 @@ use erratic::*;
 
 #[test]
 fn from_payload_creates_boxed() {
-    let err = Error::from_payload(TestMessage("hello".into()));
+    let err = mkerr!(TestMessage("hello".into())).stateless();
     let parts = err.into_parts::<TestError, TestMessage>();
     assert!(parts.0.is_none());
     assert!(parts.1.is_some());
@@ -14,7 +14,7 @@ fn from_payload_creates_boxed() {
 
 #[test]
 fn downcast_payload_ok() {
-    let err = Error::from_payload(TestMessage("hello".into()));
+    let err = mkerr!(TestMessage("hello".into())).stateless();
     assert!(err.has_payload_of::<TestMessage>());
     assert_eq!(
         err.downcast_payload_ref::<TestMessage>().unwrap().0,

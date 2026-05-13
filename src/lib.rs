@@ -121,44 +121,6 @@ where
     S: State + ?Sized;
 
 impl Error {
-    /// Creates an `Error` from any [`Error`][std::error::Error].
-    ///
-    /// Equivalent to `E::into()` via the blanket `From` impl.
-    pub fn from_error<E>(err: E) -> Self
-    where
-        E: error::Error + Send + Sync + 'static,
-    {
-        err.into()
-    }
-
-    /// Creates an `Error` from a typed literal context.
-    pub fn from_context<L>(_ty: L) -> Self
-    where
-        L: Literal,
-    {
-        Error(RawError::new_const::<L>())
-    }
-
-    /// Creates an `Error` from a literal context type, inferred at the call site.
-    pub fn from_context_ty<L>() -> Self
-    where
-        L: Literal,
-    {
-        Error(RawError::new_const::<L>())
-    }
-
-    /// Creates an `Error` with a dynamic payload.
-    pub fn from_payload<P>(payload: P) -> Self
-    where
-        P: Display + Send + Sync + 'static,
-    {
-        Error(RawError::new_boxed::<_, P, context::Blank>(
-            (),
-            Nae,
-            payload,
-        ))
-    }
-
     /// Starts building an `Error` from a source error.
     pub fn with_error<E>(
         err: E,
@@ -232,6 +194,11 @@ impl Error {
         let (source, payload, _) = self.0.into_parts::<E, P>();
         (source, payload)
     }
+
+    // Helper for type inference when the state is not needed.
+    pub fn stateless(self) -> Self {
+        self
+    }
 }
 
 impl<S> Error<S>
@@ -252,6 +219,60 @@ where
         // Safety: `ImplError<S>` is `#[repr(transparent)]` over `RawError<S::Repr>`,
         // so `&RawError<S::Repr>` and `&ImplError<S>` have identical layout.
         unsafe { mem::transmute::<&RawError<S::Repr>, &ImplError<S>>(&self.0) }
+    }
+}
+
+impl<S> Error<S>
+where
+    S: State + ?Sized,
+    S::Repr: Default,
+{
+    /// Creates an `Error` from any [`Error`][std::error::Error].
+    ///
+    /// Equivalent to `E::into()` via the blanket `From` impl.
+    pub fn from_error<E>(err: E) -> Self
+    where
+        E: error::Error + Send + Sync + 'static,
+    {
+        err.into()
+    }
+
+    /// Creates an `Error` from a typed literal context.
+    pub fn from_context<L>(_ty: L) -> Self
+    where
+        L: Literal,
+    {
+        Self::from_context_ty::<L>()
+    }
+
+    /// Creates an `Error` from a literal context type, inferred at the call site.
+    pub fn from_context_ty<L>() -> Self
+    where
+        L: Literal,
+    {
+        if let Ok(err) =
+            rtti::concretize::<Error<Stateless>, Error<S>>(Error(RawError::new_const::<L>()))
+        {
+            return err;
+        }
+
+        Self(RawError::new_boxed::<_, _, context::Blank>(
+            S::Repr::default(),
+            Nae,
+            payload::Empty,
+        ))
+    }
+
+    /// Creates an `Error` with a dynamic payload.
+    pub fn from_payload<P>(payload: P) -> Self
+    where
+        P: Display + Send + Sync + 'static,
+    {
+        Self(RawError::new_boxed::<_, P, context::Blank>(
+            S::Repr::default(),
+            Nae,
+            payload,
+        ))
     }
 }
 
@@ -415,31 +436,16 @@ where
 impl<E, S> From<E> for Error<S>
 where
     E: error::Error + Send + Sync + 'static,
-    S: State + Default,
+    S: State + ?Sized,
+    S::Repr: Default,
 {
     fn from(err: E) -> Self {
-        Error(RawError::new_boxed::<_, _, context::Blank>(
-            S::into_repr(S::default()),
-            err,
-            payload::Empty,
-        ))
-    }
-}
-
-impl<E> From<E> for Error
-where
-    E: error::Error + Send + Sync + 'static,
-{
-    fn from(err: E) -> Self {
-        let Err(err) = match_else!(rtti::concretize::<E, ImplError<()>>(err),
-            Ok(err_unit) => return Error(err_unit.0),
-        );
-        let Err(err) = match_else!(rtti::concretize::<E, ImplError<Stateless>>(err),
+        let Err(err) = match_else!(rtti::concretize::<E, ImplError<S>>(err),
             Ok(err_unit) => return Error(err_unit.0),
         );
 
         Error(RawError::new_boxed::<_, _, context::Blank>(
-            (),
+            S::Repr::default(),
             err,
             payload::Empty,
         ))
@@ -466,11 +472,12 @@ where
 
 impl<S> From<Error> for Error<S>
 where
-    S: State + Default,
+    S: State,
+    S::Repr: Default,
 {
     fn from(value: Error) -> Self {
         Error::<S>(RawError::new_boxed::<_, _, context::Blank>(
-            S::into_repr(S::default()),
+            S::Repr::default(),
             value.erase(),
             payload::Empty,
         ))
@@ -543,14 +550,15 @@ impl<E, S, F, P, L> From<Builder<E, Stateless, F, P, L>> for Error<S>
 where
     F: FnOnce() -> P,
     E: error::Error + Send + Sync + 'static,
-    S: State + Default,
+    S: State,
+    S::Repr: Default,
     P: Display + Send + Sync + 'static,
     L: Context + ?Sized,
 {
     fn from(value: Builder<E, Stateless, F, P, L>) -> Self {
         Builder::<E, S, F, P, L> {
             err: value.err,
-            state: S::into_repr(S::default()),
+            state: S::Repr::default(),
             load_payload: value.load_payload,
             context: PhantomData,
         }
