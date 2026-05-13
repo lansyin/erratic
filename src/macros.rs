@@ -133,13 +133,13 @@ pub mod __specialization {
 /// # fn foo() -> Result<()> {
 /// # let filename = "";
 /// # let something_impl_error_or_display = "";
-/// return Err(erratic!("404 not found"));
-/// return Err(erratic!("{} not found", filename));
-/// return Err(erratic!(something_impl_error_or_display));
+/// return Err(mkerr!("404 not found"));
+/// return Err(mkerr!("{} not found", filename));
+/// return Err(mkerr!(something_impl_error_or_display));
 /// # }
 /// ```
 #[macro_export]
-macro_rules! erratic {
+macro_rules! mkerr {
     ($lit:literal $(,)?) => {
         $crate::ErrorExt::build_error($crate::Error::with_context(
             $crate::literal!($lit),
