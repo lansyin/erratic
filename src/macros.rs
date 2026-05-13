@@ -95,7 +95,7 @@ pub mod __specialization {
 
     impl FromDisplay {
         pub fn from(self, value: impl Display) -> Error {
-            Error::with_payload(|| format!("{}", value)).craft_error()
+            Error::with_payload(|| format!("{}", value)).build_error()
         }
     }
 
@@ -111,7 +111,7 @@ pub mod __specialization {
 
     impl FromError {
         pub fn from(self, err: impl std::error::Error + Send + Sync + 'static) -> Error {
-            Error::with_error(err).craft_error()
+            Error::with_error(err).build_error()
         }
     }
 
@@ -141,7 +141,7 @@ pub mod __specialization {
 #[macro_export]
 macro_rules! erratic {
     ($lit:literal $(,)?) => {
-        $crate::ErrorExt::craft_error($crate::Error::with_context(
+        $crate::ErrorExt::build_error($crate::Error::with_context(
             $crate::literal!($lit),
         ))
     };
@@ -154,7 +154,7 @@ macro_rules! erratic {
         }
     }};
     ($fmt:expr, $($arg:tt)*) => {
-        $crate::ErrorExt::craft_error($crate::Error::with_payload(
+        $crate::ErrorExt::build_error($crate::Error::with_payload(
             || $crate::macros::__private::std::format!($fmt, $($arg)*)
         ))
     };

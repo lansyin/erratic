@@ -17,7 +17,7 @@
 //! # Attaching Context & Payload
 //! When constructing an error, you can optionally attach a static context and/or a dynamic payload.
 //! If attached, their memory is merged into a single allocation when the upstream error is erased.
-//! If omitted, no extra memory is allocated for them. If only context is provided, no heap allocation
+//! If omitted, no extra memory is allocated for them. If only a context is provided, no heap allocation
 //! occurs at all.
 //!
 //! ```
@@ -480,7 +480,7 @@ where
 /// An intermediate builder for constructing an [`Error`].
 ///
 /// `Builder` accumulates the error source, state, payload, and context,
-/// then materializes them into an `Error<S>` via [`craft`](Builder::craft) or [`Into`].
+/// then materializes them into an `Error<S>` via [`build`](Builder::build) or [`Into`].
 #[derive(Debug)]
 pub struct Builder<E, S, F, P, L>
 where
@@ -503,7 +503,7 @@ where
     L: Context + ?Sized,
 {
     /// Materializes the builder into an [`Error<S>`].
-    pub fn craft(self) -> Error<S> {
+    pub fn build(self) -> Error<S> {
         self.into()
     }
 }
@@ -662,7 +662,7 @@ pub trait ErrorExt {
     type S: State + ?Sized;
 
     /// Materializes the final [`Error<Self::S>`].
-    fn craft_error(self) -> Self::Result<Error<Self::S>>;
+    fn build_error(self) -> Self::Result<Error<Self::S>>;
 
     /// Materializes and then erases the state, returning an opaque `dyn Error`.
     fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>
@@ -851,7 +851,7 @@ where
     type Result<E> = E;
     type S = S;
 
-    fn craft_error(self) -> Self::Result<Error<Self::S>> {
+    fn build_error(self) -> Self::Result<Error<Self::S>> {
         self
     }
 
@@ -875,7 +875,7 @@ where
     type Result<E> = E;
     type S = S;
 
-    fn craft_error(self) -> Self::Result<Error<Self::S>> {
+    fn build_error(self) -> Self::Result<Error<Self::S>> {
         self.into()
     }
 
@@ -883,7 +883,7 @@ where
     where
         <Self::S as State>::Repr: Debug + Send + Sync,
     {
-        self.craft_error().erase()
+        self.build_error().erase()
     }
 }
 
@@ -898,21 +898,21 @@ where
     type Result<E> = E;
     type S = S;
 
-    fn craft_error(self) -> Self::Result<Error<Self::S>> {
+    fn build_error(self) -> Self::Result<Error<Self::S>> {
         Builder {
             err: self.err.erase(),
             state: self.state,
             load_payload: self.load_payload,
             context: self.context,
         }
-        .craft_error()
+        .build_error()
     }
 
     fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>
     where
         <Self::S as State>::Repr: Debug + Send + Sync,
     {
-        self.craft_error().erase()
+        self.build_error().erase()
     }
 }
 
@@ -928,7 +928,7 @@ where
     type Result<E> = result::Result<T, E>;
     type S = S;
 
-    fn craft_error(self) -> Self::Result<Error<Self::S>> {
+    fn build_error(self) -> Self::Result<Error<Self::S>> {
         self.map_err(Error::from)
     }
 
@@ -936,7 +936,7 @@ where
     where
         <Self::S as State>::Repr: Debug + Send + Sync,
     {
-        self.craft_error().map_err(|err| err.erase())
+        self.build_error().map_err(|err| err.erase())
     }
 }
 
@@ -951,7 +951,7 @@ where
     type Result<E> = result::Result<T, E>;
     type S = S;
 
-    fn craft_error(self) -> Self::Result<Error<Self::S>> {
+    fn build_error(self) -> Self::Result<Error<Self::S>> {
         self.map_err(|err| {
             Builder {
                 err: err.err.erase(),
@@ -959,7 +959,7 @@ where
                 load_payload: err.load_payload,
                 context: err.context,
             }
-            .craft_error()
+            .build_error()
         })
     }
 
@@ -967,7 +967,7 @@ where
     where
         <Self::S as State>::Repr: Debug + Send + Sync,
     {
-        self.craft_error().map_err(|err| err.erase())
+        self.build_error().map_err(|err| err.erase())
     }
 }
 
@@ -978,7 +978,7 @@ where
     type Result<E> = result::Result<T, E>;
     type S = Stateless;
 
-    fn craft_error(self) -> Self::Result<Error<Self::S>> {
+    fn build_error(self) -> Self::Result<Error<Self::S>> {
         self.map_err(Error::from)
     }
 
@@ -986,7 +986,7 @@ where
     where
         <Self::S as State>::Repr: Debug + Send + Sync,
     {
-        self.craft_error().map_err(|err| err.erase())
+        self.build_error().map_err(|err| err.erase())
     }
 }
 
@@ -998,7 +998,7 @@ where
     type Result<E> = result::Result<T, E>;
     type S = S;
 
-    fn craft_error(self) -> Self::Result<Error<Self::S>> {
+    fn build_error(self) -> Self::Result<Error<Self::S>> {
         self
     }
 
