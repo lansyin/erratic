@@ -43,7 +43,7 @@ When propagating an error that requires special handling, you can supply a gener
 alongside it. If the state implements `Default`, other errors can be wrapped and
 returned directly via `?` without explicitly setting the state.
 
-When the state is small enough and neither a source error nor context/payload is attached,
+When the state is small enough and none of the source error, context, or payload is attached,
 the state is inlined without any heap allocation.
 
 ```rust
