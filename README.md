@@ -1,4 +1,4 @@
-# Erratic
+# Erratic /ɪˈrætɪk/
 
 [![license](https://img.shields.io/github/license/lansyin/erratic)](https://github.com/lansyin/erratic)
 [![crates.io](https://img.shields.io/crates/v/erratic)](https://crates.io/crates/erratic)

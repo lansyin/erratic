@@ -170,7 +170,7 @@ macro_rules! mkerr {
     };
 }
 
-// Equals to `Err(mkerr!(...))`.
+/// Constructs a [`Result`][crate::Result] from a literal, [`Error`][std::error::Error], [`Display`][std::fmt::Display], or [format string][std::format].
 #[macro_export]
 macro_rules! mkres {
     ($($tt:tt)*) => {

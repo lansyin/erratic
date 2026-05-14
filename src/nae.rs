@@ -1,3 +1,4 @@
+//! Error placeholder for [`Builder`][crate::Builder].
 use std::{
     error,
     fmt::{self, Display},

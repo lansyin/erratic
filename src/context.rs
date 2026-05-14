@@ -1,3 +1,4 @@
+//! Context traits and its placeholder for [`Builder`][crate::Builder].
 use std::fmt::{self, Debug, Display};
 
 /// A string literal identified by a zero-sized type.

@@ -1,3 +1,4 @@
+/// State traits and the Stateless marker.
 use std::fmt::Debug;
 
 /// Associates an error state type with its stored representation.
