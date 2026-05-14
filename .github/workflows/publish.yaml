@@ -6,8 +6,8 @@ on:
       - erratic-[0-9]+.*
 
 jobs:
-  create-release:
-    name: Publish to crates.io
+  publish:
+    name: cargo publish
     environment: publish
     env:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO }}
