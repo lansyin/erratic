@@ -2,6 +2,8 @@ name: publish
 
 on:
   push:
+    branches:
+      - main
     tags:
       - erratic-[0-9]+.*
 
