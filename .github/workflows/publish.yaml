@@ -6,8 +6,8 @@ on:
       - erratic-[0-9]+.*
 
 jobs:
-  create-release:
-    name: Publish to crates.io
+  publish:
+    name: cargo publish
     if: github.repository_owner == 'lansyin' && github.ref == 'refs/heads/main'
     environment: publish
     env:
