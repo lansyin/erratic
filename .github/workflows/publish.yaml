@@ -2,17 +2,19 @@ name: publish
 
 on:
   push:
+    branches:
+      - main
     tags:
       - erratic-[0-9]+.*
 
 jobs:
-  publish:
-    name: cargo publish
-    if: github.repository_owner == 'lansyin' && github.ref == 'refs/heads/main'
+  create-release:
+    name: Publish to crates.io
     environment: publish
     env:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO }}
     # only publish from the origin repository
+    if: github.repository_owner == 'lansyin'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
