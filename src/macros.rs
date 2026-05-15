@@ -152,9 +152,26 @@ pub mod __specialization {
 /// ```
 #[macro_export]
 macro_rules! mkerr {
-    ($lit:literal $(,)?) => {
-        $crate::Error::from_context($crate::literal!($lit))
-    };
+    ($fmt:literal $($rest:tt)*) => {{
+        fn make_error<'a, S>(args: $crate::macros::__private::std::fmt::Arguments<'a>) -> $crate::Error<S>
+        where
+            S: $crate::state::State + ?Sized,
+            S::Repr: Default,
+        {
+            if args.as_str().is_some() {
+                struct Literal;
+
+                impl $crate::context::Literal for Literal {
+                    const LITERAL: &'static str = $fmt;
+                }
+
+                $crate::Error::from_context(Literal)
+            } else {
+                $crate::Error::from_payload(args.to_string())
+            }
+        }
+        make_error($crate::macros::__private::std::format_args!($fmt $($rest)*))
+    }};
     ($exp:expr $(,)?) => {{
         #[allow(unused_imports)]
         use $crate::macros::__specialization::{SelectDisplay, SelectError};
@@ -163,11 +180,6 @@ macro_rules! mkerr {
             err => (&err).select().from(err),
         }
     }};
-    ($fmt:expr, $($arg:tt)*) => {
-        $crate::Error::from_payload(
-            $crate::macros::__private::std::format!($fmt, $($arg)*)
-        )
-    };
 }
 
 /// Constructs a [`Result`][crate::Result] from a literal, [`Error`][std::error::Error], [`Display`][std::fmt::Display], or [format string][std::format].
@@ -224,5 +236,20 @@ mod tests {
     fn error_from_format_string() {
         let filename = "file.txt";
         let _ = mkerr!("{} not found", filename).stateless();
+    }
+
+    // Test that the macros can select format string or literal based on the input.
+
+    #[test]
+    fn error_from_literal_like_format_string() {
+        let filename = "file.txt";
+        let err = mkerr!("{filename} not found").stateless();
+        assert!(err.has_payload_of::<String>());
+    }
+
+    #[test]
+    fn error_from_literal_without_allocation() {
+        let err = mkerr!("file not found").stateless();
+        assert!(!err.has_payload_of::<String>());
     }
 }
