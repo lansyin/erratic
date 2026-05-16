@@ -6,7 +6,7 @@
 
 {{readme}}
 
-## Contribution
+## Contributing
 Contributions are warmly welcomed! Whether you have a bug report, feature request, or 
 an improvement in mind, feel free to open an issue or submit a pull request. 
 All ideas—big or small—help make this library better for everyone.

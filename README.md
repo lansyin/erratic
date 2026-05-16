@@ -7,7 +7,7 @@
 This library provides `Error<S = Stateless>`, an **optionally** dynamic dispatched error type,
 enabling applications to handle errors uniformly across different contexts.
 
-## Basic Usage
+## Quick Start
 In most cases, `Error` can serve as a drop-in replacement for `Box<dyn Error>`.
 Compared to the latter, it occupies only 1 usize, making the happy path faster.
 ```rust
@@ -32,7 +32,7 @@ fn write_log(filename: String) -> Result<()> {
     File::open(&filename)
         .or_context(literal!("failed to open the log file"))? // No alloc.
         .write_all(b"Hello, World!")
-        .with_context(literal!("while writing file"))
+        .with_context(literal!("while writing to"))
         .with_payload(|| filename)?; // Alloc once for `io::Error`, `filename`, and `Context`.
     Ok(())
 }
@@ -87,7 +87,7 @@ the discriminant. This design allows heap allocation to be avoided when unnecess
 ```
 
 
-## Contribution
+## Contributing
 Contributions are warmly welcomed! Whether you have a bug report, feature request, or 
 an improvement in mind, feel free to open an issue or submit a pull request. 
 All ideas—big or small—help make this library better for everyone.

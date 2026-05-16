@@ -1,7 +1,7 @@
 //! This library provides `Error<S = Stateless>`, an **optionally** dynamic dispatched error type,
 //! enabling applications to handle errors uniformly across different contexts.
 //!
-//! # Basic Usage
+//! # Quick Start
 //! In most cases, `Error` can serve as a drop-in replacement for `Box<dyn Error>`.
 //! Compared to the latter, it occupies only 1 usize, making the happy path faster.
 //! ```
@@ -28,7 +28,7 @@
 //!     File::open(&filename)
 //!         .or_context(literal!("failed to open the log file"))? // No alloc.
 //!         .write_all(b"Hello, World!")
-//!         .with_context(literal!("while writing file"))
+//!         .with_context(literal!("while writing to"))
 //!         .with_payload(|| filename)?; // Alloc once for `io::Error`, `filename`, and `Context`.
 //!     Ok(())
 //! }
