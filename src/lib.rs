@@ -181,7 +181,7 @@ impl Error {
 
     /// Extracts the source error and payload by type.
     ///
-    /// Returns `(None, None)` when the requested types do not match.
+    /// Returns `None` when the corresponding requested type do not match.
     pub fn into_parts<E, P>(self) -> (Option<E>, Option<P>)
     where
         E: 'static,
