@@ -480,8 +480,8 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let state = format_args!("{:?}", self.state());
         let mut segments = [
-            self.context().map(|s| s as &dyn Display),
             (TypeId::of::<S>() != TypeId::of::<()>()).then_some(&state as _),
+            self.context().map(|s| s as &dyn Display),
             self.payload().map(|s| s as _),
             self.source().map(|s| s as _),
         ]
@@ -516,8 +516,8 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let state = format_args!("{:?}", self.state());
         let mut segments = [
-            self.context().map(|s| s as &dyn Display),
             (TypeId::of::<S>() != TypeId::of::<()>()).then_some(&state as _),
+            self.context().map(|s| s as &dyn Display),
             self.payload().map(|s| s as _),
             self.source().map(|s| s as _),
         ]
