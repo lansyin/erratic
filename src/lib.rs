@@ -853,7 +853,7 @@ where
 
 impl<S> ErrorExt for Error<S>
 where
-    S: State,
+    S: State + ?Sized,
     S::Repr: Debug + Send + Sync,
 {
     type Result<E> = E;
