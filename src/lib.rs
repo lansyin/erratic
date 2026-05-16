@@ -948,11 +948,13 @@ where
     }
 }
 
-impl<T, S, F, P, L> ErrorExt for result::Result<T, Builder<Error, S, F, P, L>>
+impl<T, S1, S, F, P, L> ErrorExt for result::Result<T, Builder<Error<S1>, S, F, P, L>>
 where
-    F: FnOnce() -> P,
+    S1: State + ?Sized,
+    S1::Repr: Debug + Send + Sync,
     S: State + ?Sized,
     <S as State>::Repr: Debug + 'static,
+    F: FnOnce() -> P,
     P: Display + Send + Sync + 'static,
     L: Context + ?Sized,
 {
