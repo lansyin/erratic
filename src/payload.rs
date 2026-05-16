@@ -30,10 +30,10 @@ where
 }
 
 /// A wrapper that can be used as [`PayloadFn`].
-pub struct Payload<P>(pub P);
+pub struct Immediate<P>(pub P);
 
-impl<T> PayloadFn for Payload<T> {
-    type Output = T;
+impl<P> PayloadFn for Immediate<P> {
+    type Output = P;
 
     fn call(self) -> Self::Output {
         self.0

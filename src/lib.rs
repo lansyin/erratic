@@ -108,7 +108,7 @@ use std::{
 use crate::{
     context::{Context, Literal},
     nae::Nae,
-    payload::{Payload, PayloadFn},
+    payload::{Immediate, PayloadFn},
     raw::RawError,
     state::{State, Stateless},
 };
@@ -123,19 +123,21 @@ where
 
 impl Error {
     /// Starts building an `Error` from a source error.
-    pub fn with_error<E>(err: E) -> Builder<E, Stateless, Payload<payload::Empty>, context::Blank> {
+    pub fn with_error<E>(
+        err: E,
+    ) -> Builder<E, Stateless, Immediate<payload::Empty>, context::Blank> {
         Builder {
             err,
             context: PhantomData,
             state: (),
-            payload_fn: Payload(payload::Empty),
+            payload_fn: Immediate(payload::Empty),
         }
     }
 
     /// Starts building an `Error` with a typed state.
     ///
     /// The state is inlined when no source or payload is attached.
-    pub fn with_state<S>(state: S) -> Builder<Nae, S, Payload<payload::Empty>, context::Blank>
+    pub fn with_state<S>(state: S) -> Builder<Nae, S, Immediate<payload::Empty>, context::Blank>
     where
         S: State,
     {
@@ -143,14 +145,24 @@ impl Error {
             err: Nae,
             context: PhantomData,
             state: state.into_repr(),
-            payload_fn: Payload(payload::Empty),
+            payload_fn: Immediate(payload::Empty),
+        }
+    }
+
+    /// Starts building an `Error` with a payload.
+    pub fn with_payload<P>(payload: P) -> Builder<Nae, Stateless, Immediate<P>, context::Blank> {
+        Builder {
+            err: Nae,
+            context: PhantomData,
+            state: (),
+            payload_fn: Immediate(payload),
         }
     }
 
     /// Starts building an `Error` with a lazily-evaluated payload.
     ///
     /// The closure `payload_fn` is called only when the error is materialized.
-    pub fn with_payload<F, P>(payload_fn: F) -> Builder<Nae, Stateless, F, context::Blank>
+    pub fn with_payload_fn<F>(payload_fn: F) -> Builder<Nae, Stateless, F, context::Blank>
     where
         F: PayloadFn,
     {
@@ -165,17 +177,17 @@ impl Error {
     /// Starts building an `Error` with a typed literal context.
     ///
     /// For dynamic content, use [`with_payload`][Self::with_payload] instead.
-    pub fn with_context<L>(_ty: L) -> Builder<Nae, Stateless, Payload<payload::Empty>, L> {
+    pub fn with_context<L>(_ty: L) -> Builder<Nae, Stateless, Immediate<payload::Empty>, L> {
         Self::with_context_ty::<L>()
     }
 
     /// Starts building an `Error` with a literal context type, inferred at the call site.
-    pub fn with_context_ty<L>() -> Builder<Nae, Stateless, Payload<payload::Empty>, L> {
+    pub fn with_context_ty<L>() -> Builder<Nae, Stateless, Immediate<payload::Empty>, L> {
         Builder {
             err: Nae,
             context: PhantomData,
             state: (),
-            payload_fn: Payload(payload::Empty),
+            payload_fn: Immediate(payload::Empty),
         }
     }
 
@@ -661,8 +673,8 @@ pub trait BuilderExt: Sized {
     fn with_payload<P>(
         self,
         payload: P,
-    ) -> Self::Result<Builder<Self::E, Self::S, Payload<P>, Self::L>> {
-        self.with_payload_fn(Payload(payload))
+    ) -> Self::Result<Builder<Self::E, Self::S, Immediate<P>, Self::L>> {
+        self.with_payload_fn(Immediate(payload))
     }
 }
 
@@ -710,7 +722,7 @@ where
 
     type E = E1;
     type S = Stateless;
-    type F = Payload<payload::Empty>;
+    type F = Immediate<payload::Empty>;
     type L = context::Blank;
 
     fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>> {
@@ -718,7 +730,7 @@ where
             err,
             context: PhantomData,
             state: (),
-            payload_fn: Payload(payload::Empty),
+            payload_fn: Immediate(payload::Empty),
         })
     }
 
@@ -730,7 +742,7 @@ where
             err,
             context: PhantomData,
             state: state.into_repr(),
-            payload_fn: Payload(payload::Empty),
+            payload_fn: Immediate(payload::Empty),
         })
     }
 
@@ -1046,7 +1058,7 @@ impl<T> BuilderExt for Option<T> {
 
     type E = Nae;
     type S = Stateless;
-    type F = Payload<payload::Empty>;
+    type F = Immediate<payload::Empty>;
     type L = context::Blank;
 
     fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>> {
@@ -1054,7 +1066,7 @@ impl<T> BuilderExt for Option<T> {
             err: Nae,
             context: PhantomData,
             state: (),
-            payload_fn: Payload(payload::Empty),
+            payload_fn: Immediate(payload::Empty),
         })
     }
 
@@ -1066,7 +1078,7 @@ impl<T> BuilderExt for Option<T> {
             state: state.into_repr(),
             err: Nae,
             context: PhantomData,
-            payload_fn: Payload(payload::Empty),
+            payload_fn: Immediate(payload::Empty),
         })
     }
 
