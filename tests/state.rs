@@ -12,7 +12,7 @@ fn builder_with_state_inlines_when_no_source() {
 #[test]
 fn builder_with_state_and_payload_boxes() {
     let err: Error<TestState> = Error::with_state(TestState::FileNotFound)
-        .with_payload(|| TestMessage("data".into()))
+        .with_payload(TestMessage("data".into()))
         .build();
     assert_eq!(err.state(), &TestState::FileNotFound);
     let (_, payload, _) = err.into_parts::<TestError, TestMessage>();

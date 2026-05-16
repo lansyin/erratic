@@ -17,7 +17,7 @@ fn from_error_round_trip() {
 fn builder_with_error_builds_correctly() {
     let err: Error = Error::with_error(TestError("oops"))
         .with_context(literal!("context"))
-        .with_payload(|| TestMessage("payload".into()))
+        .with_payload(TestMessage("payload".into()))
         .build();
     let (source, payload) = err.into_parts::<TestError, TestMessage>();
     assert!(source.is_some());

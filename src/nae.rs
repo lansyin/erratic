@@ -5,6 +5,7 @@ use std::{
 };
 
 /// Not an error, a zero-sized error placeholder for [Error][crate::Error], represents the end of the error source chain.
+/// It is used by [`Builder`][crate::Builder] and will not appear in the [`chain`][crate::Error::chain] method.
 #[derive(Debug)]
 pub struct Nae;
 

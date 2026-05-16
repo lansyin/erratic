@@ -33,7 +33,7 @@ fn write_log(filename: String) -> Result<()> {
         .or_context(literal!("failed to open the log file"))? // No alloc.
         .write_all(b"Hello, World!")
         .with_context(literal!("while writing to"))
-        .with_payload(|| filename)?; // Alloc once for `io::Error`, `filename`, and `Context`.
+        .with_payload(filename)?; // Alloc once for `io::Error`, `filename`, and `Context`.
     Ok(())
 }
 ```
@@ -61,7 +61,7 @@ fn write_log(filename: String) -> std::result::Result<(), Error<WriteLog>> {
         .or_state(WriteLog::FileNotFound)? // No alloc.
         .write_all(b"Hello, World!")
         .with_context(literal!("while writing to"))
-        .with_payload(|| filename)?; // Falls back to the default state value.
+        .with_payload(filename)?; // Falls back to the default state value.
     Ok(())
 }
 ```
