@@ -191,7 +191,7 @@ impl Error {
         (source, payload)
     }
 
-    // Helper for type inference when the state is not needed.
+    /// Helper for type inference when the state is not needed.
     pub fn stateless(self) -> Self {
         self
     }

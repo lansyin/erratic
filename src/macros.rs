@@ -147,7 +147,7 @@ pub mod __specialization {
 /// # fn foo() -> std::result::Result<(), Error<()>> {
 /// # let filename = "";
 /// # let something_impl_error_or_display = "";
-/// let _err = mkerr!("404 not found") as Error;
+/// let _err = mkerr!("404 not found").stateless();
 /// let _err = mkerr!(something_impl_error_or_display) as Error<S>;
 /// return Err(mkerr!("{} not found", filename)); // Equals to return mkres!(..).
 /// # }
