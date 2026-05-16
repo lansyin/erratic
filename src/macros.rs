@@ -51,18 +51,18 @@ macro_rules! match_else {
 /// ```
 /// # use erratic::*;
 /// # fn foo() -> Result<()> {
-/// # let trunc_file = || -> std::result::Result<(), std::io::Error> { unimplemented!() };
+/// # let foo = || -> std::result::Result<(), std::io::Error> { unimplemented!() };
+/// foo()
+///     .with_context(literal!("file not found"))?;
 /// literal!{
 ///     pub NotFound: "file not found";
 ///     pub InternalError: "internal error";
 /// }
-/// trunc_file()
-///     .with_context(literal!("file not found"))?;
-/// trunc_file()
+/// foo()
 ///     .with_context(NotFound)?;
-/// trunc_file()
+/// foo()
 ///     .with_context_ty::<InternalError>()?;
-/// Ok(())
+/// # Ok(())
 /// # }
 /// ```
 #[macro_export]
@@ -142,12 +142,14 @@ pub mod __specialization {
 ///
 /// ```
 /// # use erratic::*;
-/// # fn foo() -> Result<()> {
+/// # #[derive(Debug, Default)]
+/// # enum S { #[default] _A }
+/// # fn foo() -> std::result::Result<(), Error<()>> {
 /// # let filename = "";
 /// # let something_impl_error_or_display = "";
-/// return Err(mkerr!("404 not found"));
-/// return Err(mkerr!("{} not found", filename));
-/// return Err(mkerr!(something_impl_error_or_display));
+/// let _err = mkerr!("404 not found") as Error;
+/// let _err = mkerr!(something_impl_error_or_display) as Error<S>;
+/// return Err(mkerr!("{} not found", filename)); // Equals to return mkres!(..).
 /// # }
 /// ```
 #[macro_export]
@@ -183,6 +185,8 @@ macro_rules! mkerr {
 }
 
 /// Constructs a [`Result`][crate::Result] from a literal, [`Error`][std::error::Error], [`Display`][std::fmt::Display], or [format string][std::format].
+///
+/// This is a shorthand for `Err(mkerr!(..))`.
 #[macro_export]
 macro_rules! mkres {
     ($($tt:tt)*) => {
