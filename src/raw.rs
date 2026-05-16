@@ -174,10 +174,8 @@ impl<S> RawError<S> {
                     state,
                     vtable: &const { DynBodyVTable::new::<E, P, L::Repr>() },
                     source,
-                    store: Store {
-                        payload,
-                        context: L::new_context(),
-                    },
+                    payload,
+                    context: L::new_context(),
                 })),
                 Self::KIND_BOXED,
             )
@@ -563,7 +561,7 @@ pub struct ConstBody {
 /// - The `vtable` pointer must point to a `DynBodyVTable` that was monomorphized
 ///   for the same `S`, `E`, `P`, `C` as the stored data.
 #[repr(C)]
-struct DynBody<S, E = (), P = (), C = ()>
+struct DynBody<S = (), E = (), P = (), C = ()>
 where
     S: 'static,
     E: 'static,
@@ -573,18 +571,8 @@ where
     state: S,
     vtable: &'static DynBodyVTable<S>,
     source: E,
-    store: Store<P, C>,
-}
-
-/// Container for the payload and context inside a [`DynBody`].
-#[repr(C)]
-struct Store<P, L>
-where
-    P: 'static,
-    L: 'static,
-{
     payload: P,
-    context: L,
+    context: C,
 }
 
 /// Virtual function table for type-erased operations on [`DynBody`].
@@ -695,7 +683,7 @@ where
         if TypeId::of::<P>() == payload_ty {
             // Safety: The caller guarantees `payload_dst` points to a valid `Option<P>`.
             let dst = unsafe { payload_dst.cast::<Option<P>>().as_mut() };
-            dst.replace(this.store.payload);
+            dst.replace(this.payload);
         }
         this.state
     }
@@ -728,7 +716,7 @@ where
     /// - The `store.payload` field must be initialized.
     unsafe fn payload(this: Ref<'_, DynBody<S>>) -> Option<&(dyn Display + Send + Sync + 'static)> {
         let this = unsafe { this.cast::<Self>() };
-        let payload = unsafe { this.project(|body| &raw const (*body).store.payload) };
+        let payload = unsafe { this.project(|body| &raw const (*body).payload) };
 
         if TypeId::of::<P>() == TypeId::of::<payload::Empty>() {
             None
@@ -744,7 +732,7 @@ where
     /// - `this` must point to a valid `DynBody<S, E, P, C>`.
     unsafe fn context(this: Ref<'_, DynBody<S>>) -> Option<&(dyn Display + Send + Sync + 'static)> {
         let this = unsafe { this.cast::<Self>() };
-        let context = unsafe { this.project(|body| &raw const (*body).store.context) };
+        let context = unsafe { this.project(|body| &raw const (*body).context) };
 
         if TypeId::of::<C>() == TypeId::of::<context::Unit>() {
             None
@@ -776,10 +764,7 @@ where
     unsafe fn downcast_payload_ref(this: Ref<'_, DynBody<S>>, _ty: TypeId) -> Option<Ref<'_, ()>> {
         let this = unsafe { this.cast::<Self>() };
         if _ty == TypeId::of::<P>() {
-            Some(unsafe {
-                this.project(|body| &raw const (*body).store.payload)
-                    .cast::<()>()
-            })
+            Some(unsafe { this.project(|body| &raw const (*body).payload).cast::<()>() })
         } else {
             None
         }
@@ -809,10 +794,7 @@ where
         let this = unsafe { this.cast::<Self>() };
 
         if _ty == TypeId::of::<P>() {
-            Some(unsafe {
-                this.project(|body| &raw mut (*body).store.payload)
-                    .cast::<()>()
-            })
+            Some(unsafe { this.project(|body| &raw mut (*body).payload).cast::<()>() })
         } else {
             None
         }
