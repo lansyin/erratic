@@ -15,7 +15,7 @@ impl Display for Empty {
 pub trait PayloadFn {
     type Output;
 
-    fn load(self) -> Self::Output;
+    fn call(self) -> Self::Output;
 }
 
 impl<T, R> PayloadFn for T
@@ -24,7 +24,7 @@ where
 {
     type Output = R;
 
-    fn load(self) -> Self::Output {
+    fn call(self) -> Self::Output {
         self()
     }
 }
@@ -35,7 +35,7 @@ pub struct Payload<P>(pub P);
 impl<T> PayloadFn for Payload<T> {
     type Output = T;
 
-    fn load(self) -> Self::Output {
+    fn call(self) -> Self::Output {
         self.0
     }
 }

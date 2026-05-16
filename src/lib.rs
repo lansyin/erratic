@@ -536,7 +536,7 @@ where
             _ => Error::<S>(RawError::new_boxed::<_, _, L>(
                 value.state,
                 value.err,
-                value.payload_fn.load(),
+                value.payload_fn.call(),
             )),
         }
     }
