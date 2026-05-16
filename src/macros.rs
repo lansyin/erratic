@@ -1,5 +1,5 @@
 #[doc(hidden)]
-pub mod __private {
+pub mod __reexport {
     pub use std;
 }
 
@@ -22,10 +22,10 @@ macro_rules! match_else {
         match $exp {
             Ok($pat) => {
                 #[allow(clippy::diverging_sub_expression)]
-                let _: $crate::macros::__private::std::convert::Infallible = $body;
+                let _: $crate::macros::__reexport::std::convert::Infallible = $body;
             }
-            Err(err) => $crate::macros::__private::std::result::Result::<
-                $crate::macros::__private::std::convert::Infallible,
+            Err(err) => $crate::macros::__reexport::std::result::Result::<
+                $crate::macros::__reexport::std::convert::Infallible,
                 _,
             >::Err(err),
         }
@@ -34,11 +34,11 @@ macro_rules! match_else {
         match $exp {
             Err($pat) => {
                 #[allow(clippy::diverging_sub_expression)]
-                let _: $crate::macros::__private::std::convert::Infallible = $body;
+                let _: $crate::macros::__reexport::std::convert::Infallible = $body;
             }
-            Ok(value) => $crate::macros::__private::std::result::Result::<
+            Ok(value) => $crate::macros::__reexport::std::result::Result::<
                 _,
-                $crate::macros::__private::std::convert::Infallible,
+                $crate::macros::__reexport::std::convert::Infallible,
             >::Ok(value),
         }
     };
@@ -153,7 +153,7 @@ pub mod __specialization {
 #[macro_export]
 macro_rules! mkerr {
     ($fmt:literal $($rest:tt)*) => {{
-        fn make_error<'a, S>(args: $crate::macros::__private::std::fmt::Arguments<'a>) -> $crate::Error<S>
+        fn make_error<'a, S>(args: $crate::macros::__reexport::std::fmt::Arguments<'a>) -> $crate::Error<S>
         where
             S: $crate::state::State + ?Sized,
             S::Repr: Default,
@@ -170,7 +170,7 @@ macro_rules! mkerr {
                 $crate::Error::from_payload(args.to_string())
             }
         }
-        make_error($crate::macros::__private::std::format_args!($fmt $($rest)*))
+        make_error($crate::macros::__reexport::std::format_args!($fmt $($rest)*))
     }};
     ($exp:expr $(,)?) => {{
         #[allow(unused_imports)]
@@ -186,7 +186,7 @@ macro_rules! mkerr {
 #[macro_export]
 macro_rules! mkres {
     ($($tt:tt)*) => {
-        $crate::macros::__private::std::result::Result::Err($crate::mkerr!($($tt)*))
+        $crate::macros::__reexport::std::result::Result::Err($crate::mkerr!($($tt)*))
     };
 }
 
