@@ -30,6 +30,7 @@ where
 }
 
 /// A wrapper that can be used as [`PayloadFn`].
+#[derive(Debug)]
 pub struct Immediate<P>(pub P);
 
 impl<P> PayloadFn for Immediate<P> {
