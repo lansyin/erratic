@@ -4,9 +4,9 @@ use std::fmt::Debug;
 /// Associates an error state type with its stored representation.
 ///
 /// Most types implement `State::Repr = Self` via blanket impl.
-pub trait State: 'static {
+pub trait State: Debug + Send + Sync + 'static {
     /// The type used to store the state inside [`Error`](crate::Error).
-    type Repr: 'static;
+    type Repr: Debug + Send + Sync + 'static;
 
     /// Converts `self` into its stored representation.
     fn into_repr(self) -> Self::Repr
@@ -26,7 +26,7 @@ pub trait State: 'static {
 
 impl<T> State for T
 where
-    T: Debug + 'static,
+    T: Debug + Send + Sync + 'static,
 {
     type Repr = T;
 

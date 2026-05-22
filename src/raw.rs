@@ -4,6 +4,7 @@ use crate::{
     nae::Nae,
     payload,
     ptr::{Align4, Align4Own, Align4PtrCompat, Align4Ref, Metadata, Mut, Ref},
+    rtti,
 };
 use std::{
     self,
@@ -144,7 +145,10 @@ impl<S> RawError<S> {
         })
     }
 
-    pub fn new_inline_or_boxed(state: S) -> Self {
+    pub fn new_inline_or_boxed(state: S) -> Self
+    where
+        S: Debug + Send + Sync + 'static,
+    {
         let Err(state) = match_else!(Self::new_inline(state),
             Ok(this) => return this,
         );
@@ -157,6 +161,7 @@ impl<S> RawError<S> {
     /// alongside a vtable for type-erased access.
     pub fn new_boxed<E, P, L>(state: S, source: E, payload: P) -> Self
     where
+        S: Debug + Send + Sync + 'static,
         E: error::Error + Send + Sync + 'static,
         P: Display + Send + Sync + 'static,
         L: Literal + context::Context + ?Sized,
@@ -445,6 +450,32 @@ impl<S> RawError<S> {
                 .map(|err| err as &(dyn error::Error + 'static)),
         )
     }
+
+    /// Convert into a boxed error without reallocation if already boxed, otherwise box the error.
+    pub fn into_boxed_error(self) -> Box<dyn error::Error + Send + Sync + 'static>
+    where
+        S: Debug,
+    {
+        match self.select_own() {
+            SelectOwn::Const(body) => unsafe {
+                // Safety: Projection from `ConstBody` to `ConstBody::context` is safe.
+                let context = body
+                    .borrow()
+                    .project(|body| &raw const (*body).context)
+                    .deref();
+                context.to_owned().into()
+            },
+            SelectOwn::Inline(body) => format!("{:?}", body.borrow_value()).into(),
+            SelectOwn::Boxed(body) => unsafe {
+                // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
+                let vtable = body
+                    .borrow()
+                    .project(|body| &raw const (*body).vtable)
+                    .copied();
+                (vtable.into_boxed_error)(body)
+            },
+        }
+    }
 }
 
 impl<S> Drop for RawError<S> {
@@ -476,34 +507,13 @@ where
     S: Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let state = format_args!("{:?}", self.state());
-        let mut segments = [
-            (TypeId::of::<S>() != TypeId::of::<()>()).then_some(&state as _),
-            self.context().map(|s| s as &dyn Display),
-            self.payload().map(|s| s as _),
-            self.source().map(|s| s as _),
-        ]
-        .into_iter()
-        .flatten()
-        .peekable();
-
-        while let Some(segment) = segments.next() {
-            write!(f, "{}", segment)?;
-
-            if segments.peek().is_some() {
-                write!(f, ": ")?;
-            }
-        }
-
-        writeln!(f)?;
-
-        writeln!(f, "Caused by: ")?;
-        for err in self.chain() {
-            write!(f, "  ")?;
-            writeln!(f, "{}", err)?;
-        }
-
-        Ok(())
+        format_debug(
+            f,
+            self.state(),
+            self.context(),
+            self.payload(),
+            self.source(),
+        )
     }
 }
 
@@ -512,26 +522,13 @@ where
     S: Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let state = format_args!("{:?}", self.state());
-        let mut segments = [
-            (TypeId::of::<S>() != TypeId::of::<()>()).then_some(&state as _),
-            self.context().map(|s| s as &dyn Display),
-            self.payload().map(|s| s as _),
-            self.source().map(|s| s as _),
-        ]
-        .into_iter()
-        .flatten()
-        .peekable();
-
-        while let Some(segment) = segments.next() {
-            write!(f, "{}", segment)?;
-
-            if segments.peek().is_some() {
-                write!(f, ": ")?;
-            }
-        }
-
-        Ok(())
+        format_display(
+            f,
+            self.state(),
+            self.context(),
+            self.payload(),
+            self.source(),
+        )
     }
 }
 
@@ -592,6 +589,8 @@ where
     into_source:
         unsafe fn(Align4Own<DynBody<S>>) -> Option<Box<dyn error::Error + Send + Sync + 'static>>,
     into_parts: unsafe fn(Align4Own<DynBody<S>>, TypeId, NonNull<()>, TypeId, NonNull<()>) -> S,
+    into_boxed_error:
+        unsafe fn(Align4Own<DynBody<S>>) -> Box<dyn error::Error + Send + Sync + 'static>,
     source: unsafe fn(Ref<'_, DynBody<S>>) -> Option<&(dyn error::Error + Send + Sync + 'static)>,
     payload: unsafe fn(Ref<'_, DynBody<S>>) -> Option<&(dyn Display + Send + Sync + 'static)>,
     context: unsafe fn(Ref<'_, DynBody<S>>) -> Option<&(dyn Display + Send + Sync + 'static)>,
@@ -604,6 +603,7 @@ where
 impl<S> DynBodyVTable<S> {
     const fn new<E, P, L>() -> Self
     where
+        S: Debug + Send + Sync + 'static,
         E: error::Error + Send + Sync + 'static,
         L: Display + Send + Sync + 'static,
         P: Display + Send + Sync + 'static,
@@ -612,6 +612,7 @@ impl<S> DynBodyVTable<S> {
             into_state: DynBody::<S, E, P, L>::into_state,
             into_source: DynBody::<S, E, P, L>::into_source,
             into_parts: DynBody::<S, E, P, L>::into_parts,
+            into_boxed_error: DynBody::<S, E, P, L>::into_boxed_error,
             source: DynBody::<S, E, P, L>::source,
             payload: DynBody::<S, E, P, L>::payload,
             context: DynBody::<S, E, P, L>::context,
@@ -625,7 +626,7 @@ impl<S> DynBodyVTable<S> {
 
 impl<S, E, P, C> DynBody<S, E, P, C>
 where
-    S: 'static,
+    S: Debug + Send + Sync + 'static,
     E: error::Error + Send + Sync + 'static,
     P: Display + Send + Sync + 'static,
     C: Display + Send + Sync + 'static,
@@ -686,6 +687,22 @@ where
             dst.replace(this.payload);
         }
         this.state
+    }
+
+    /// Convert the thin `DynBody` pointer to `Box<Error>` without reallocation.
+    ///
+    /// # Safety
+    ///
+    /// Same as [`into_parts`](DynBody::into_parts).
+    unsafe fn into_boxed_error(
+        this: Align4Own<DynBody<S>>,
+    ) -> Box<dyn error::Error + Send + Sync + 'static> {
+        let this = unsafe { this.cast::<Self>().into_boxed() };
+        let this_raw = Box::into_raw(this);
+        // # Safety
+        //
+        // The `Ailgn4` wrapper is `repr(C)` and has only one field, so the pointer cast is valid.
+        unsafe { Box::from_raw(this_raw as *mut DynBody<S, E, P, C>) }
     }
 
     /// Returns a reference to the source error.
@@ -799,6 +816,154 @@ where
             None
         }
     }
+}
+
+impl<S, E, P, C> fmt::Debug for DynBody<S, E, P, C>
+where
+    S: Debug + Send + Sync + 'static,
+    E: error::Error + Send + Sync + 'static,
+    P: Display + Send + Sync + 'static,
+    C: Display + Send + Sync + 'static,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        format_debug(
+            f,
+            &self.state,
+            (TypeId::of::<C>() != TypeId::of::<context::Unit>()).then_some(&self.context),
+            (TypeId::of::<P>() != TypeId::of::<payload::Empty>()).then_some(&self.payload),
+            Some(&self.source),
+        )
+    }
+}
+
+impl<S, E, P, C> fmt::Display for DynBody<S, E, P, C>
+where
+    S: Debug + 'static,
+    E: error::Error + Send + Sync + 'static,
+    P: Display + Send + Sync + 'static,
+    C: Display + Send + Sync + 'static,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        format_display(
+            f,
+            &self.state,
+            (TypeId::of::<C>() != TypeId::of::<context::Unit>()).then_some(&self.context),
+            (TypeId::of::<P>() != TypeId::of::<payload::Empty>()).then_some(&self.payload),
+            Some(&self.source),
+        )
+    }
+}
+
+impl<S, E, P, C> error::Error for DynBody<S, E, P, C>
+where
+    S: Debug + Send + Sync + 'static,
+    E: error::Error + Send + Sync + 'static,
+    P: Display + Send + Sync + 'static,
+    C: Display + Send + Sync + 'static,
+{
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        (TypeId::of::<E>() != TypeId::of::<Nae>()).then_some(&self.source as _)
+    }
+}
+
+fn format_debug<S>(
+    f: &mut fmt::Formatter<'_>,
+    state: &S,
+    context: Option<&(dyn Display + Send + Sync + 'static)>,
+    payload: Option<&(dyn Display + Send + Sync + 'static)>,
+    source: Option<&(dyn error::Error + Send + Sync + 'static)>,
+) -> fmt::Result
+where
+    S: Debug + 'static,
+{
+    struct DisplayAsDebug<'a>(pub &'a dyn Display);
+
+    impl<'a> Debug for DisplayAsDebug<'a> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, r#""{}""#, self.0)
+        }
+    }
+
+    struct DebugSourceChain<'a>(&'a dyn error::Error);
+
+    impl<'a> fmt::Debug for DebugSourceChain<'a> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let mut list = f.debug_list();
+
+            let mut next_source = Some(self.0);
+            while let Some(source) = next_source {
+                next_source = source.source();
+
+                list.entry(&format!("{source:#}"));
+            }
+
+            list.finish()
+        }
+    }
+
+    let ds = &mut f.debug_struct("Error");
+
+    if !rtti::is_same_ty::<S, ()>() {
+        ds.field("state", &state);
+    }
+
+    if let Some(context) = context {
+        ds.field("context", &DisplayAsDebug(context));
+    }
+
+    if let Some(payload) = payload {
+        ds.field("payload", &DisplayAsDebug(payload));
+    }
+
+    if let Some(source) = source {
+        ds.field("source", &DebugSourceChain(source));
+    }
+
+    ds.finish()
+}
+
+fn format_display<S>(
+    f: &mut fmt::Formatter<'_>,
+    state: &S,
+    context: Option<&(dyn Display + Send + Sync + 'static)>,
+    payload: Option<&(dyn Display + Send + Sync + 'static)>,
+    mut source: Option<&(dyn error::Error + Send + Sync + 'static)>,
+) -> fmt::Result
+where
+    S: Debug + 'static,
+{
+    let state = format_args!("{:?}", state);
+    let state: Option<&dyn Display> =
+        (!rtti::is_same_ty::<S, ()>()).then_some(&state as &dyn Display);
+
+    if f.alternate() {
+        match (state, context, payload, source) {
+            (None, None, None, Some(source)) => return write!(f, "{source:#}"),
+            _ => {
+                source = None;
+            }
+        }
+    }
+
+    let mut segments = [
+        state,
+        context.map(|s| s as _),
+        payload.map(|s| s as _),
+        source.map(|s| s as _),
+    ]
+    .into_iter()
+    .flatten()
+    .peekable();
+
+    while let Some(segment) = segments.next() {
+        write!(f, "{}", segment)?;
+
+        if segments.peek().is_some() {
+            write!(f, ": ")?;
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

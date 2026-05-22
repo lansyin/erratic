@@ -102,3 +102,10 @@ fn error_is_send_sync() {
     assert_send::<Error<TestState>>();
     assert_sync::<Error<TestState>>();
 }
+
+#[test]
+fn into_boxed_error() {
+    let err = mkerr!(TestError("oops")).stateless();
+    let boxed: Box<dyn std::error::Error + Send + Sync + 'static> = err.into();
+    assert_eq!(boxed.to_string(), "oops");
+}

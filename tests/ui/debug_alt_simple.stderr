@@ -1,0 +1,8 @@
+Error {
+    state: FileNotFound,
+    context: "while opening file",
+    payload: "hello.txt",
+    source: [
+        "no such device",
+    ],
+}

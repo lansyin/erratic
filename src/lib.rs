@@ -384,6 +384,15 @@ where
     }
 }
 
+impl<S> From<Error<S>> for Box<dyn error::Error + Send + Sync + 'static>
+where
+    S: State + ?Sized,
+{
+    fn from(value: Error<S>) -> Self {
+        value.0.into_boxed_error()
+    }
+}
+
 impl<S> Debug for Error<S>
 where
     S: State + ?Sized,

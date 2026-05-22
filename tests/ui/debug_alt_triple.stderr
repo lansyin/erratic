@@ -1,0 +1,10 @@
+Error {
+    state: FileNotFound,
+    context: "while copying file",
+    payload: "hello.txt",
+    source: [
+        "while invoking copy_context",
+        "while invoking open",
+        "no such device",
+    ],
+}
