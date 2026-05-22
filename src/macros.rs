@@ -89,53 +89,6 @@ macro_rules! literal {
     };
 }
 
-#[doc(hidden)]
-pub mod __priv_specialization {
-    use std::{error, fmt::Display};
-
-    use crate::{Error, state::State};
-
-    pub struct FromDisplay;
-
-    impl FromDisplay {
-        pub fn from<S>(self, value: impl Display + Send + Sync + 'static) -> Error<S>
-        where
-            S: State + ?Sized,
-            S::Repr: Default,
-        {
-            Error::from_payload(value)
-        }
-    }
-
-    pub trait SelectDisplay {
-        fn select(&self) -> FromDisplay {
-            FromDisplay
-        }
-    }
-
-    impl<D> SelectDisplay for &D {}
-
-    pub struct FromError;
-
-    impl FromError {
-        pub fn from<S>(self, err: impl std::error::Error + Send + Sync + 'static) -> Error<S>
-        where
-            S: State + ?Sized,
-            S::Repr: Default,
-        {
-            Error::from_error(err)
-        }
-    }
-
-    pub trait SelectError {
-        fn select(&self) -> FromError {
-            FromError
-        }
-    }
-
-    impl<E: error::Error> SelectError for E {}
-}
-
 /// Constructs an [`Error`][crate::Error] from a variety of input types.
 ///
 /// # Examples
@@ -151,7 +104,6 @@ pub mod __priv_specialization {
 /// let _err = mkerr!("404 not found").stateless();
 /// let _err = mkerr!("{filename} not found").stateless();
 /// let _err = mkerr!("{} not found", filename).stateless();
-/// let _err = mkerr!(something_impl_error_or_display).stateless();
 /// let _err = mkerr!(state=State::NotFound);
 /// let _err = mkerr!(context="while opening").stateless();
 /// let _err = mkerr!(context="while opening", payload=filename).stateless();
@@ -196,14 +148,6 @@ macro_rules! mkerr {
         }
         make_error($crate::macros::__priv_reexport::std::format_args!($fmt $($rest)*))
     }};
-    ($exp:expr $(,)?) => {{
-        #[allow(unused_imports)]
-        use $crate::macros::__priv_specialization::{SelectDisplay, SelectError};
-
-        match $exp {
-            err => (&err).select().from(err),
-        }
-    }};
 }
 
 /// Shorthand for `Err(mkerr!(..))`; see [`mkerr!`].
@@ -245,21 +189,26 @@ mod tests {
     }
 
     #[test]
-    fn error_from_error() {
-        let err = mkerr!("test").stateless();
-        let _ = mkerr!(err).stateless();
-    }
-
-    #[test]
-    fn error_from_display() {
-        let text = String::from("foo");
-        let _ = mkerr!(text).stateless();
-    }
-
-    #[test]
     fn error_from_format_string() {
         let filename = "file.txt";
         let _ = mkerr!("{} not found", filename).stateless();
+    }
+
+    #[test]
+    fn error_from_kvs() {
+        let err_from_mkerr = mkerr!(
+            state = 42,
+            context = "test",
+            payload = "error message",
+            error = mkerr!("source").stateless().erase()
+        );
+        let err_from_builder = Error::with_error(mkerr!("source").stateless().erase())
+            .with_state(42)
+            .with_context(literal!("test"))
+            .with_payload("error message")
+            .build();
+
+        assert_eq!(err_from_mkerr.to_string(), err_from_builder.to_string());
     }
 
     // Test that the macros can select format string or literal based on the input.
@@ -275,22 +224,5 @@ mod tests {
     fn error_from_literal_without_allocation() {
         let err = mkerr!("file not found").stateless();
         assert!(!err.has_payload_of::<String>());
-    }
-
-    #[test]
-    fn error_from_kvs_is_correct() {
-        let err_from_mkerr = mkerr!(
-            state = 42,
-            context = "test",
-            payload = "error message",
-            error = mkerr!("source").stateless().erase()
-        );
-        let err_from_builder = Error::with_error(mkerr!("source").stateless().erase())
-            .with_state(42)
-            .with_context(literal!("test"))
-            .with_payload("error message")
-            .build();
-
-        assert_eq!(err_from_mkerr.to_string(), err_from_builder.to_string());
     }
 }
