@@ -288,6 +288,7 @@ impl<S> Error<S>
 where
     S: State + ?Sized,
 {
+    /// Returns a reference to the context, if present.
     pub fn context(&self) -> Option<&(dyn Display + Send + Sync + 'static)> {
         self.0.context()
     }
