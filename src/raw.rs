@@ -346,7 +346,7 @@ impl<S> RawError<S> {
             },
             SelectRef::Inline(_body) => unsafe {
                 // Safety: Access `InlineBody::value` is safe.
-                &self.inline_body.borrow_value()
+                self.inline_body.borrow_value()
             },
             SelectRef::Boxed(body) => unsafe {
                 // Safety: Projection from `DynBody` to `DynBody::state` is safe.

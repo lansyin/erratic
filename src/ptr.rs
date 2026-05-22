@@ -55,7 +55,7 @@ impl<T> Align4PtrCompat<T> {
         while offset <= store_offset_end {
             // Note: Rust guarantees that the alignment is not smaller than 1, even for ZSTs.
             // https://doc.rust-lang.org/reference/type-layout.html#size-and-alignment
-            if (target_align + offset) % target_align == 0
+            if (target_align + offset).is_multiple_of(target_align)
                 && store_offset_end - offset >= target_size
             {
                 return Some((offset - store_offset_start) as isize);
