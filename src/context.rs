@@ -36,13 +36,22 @@ impl Context for Blank {
     type Repr = Unit;
 
     fn new_context() -> Self::Repr {
-        Unit
+        Unit::new()
     }
 }
 
 /// A zero-sized displayable type used as the [`Context::Repr`] for [`Blank`].
 #[derive(Debug)]
-pub struct Unit;
+pub struct Unit {
+    _private: (),
+}
+
+impl Unit {
+    /// Creates a new [`Unit`] instance.
+    pub(crate) fn new() -> Self {
+        Unit { _private: () }
+    }
+}
 
 impl Display for Unit {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
