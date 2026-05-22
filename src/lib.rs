@@ -293,7 +293,7 @@ where
     }
 
     /// Returns a reference to the displayable payload, if present.
-    pub fn payload(&self) -> Option<&(dyn Display + Send + Sync)> {
+    pub fn payload(&self) -> Option<&(dyn Display + Send + Sync + 'static)> {
         self.0.payload()
     }
 
