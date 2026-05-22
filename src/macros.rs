@@ -105,30 +105,26 @@ macro_rules! literal {
 /// let _err = mkerr!("{filename} not found").stateless();
 /// let _err = mkerr!("{} not found", filename).stateless();
 /// let _err = mkerr!(state=State::NotFound);
-/// let _err = mkerr!(context="while opening").stateless();
-/// let _err = mkerr!(context="while opening", payload=filename).stateless();
-/// let _err = mkerr!(state=State::NotFound, context="while opening", payload=filename, error=err);
+/// let _err = mkerr!(context="file not found").stateless();
+/// let _err = mkerr!(context="file not found while opening", payload=filename).stateless();
+/// let _err = mkerr!(
+///     state=State::NotFound,
+///     context="while opening",
+///     payload=filename,
+///     error=err,
+/// );
 /// # }
 /// ```
+///
+/// # Order
+///
+/// The key-value pairs can be provided in any order.
 #[macro_export]
 macro_rules! mkerr {
     ($($key:ident=$value:expr),+ $(,)?) => {
-        $crate::mkerr!(@priv kvs $($key=$value,)?)
+        $crate::__priv_mkerr_kvs!(@sort[,,,] $($key=$value,)+)
     };
-    (@priv kvs $(state=$state:expr,)? $(context=$context:expr,)? $(payload=$payload:expr,)? $(error=$error:expr,)?) => {
-        {
-            use $crate::{BuilderExt, ErrorExt};
-
-            ($crate::macros::__priv_reexport::std::option::Option::None::<()>)
-                $(.ok_or($error))?
-                $(.with_state($state))?
-                $(.with_context($crate::literal!($context)))?
-                $(.with_payload($payload))?
-                .build_error()
-                .unwrap_err()
-        }
-    };
-    ($fmt:literal $($rest:tt)*) => {{
+    ($fmt:literal $($args:tt)*) => {{
         fn make_error<'a, S>(args: $crate::macros::__priv_reexport::std::fmt::Arguments<'a>) -> $crate::Error<S>
         where
             S: $crate::state::State + ?Sized,
@@ -146,11 +142,37 @@ macro_rules! mkerr {
                 $crate::Error::from_payload($crate::macros::__priv_reexport::std::string::ToString::to_string(&args))
             }
         }
-        make_error($crate::macros::__priv_reexport::std::format_args!($fmt $($rest)*))
+        make_error($crate::macros::__priv_reexport::std::format_args!($fmt $($args)*))
     }};
 }
 
-/// Shorthand for `Err(mkerr!(..))`; see [`mkerr!`].
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __priv_mkerr_kvs {
+    (@sort[$(state=$s:expr)?, $(context=$c:expr)?, $(payload=$p:expr)?, $(error=$e:expr)?] state=$state:expr, $($key:ident=$value:expr,)*) => {
+        $crate::__priv_mkerr_kvs!(@sort[state=$state, $(context=$c)?, $(payload=$p)?, $(error=$e)?] $($key=$value,)*)
+    };
+    (@sort[$(state=$s:expr)?, $(context=$c:expr)?, $(payload=$p:expr)?, $(error=$e:expr)?] context=$context:expr, $($key:ident=$value:expr,)*) => {
+        $crate::__priv_mkerr_kvs!(@sort[$(state=$s)?, context=$context, $(payload=$p)?, $(error=$e)?] $($key=$value,)*)
+    };
+    (@sort[$(state=$s:expr)?, $(context=$c:expr)?, $(payload=$p:expr)?, $(error=$e:expr)?] payload=$payload:expr, $($key:ident=$value:expr,)*) => {
+        $crate::__priv_mkerr_kvs!(@sort[$(state=$s)?, $(context=$c)?, payload=$payload, $(error=$e)?] $($key=$value,)*)
+    };
+    (@sort[$(state=$s:expr)?, $(context=$c:expr)?, $(payload=$p:expr)?, $(error=$e:expr)?] error=$error:expr, $($key:ident=$value:expr,)*) => {
+        $crate::__priv_mkerr_kvs!(@sort[$(state=$s)?, $(context=$c)?, $(payload=$p)?, error=$error] $($key=$value,)*)
+    };
+    (@sort[$(state=$s:expr)?, $(context=$c:expr)?, $(payload=$p:expr)?, $(error=$e:expr)?]) => {{
+        ($crate::macros::__priv_reexport::std::option::Option::None::<()>)
+            $(.ok_or($e))?
+            $(.with_state($s))?
+            $(.with_context($crate::literal!($c)))?
+            $(.with_payload($p))?
+            .build_error()
+            .unwrap_err()
+    }};
+}
+
+/// Shorthand for [`Err(mkerr!(..))`][`mkerr!`].
 #[macro_export]
 macro_rules! mkres {
     ($($tt:tt)*) => {
@@ -200,7 +222,24 @@ mod tests {
             state = 42,
             context = "test",
             payload = "error message",
-            error = mkerr!("source").stateless().erase()
+            error = mkerr!("source").stateless().erase(),
+        );
+        let err_from_builder = Error::with_error(mkerr!("source").stateless().erase())
+            .with_state(42)
+            .with_context(literal!("test"))
+            .with_payload("error message")
+            .build();
+
+        assert_eq!(err_from_mkerr.to_string(), err_from_builder.to_string());
+    }
+
+    #[test]
+    fn error_from_kvs_unordered() {
+        let err_from_mkerr = mkerr!(
+            context = "test",
+            error = mkerr!("source").stateless().erase(),
+            payload = "error message",
+            state = 42,
         );
         let err_from_builder = Error::with_error(mkerr!("source").stateless().erase())
             .with_state(42)
