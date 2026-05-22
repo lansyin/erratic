@@ -3,7 +3,16 @@ use std::fmt::{self, Display};
 
 /// A zero-sized payload placeholder for [Error][crate::Error].
 #[derive(Debug)]
-pub struct Empty;
+pub struct Empty {
+    _private: (),
+}
+
+impl Empty {
+    /// Creates a new [`Empty`] instance.
+    pub(crate) fn new() -> Self {
+        Empty { _private: () }
+    }
+}
 
 impl Display for Empty {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {

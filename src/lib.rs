@@ -130,7 +130,7 @@ impl Error {
             err,
             context: PhantomData,
             state: (),
-            payload_fn: Immediate(payload::Empty),
+            payload_fn: Immediate(payload::Empty::new()),
         }
     }
 
@@ -142,17 +142,17 @@ impl Error {
         S: State,
     {
         Builder {
-            err: Nae,
+            err: Nae::new(),
             context: PhantomData,
             state: state.into_repr(),
-            payload_fn: Immediate(payload::Empty),
+            payload_fn: Immediate(payload::Empty::new()),
         }
     }
 
     /// Starts building an `Error` with a payload.
     pub fn with_payload<P>(payload: P) -> Builder<Nae, Stateless, Immediate<P>, context::Blank> {
         Builder {
-            err: Nae,
+            err: Nae::new(),
             context: PhantomData,
             state: (),
             payload_fn: Immediate(payload),
@@ -167,7 +167,7 @@ impl Error {
         F: PayloadFn,
     {
         Builder {
-            err: Nae,
+            err: Nae::new(),
             context: PhantomData,
             state: (),
             payload_fn,
@@ -184,10 +184,10 @@ impl Error {
     /// Starts building an `Error` with a literal context type, inferred at the call site.
     pub fn with_context_ty<L>() -> Builder<Nae, Stateless, Immediate<payload::Empty>, L> {
         Builder {
-            err: Nae,
+            err: Nae::new(),
             context: PhantomData,
             state: (),
-            payload_fn: Immediate(payload::Empty),
+            payload_fn: Immediate(payload::Empty::new()),
         }
     }
 
@@ -266,8 +266,8 @@ where
 
         Self(RawError::new_boxed::<_, _, context::Blank>(
             S::Repr::default(),
-            Nae,
-            payload::Empty,
+            Nae::new(),
+            payload::Empty::new(),
         ))
     }
 
@@ -278,7 +278,7 @@ where
     {
         Self(RawError::new_boxed::<_, P, context::Blank>(
             S::Repr::default(),
-            Nae,
+            Nae::new(),
             payload,
         ))
     }
@@ -464,7 +464,7 @@ where
         Error(RawError::new_boxed::<_, _, context::Blank>(
             S::Repr::default(),
             err,
-            payload::Empty,
+            payload::Empty::new(),
         ))
     }
 }
@@ -482,7 +482,7 @@ where
         Error(RawError::new_boxed::<_, _, context::Blank>(
             (),
             err.erase(),
-            payload::Empty,
+            payload::Empty::new(),
         ))
     }
 }
@@ -496,7 +496,7 @@ where
         Error::<S>(RawError::new_boxed::<_, _, context::Blank>(
             S::Repr::default(),
             value.erase(),
-            payload::Empty,
+            payload::Empty::new(),
         ))
     }
 }
@@ -602,22 +602,22 @@ where
             (true, false, false, false) => Error(RawError::new_boxed::<_, _, L>(
                 (),
                 ImplError::<S>(RawError::new_inline_or_boxed(value.state)),
-                payload::Empty,
+                payload::Empty::new(),
             )),
             (false, true, false, false) => Error(RawError::new_const::<L>()),
             (false, _, _, _) => Error(RawError::new_boxed::<_, _, L>(
                 (),
                 value.err,
-                payload::Empty,
+                payload::Empty::new(),
             )),
             _ => Error(RawError::new_boxed::<_, _, context::Blank>(
                 (),
                 ImplError::<S>(RawError::new_boxed::<_, _, L>(
                     value.state,
                     value.err,
-                    payload::Empty,
+                    payload::Empty::new(),
                 )),
-                payload::Empty,
+                payload::Empty::new(),
             )),
         }
     }
@@ -739,7 +739,7 @@ where
             err,
             context: PhantomData,
             state: (),
-            payload_fn: Immediate(payload::Empty),
+            payload_fn: Immediate(payload::Empty::new()),
         })
     }
 
@@ -751,7 +751,7 @@ where
             err,
             context: PhantomData,
             state: state.into_repr(),
-            payload_fn: Immediate(payload::Empty),
+            payload_fn: Immediate(payload::Empty::new()),
         })
     }
 
@@ -1072,10 +1072,10 @@ impl<T> BuilderExt for Option<T> {
 
     fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>> {
         self.ok_or(Builder {
-            err: Nae,
+            err: Nae::new(),
             context: PhantomData,
             state: (),
-            payload_fn: Immediate(payload::Empty),
+            payload_fn: Immediate(payload::Empty::new()),
         })
     }
 
@@ -1085,9 +1085,9 @@ impl<T> BuilderExt for Option<T> {
     {
         self.ok_or(Builder {
             state: state.into_repr(),
-            err: Nae,
+            err: Nae::new(),
             context: PhantomData,
-            payload_fn: Immediate(payload::Empty),
+            payload_fn: Immediate(payload::Empty::new()),
         })
     }
 
@@ -1099,7 +1099,7 @@ impl<T> BuilderExt for Option<T> {
         F: PayloadFn,
     {
         self.ok_or(Builder {
-            err: Nae,
+            err: Nae::new(),
             context: PhantomData,
             state: (),
             payload_fn,

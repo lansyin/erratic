@@ -8,7 +8,16 @@ use std::{
 /// the end of source chain in [`Error`][crate::Error]. It is used by [`Builder`][crate::Builder]
 /// and will not appear in the iterator returned by [`chain`][crate::Error::chain].
 #[derive(Debug)]
-pub struct Nae;
+pub struct Nae {
+    _private: (),
+}
+
+impl Nae {
+    /// Creates a new [`Nae`] instance.
+    pub(crate) fn new() -> Self {
+        Nae { _private: () }
+    }
+}
 
 impl Display for Nae {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {

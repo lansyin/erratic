@@ -152,7 +152,11 @@ impl<S> RawError<S> {
         let Err(state) = match_else!(Self::new_inline(state),
             Ok(this) => return this,
         );
-        Self::new_boxed::<Nae, payload::Empty, context::Blank>(state, Nae, payload::Empty)
+        Self::new_boxed::<Nae, payload::Empty, context::Blank>(
+            state,
+            Nae::new(),
+            payload::Empty::new(),
+        )
     }
 
     /// Constructs a boxed-variant [`RawError`] containing source, payload, and context.
@@ -1027,7 +1031,7 @@ mod tests {
 
     #[test]
     fn kind_discriminates_boxed() {
-        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty);
+        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty::new());
         assert_eq!(err.kind(), RawError::<()>::KIND_BOXED);
     }
 
@@ -1097,7 +1101,7 @@ mod tests {
 
     #[test]
     fn boxed_variant_source() {
-        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty);
+        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty::new());
         let src = err.source();
         assert!(src.is_some());
         assert_eq!(src.unwrap().to_string(), "oops");
@@ -1105,7 +1109,7 @@ mod tests {
 
     #[test]
     fn boxed_variant_downcast_source() {
-        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty);
+        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty::new());
         let downcasted = err.downcast_source_ref::<TestError>();
         assert!(downcasted.is_some());
         assert_eq!(downcasted.unwrap().0, "oops");
@@ -1113,14 +1117,15 @@ mod tests {
 
     #[test]
     fn boxed_variant_downcast_source_wrong_type() {
-        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty);
+        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty::new());
         let downcasted = err.downcast_source_ref::<String>();
         assert!(downcasted.is_none());
     }
 
     #[test]
     fn boxed_variant_downcast_source_mut() {
-        let mut err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty);
+        let mut err =
+            RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty::new());
         {
             let downcasted = err.downcast_source_mut::<TestError>();
             assert!(downcasted.is_some());
@@ -1148,7 +1153,8 @@ mod tests {
 
     #[test]
     fn boxed_variant_context() {
-        let err = RawError::new_boxed::<_, _, TestContext>((), TestError("oops"), payload::Empty);
+        let err =
+            RawError::new_boxed::<_, _, TestContext>((), TestError("oops"), payload::Empty::new());
         let ctx = err.context();
         assert!(ctx.is_some());
         assert_eq!(ctx.unwrap().to_string(), "test context");
@@ -1157,14 +1163,14 @@ mod tests {
     #[test]
     fn boxed_variant_nae_source_is_none() {
         // When source is `Nae`, `.source()` should return `None`.
-        let err = RawError::new_boxed::<_, _, Blank>(42u32, Nae, payload::Empty);
+        let err = RawError::new_boxed::<_, _, Blank>(42u32, Nae::new(), payload::Empty::new());
         assert!(err.source().is_none());
         assert_eq!(*err.state(), 42);
     }
 
     #[test]
     fn boxed_variant_empty_payload_is_none() {
-        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty);
+        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty::new());
         assert!(err.payload().is_none());
     }
 
@@ -1172,7 +1178,7 @@ mod tests {
 
     #[test]
     fn boxed_variant_into_source_returns_boxed_error() {
-        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty);
+        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty::new());
         let src = err.into_source();
         assert!(src.is_some());
         assert_eq!(src.unwrap().to_string(), "oops");
@@ -1180,7 +1186,7 @@ mod tests {
 
     #[test]
     fn boxed_variant_into_source_nae_returns_none() {
-        let err = RawError::new_boxed::<_, _, Blank>((), Nae, payload::Empty);
+        let err = RawError::new_boxed::<_, _, Blank>((), Nae::new(), payload::Empty::new());
         assert!(err.into_source().is_none());
     }
 
@@ -1200,7 +1206,7 @@ mod tests {
 
     #[test]
     fn boxed_variant_into_parts_wrong_source_type() {
-        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty);
+        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty::new());
         let (source, payload, _) = err.into_parts::<String, payload::Empty>();
         assert!(source.is_none());
         assert!(payload.is_some());
@@ -1251,7 +1257,7 @@ mod tests {
         impl error::Error for DropWatch {}
 
         {
-            let _err = RawError::new_boxed::<_, _, Blank>((), DropWatch, payload::Empty);
+            let _err = RawError::new_boxed::<_, _, Blank>((), DropWatch, payload::Empty::new());
         } // drop here
         assert!(DROPPED.load(Ordering::SeqCst));
     }

@@ -1,5 +1,5 @@
 #[doc(hidden)]
-pub mod __reexport {
+pub mod __priv_reexport {
     pub use std;
 }
 
@@ -22,10 +22,10 @@ macro_rules! match_else {
         match $exp {
             Ok($pat) => {
                 #[allow(clippy::diverging_sub_expression)]
-                let _: $crate::macros::__reexport::std::convert::Infallible = $body;
+                let _: $crate::macros::__priv_reexport::std::convert::Infallible = $body;
             }
-            Err(err) => $crate::macros::__reexport::std::result::Result::<
-                $crate::macros::__reexport::std::convert::Infallible,
+            Err(err) => $crate::macros::__priv_reexport::std::result::Result::<
+                $crate::macros::__priv_reexport::std::convert::Infallible,
                 _,
             >::Err(err),
         }
@@ -34,11 +34,11 @@ macro_rules! match_else {
         match $exp {
             Err($pat) => {
                 #[allow(clippy::diverging_sub_expression)]
-                let _: $crate::macros::__reexport::std::convert::Infallible = $body;
+                let _: $crate::macros::__priv_reexport::std::convert::Infallible = $body;
             }
-            Ok(value) => $crate::macros::__reexport::std::result::Result::<
+            Ok(value) => $crate::macros::__priv_reexport::std::result::Result::<
                 _,
-                $crate::macros::__reexport::std::convert::Infallible,
+                $crate::macros::__priv_reexport::std::convert::Infallible,
             >::Ok(value),
         }
     };
@@ -90,7 +90,7 @@ macro_rules! literal {
 }
 
 #[doc(hidden)]
-pub mod __specialization {
+pub mod __priv_specialization {
     use std::{error, fmt::Display};
 
     use crate::{Error, state::State};
@@ -136,26 +136,48 @@ pub mod __specialization {
     impl<E: error::Error> SelectError for E {}
 }
 
-/// Constructs an [`Error`][crate::Error] from a literal, [`Error`][std::error::Error], [`Display`][std::fmt::Display], or [format string][std::format].
+/// Constructs an [`Error`][crate::Error] from a variety of input types.
 ///
 /// # Examples
 ///
 /// ```
 /// # use erratic::*;
 /// # #[derive(Debug, Default)]
-/// # enum S { #[default] _A }
-/// # fn foo() -> std::result::Result<(), Error<()>> {
+/// # enum State { #[default] NotFound }
+/// # fn foo() {
 /// # let filename = "";
 /// # let something_impl_error_or_display = "";
+/// # let err = mkerr!("oops").stateless().erase();
 /// let _err = mkerr!("404 not found").stateless();
-/// let _err = mkerr!(something_impl_error_or_display) as Error<S>;
-/// return Err(mkerr!("{} not found", filename)); // Equals to return mkres!(..).
+/// let _err = mkerr!("{filename} not found").stateless();
+/// let _err = mkerr!("{} not found", filename).stateless();
+/// let _err = mkerr!(something_impl_error_or_display).stateless();
+/// let _err = mkerr!(state=State::NotFound);
+/// let _err = mkerr!(context="while opening").stateless();
+/// let _err = mkerr!(context="while opening", payload=filename).stateless();
+/// let _err = mkerr!(state=State::NotFound, context="while opening", payload=filename, error=err);
 /// # }
 /// ```
 #[macro_export]
 macro_rules! mkerr {
+    ($($key:ident=$value:expr),+ $(,)?) => {
+        $crate::mkerr!(@priv kvs $($key=$value,)?)
+    };
+    (@priv kvs $(state=$state:expr,)? $(context=$context:expr,)? $(payload=$payload:expr,)? $(error=$error:expr,)?) => {
+        {
+            use $crate::{BuilderExt, ErrorExt};
+
+            ($crate::macros::__priv_reexport::std::option::Option::None::<()>)
+                $(.ok_or($error))?
+                $(.with_state($state))?
+                $(.with_context($crate::literal!($context)))?
+                $(.with_payload($payload))?
+                .build_error()
+                .unwrap_err()
+        }
+    };
     ($fmt:literal $($rest:tt)*) => {{
-        fn make_error<'a, S>(args: $crate::macros::__reexport::std::fmt::Arguments<'a>) -> $crate::Error<S>
+        fn make_error<'a, S>(args: $crate::macros::__priv_reexport::std::fmt::Arguments<'a>) -> $crate::Error<S>
         where
             S: $crate::state::State + ?Sized,
             S::Repr: Default,
@@ -169,14 +191,14 @@ macro_rules! mkerr {
 
                 $crate::Error::from_context(Literal)
             } else {
-                $crate::Error::from_payload(args.to_string())
+                $crate::Error::from_payload($crate::macros::__priv_reexport::std::string::ToString::to_string(&args))
             }
         }
-        make_error($crate::macros::__reexport::std::format_args!($fmt $($rest)*))
+        make_error($crate::macros::__priv_reexport::std::format_args!($fmt $($rest)*))
     }};
     ($exp:expr $(,)?) => {{
         #[allow(unused_imports)]
-        use $crate::macros::__specialization::{SelectDisplay, SelectError};
+        use $crate::macros::__priv_specialization::{SelectDisplay, SelectError};
 
         match $exp {
             err => (&err).select().from(err),
@@ -184,13 +206,11 @@ macro_rules! mkerr {
     }};
 }
 
-/// Constructs a [`Result`][crate::Result] from a literal, [`Error`][std::error::Error], [`Display`][std::fmt::Display], or [format string][std::format].
-///
-/// This is a shorthand for `Err(mkerr!(..))`.
+/// Shorthand for `Err(mkerr!(..))`; see [`mkerr!`].
 #[macro_export]
 macro_rules! mkres {
     ($($tt:tt)*) => {
-        $crate::macros::__reexport::std::result::Result::Err($crate::mkerr!($($tt)*))
+        $crate::macros::__priv_reexport::std::result::Result::Err($crate::mkerr!($($tt)*))
     };
 }
 
@@ -255,5 +275,22 @@ mod tests {
     fn error_from_literal_without_allocation() {
         let err = mkerr!("file not found").stateless();
         assert!(!err.has_payload_of::<String>());
+    }
+
+    #[test]
+    fn error_from_kvs_is_correct() {
+        let err_from_mkerr = mkerr!(
+            state = 42,
+            context = "test",
+            payload = "error message",
+            error = mkerr!("source").stateless().erase()
+        );
+        let err_from_builder = Error::with_error(mkerr!("source").stateless().erase())
+            .with_state(42)
+            .with_context(literal!("test"))
+            .with_payload("error message")
+            .build();
+
+        assert_eq!(err_from_mkerr.to_string(), err_from_builder.to_string());
     }
 }
