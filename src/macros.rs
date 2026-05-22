@@ -104,14 +104,14 @@ macro_rules! literal {
 /// let _err = mkerr!("404 not found").stateless();
 /// let _err = mkerr!("{filename} not found").stateless();
 /// let _err = mkerr!("{} not found", filename).stateless();
-/// let _err = mkerr!(state=State::NotFound);
-/// let _err = mkerr!(context="file not found").stateless();
-/// let _err = mkerr!(context="file not found while opening", payload=filename).stateless();
+/// let _err = mkerr!(state = State::NotFound);
+/// let _err = mkerr!(context = "file not found").stateless();
+/// let _err = mkerr!(context = "file not found while opening", payload = filename).stateless();
 /// let _err = mkerr!(
-///     state=State::NotFound,
-///     context="while opening",
-///     payload=filename,
-///     error=err,
+///     state = State::NotFound,
+///     context = "while opening",
+///     payload = filename,
+///     error = err,
 /// );
 /// # }
 /// ```
