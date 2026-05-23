@@ -162,13 +162,25 @@ macro_rules! __priv_mkerr_kvs {
         $crate::__priv_mkerr_kvs!(@sort[$(state=$s)?, $(context=$c)?, $(payload=$p)?, error=$error] $($key=$value,)*)
     };
     (@sort[$(state=$s:expr)?, $(context=$c:expr)?, $(payload=$p:expr)?, $(error=$e:expr)?]) => {{
-        ($crate::macros::__priv_reexport::std::option::Option::None::<()>)
+        #[allow(unused_imports)]
+        use $crate::BuilderExt;
+
+        let builder = ($crate::macros::__priv_reexport::std::option::Option::None::<()>)
             $(.ok_or($e))?
             $(.with_state($s))?
             $(.with_context($crate::literal!($c)))?
             $(.with_payload($p))?
-            .build_error()
-            .unwrap_err()
+            .unwrap_err();
+        $crate::__priv_mkerr_kvs!(@untype[$($s)?] builder)
+    }};
+    (@untype[] $builder:ident) => {{
+        $crate::Error::<_>::from($builder)
+    }};
+    (@untype[$state:expr] $builder:ident) => {{
+        #[allow(unused_imports)]
+        use $crate::ErrorExt;
+
+        ($builder).build_error()
     }};
 }
 
@@ -248,6 +260,20 @@ mod tests {
             .build();
 
         assert_eq!(err_from_mkerr.to_string(), err_from_builder.to_string());
+    }
+
+    #[test]
+    fn infer_default_state_if_state_is_not_specified() {
+        let _: Error<i32> = mkerr!(context = "test");
+        let _ = || -> result::Result<(), Error<i32>> {
+            return mkres!(context = "test");
+        };
+    }
+
+    #[test]
+    fn no_need_for_type_hint_if_state_is_specified() {
+        let _ = mkerr!(state = 42, context = "test");
+        let _ = mkerr!(context = "test").stateless();
     }
 
     // Test that the macros can select format string or literal based on the input.
