@@ -22,7 +22,7 @@ impl Display for Empty {
 
 /// A trait for types that can [produce a payload][crate::BuilderExt::with_payload_fn].
 pub trait PayloadFn {
-    type Output;
+    type Output: Display + Send + Sync + 'static;
 
     fn call(self) -> Self::Output;
 }
@@ -30,6 +30,7 @@ pub trait PayloadFn {
 impl<T, R> PayloadFn for T
 where
     T: FnOnce() -> R,
+    R: Display + Send + Sync + 'static,
 {
     type Output = R;
 
@@ -40,9 +41,14 @@ where
 
 /// A wrapper that can be used as [`PayloadFn`].
 #[derive(Debug)]
-pub struct Immediate<P>(pub P);
+pub struct Immediate<P>(pub P)
+where
+    P: Display + Send + Sync + 'static;
 
-impl<P> PayloadFn for Immediate<P> {
+impl<P> PayloadFn for Immediate<P>
+where
+    P: Display + Send + Sync + 'static,
+{
     type Output = P;
 
     fn call(self) -> Self::Output {

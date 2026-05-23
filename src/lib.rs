@@ -150,7 +150,10 @@ impl Error {
     }
 
     /// Starts building an `Error` with a payload.
-    pub fn with_payload<P>(payload: P) -> Builder<Nae, Stateless, Immediate<P>, context::Blank> {
+    pub fn with_payload<P>(payload: P) -> Builder<Nae, Stateless, Immediate<P>, context::Blank>
+    where
+        P: Display + Send + Sync + 'static,
+    {
         Builder {
             err: Nae::new(),
             context: PhantomData,
@@ -177,7 +180,10 @@ impl Error {
     /// Starts building an `Error` with a typed literal context.
     ///
     /// For dynamic content, use [`with_payload`][Self::with_payload] instead.
-    pub fn with_context<L>(_ty: L) -> Builder<Nae, Stateless, Immediate<payload::Empty>, L> {
+    pub fn with_context<L>(_ty: L) -> Builder<Nae, Stateless, Immediate<payload::Empty>, L>
+    where
+        L: Context,
+    {
         Self::with_context_ty::<L>()
     }
 
@@ -212,7 +218,6 @@ impl Error {
 impl<S> Error<S>
 where
     S: State + ?Sized,
-    S::Repr: Debug + Send + Sync,
 {
     /// Erases the state type, returning an opaque [`Error`][error::Error].
     ///
@@ -401,7 +406,6 @@ where
 impl<S> Debug for Error<S>
 where
     S: State + ?Sized,
-    S::Repr: Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Debug::fmt(&self.0, f)
@@ -411,7 +415,6 @@ where
 impl<S> Display for Error<S>
 where
     S: State + ?Sized,
-    S::Repr: Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Display::fmt(&self.0, f)
@@ -426,7 +429,6 @@ where
 impl<S> Debug for ImplError<S>
 where
     S: State + ?Sized,
-    S::Repr: Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Debug::fmt(&self.0, f)
@@ -436,7 +438,6 @@ where
 impl<S> Display for ImplError<S>
 where
     S: State + ?Sized,
-    S::Repr: Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Display::fmt(&self.0, f)
@@ -446,7 +447,6 @@ where
 impl<S> error::Error for ImplError<S>
 where
     S: State + ?Sized,
-    S::Repr: Debug,
 {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         self.0
@@ -477,7 +477,6 @@ where
 impl<S> From<Error<S>> for Error
 where
     S: State,
-    S::Repr: Debug + Send + Sync + 'static,
 {
     fn from(err: Error<S>) -> Self {
         let Err(err) = match_else!(rtti::concretize::<Error<S>, Error<()>>(err),
@@ -526,9 +525,8 @@ where
 impl<E, S, F, L> Builder<E, S, F, L>
 where
     F: PayloadFn,
-    F::Output: Display + Send + Sync + 'static,
-    S: State + ?Sized,
     E: error::Error + Send + Sync + 'static,
+    S: State + ?Sized,
     L: Context + ?Sized,
 {
     /// Materializes the builder into an [`Error<S>`].
@@ -540,7 +538,6 @@ where
 impl<E, S, F, L> From<Builder<E, S, F, L>> for Error<S>
 where
     F: PayloadFn,
-    F::Output: Display + Send + Sync + 'static,
     E: error::Error + Send + Sync + 'static,
     S: State + ?Sized,
     L: Context + ?Sized,
@@ -568,33 +565,11 @@ where
     }
 }
 
-impl<E, S, F, L> From<Builder<E, Stateless, F, L>> for Error<S>
-where
-    F: PayloadFn,
-    F::Output: Display + Send + Sync + 'static,
-    E: error::Error + Send + Sync + 'static,
-    S: State,
-    S::Repr: Default,
-    L: Context + ?Sized,
-{
-    fn from(value: Builder<E, Stateless, F, L>) -> Self {
-        Builder::<E, S, F, L> {
-            err: value.err,
-            state: S::Repr::default(),
-            payload_fn: value.payload_fn,
-            context: PhantomData,
-        }
-        .into()
-    }
-}
-
 impl<E, S, F, L> From<Builder<E, S, F, L>> for Error
 where
     F: PayloadFn,
-    F::Output: Display + Send + Sync + 'static,
     E: error::Error + Send + Sync + 'static,
     S: State,
-    S::Repr: Debug + Send + Sync,
     L: Context + ?Sized,
 {
     fn from(value: Builder<E, S, F, L>) -> Self {
@@ -613,18 +588,72 @@ where
             (false, _, _, _) => Error(RawError::new_boxed::<_, _, L>(
                 (),
                 value.err,
-                payload::Empty::new(),
+                value.payload_fn.call(),
             )),
             _ => Error(RawError::new_boxed::<_, _, context::Blank>(
                 (),
                 ImplError::<S>(RawError::new_boxed::<_, _, L>(
                     value.state,
                     value.err,
-                    payload::Empty::new(),
+                    value.payload_fn.call(),
                 )),
                 payload::Empty::new(),
             )),
         }
+    }
+}
+
+impl<E, S, F, L> From<Builder<E, Stateless, F, L>> for Error<S>
+where
+    F: PayloadFn,
+    E: error::Error + Send + Sync + 'static,
+    S: State,
+    S::Repr: Default,
+    L: Context + ?Sized,
+{
+    fn from(value: Builder<E, Stateless, F, L>) -> Self {
+        let has_state = rtti::is_same_ty::<S::Repr, ()>();
+        let has_context = rtti::is_same_ty::<L, context::Blank>();
+        let has_error = rtti::is_same_ty::<E, Nae>();
+        let has_payload = rtti::is_same_ty::<F::Output, payload::Empty>();
+
+        match (has_state, has_context, has_error, has_payload) {
+            (true, false, false, false) => {
+                Error(RawError::<S::Repr>::new_boxed::<_, _, context::Blank>(
+                    S::Repr::default(),
+                    Nae::new(),
+                    payload::Empty::new(),
+                ))
+            }
+            (false, true, false, false) => {
+                let Ok(body) = match_else!(rtti::concretize::<_, RawError<S::Repr>>(RawError::new_const::<L>()),
+                    Err(_) => unreachable!(),
+                );
+                Error(body)
+            }
+            _ => Error(RawError::new_boxed::<_, _, L>(
+                S::Repr::default(),
+                value.err,
+                value.payload_fn.call(),
+            )),
+        }
+    }
+}
+
+impl<S1, S, F, L> From<Builder<Error<S1>, S, F, L>> for Error<S>
+where
+    S1: State + ?Sized,
+    F: PayloadFn,
+    S: State + ?Sized,
+    S::Repr: Default,
+    L: Context + ?Sized,
+{
+    fn from(value: Builder<Error<S1>, S, F, L>) -> Self {
+        Error(RawError::new_boxed::<_, _, L>(
+            value.state,
+            value.err.erase(),
+            value.payload_fn.call(),
+        ))
     }
 }
 
@@ -658,14 +687,16 @@ pub trait BuilderExt: Sized {
     type L: Literal + ?Sized;
 
     /// Attaches a literal context identified by its type.
-    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>>;
+    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>>
+    where
+        L: Context;
 
     /// Attaches a static literal context.
     ///
     /// For dynamic content, use [`with_payload`][Self::with_payload] instead.
     fn with_context<L>(self, _ty: L) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>>
     where
-        Self: Sized,
+        L: Context,
     {
         self.with_context_ty::<L>()
     }
@@ -687,7 +718,10 @@ pub trait BuilderExt: Sized {
     fn with_payload<P>(
         self,
         payload: P,
-    ) -> Self::Result<Builder<Self::E, Self::S, Immediate<P>, Self::L>> {
+    ) -> Self::Result<Builder<Self::E, Self::S, Immediate<P>, Self::L>>
+    where
+        P: Display + Send + Sync + 'static,
+    {
         self.with_payload_fn(Immediate(payload))
     }
 }
@@ -701,9 +735,7 @@ pub trait ErrorExt {
     fn build_error(self) -> Self::Result<Error<Self::S>>;
 
     /// Materializes and then erases the state, returning an opaque `impl Error`.
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>
-    where
-        <Self::S as State>::Repr: Debug + Send + Sync;
+    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>;
 }
 
 impl<T, E1> StateExt for result::Result<T, E1> {
@@ -722,7 +754,7 @@ impl<T, E1> ContextExt for result::Result<T, E1> {
 
     fn or_context<L>(self, _ty: L) -> Self::Result<Error>
     where
-        L: Literal,
+        L: Context,
     {
         self.map_err(|_| Error(RawError::new_const::<L>()))
     }
@@ -739,7 +771,10 @@ where
     type F = Immediate<payload::Empty>;
     type L = context::Blank;
 
-    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>> {
+    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>>
+    where
+        L: Context,
+    {
         self.map_err(|err| Builder {
             err,
             context: PhantomData,
@@ -751,6 +786,57 @@ where
     fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F, Self::L>>
     where
         S: State + Sized,
+    {
+        self.map_err(|err| Builder {
+            err,
+            context: PhantomData,
+            state: state.into_repr(),
+            payload_fn: Immediate(payload::Empty::new()),
+        })
+    }
+
+    fn with_payload_fn<F>(
+        self,
+        payload_fn: F,
+    ) -> Self::Result<Builder<Self::E, Self::S, F, Self::L>>
+    where
+        F: PayloadFn,
+    {
+        self.map_err(|err| Builder {
+            err,
+            context: PhantomData,
+            state: (),
+            payload_fn,
+        })
+    }
+}
+
+impl<T, S1> BuilderExt for result::Result<T, Error<S1>>
+where
+    S1: State + ?Sized,
+{
+    type Result<E> = result::Result<T, E>;
+
+    type E = Error<S1>;
+    type S = Stateless;
+    type F = Immediate<payload::Empty>;
+    type L = context::Blank;
+
+    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>>
+    where
+        L: Context,
+    {
+        self.map_err(|err| Builder {
+            err,
+            context: PhantomData,
+            state: (),
+            payload_fn: Immediate(payload::Empty::new()),
+        })
+    }
+
+    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F, Self::L>>
+    where
+        S: State,
     {
         self.map_err(|err| Builder {
             err,
@@ -789,7 +875,10 @@ where
     type F = F1;
     type L = L1;
 
-    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>> {
+    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>>
+    where
+        L: Context,
+    {
         Builder {
             err: self.err,
             context: PhantomData,
@@ -800,7 +889,7 @@ where
 
     fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F, Self::L>>
     where
-        S: State + Sized,
+        S: State,
     {
         Builder {
             state: state.into_repr(),
@@ -839,7 +928,10 @@ where
     type F = F1;
     type L = L1;
 
-    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>> {
+    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>>
+    where
+        L: Context,
+    {
         self.map_err(|err| Builder {
             err: err.err,
             context: PhantomData,
@@ -850,7 +942,7 @@ where
 
     fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F, Self::L>>
     where
-        S: State + Sized,
+        S: State,
     {
         self.map_err(|err| Builder {
             state: state.into_repr(),
@@ -879,7 +971,6 @@ where
 impl<S> ErrorExt for Error<S>
 where
     S: State + ?Sized,
-    S::Repr: Debug + Send + Sync,
 {
     type Result<E> = E;
     type S = S;
@@ -888,21 +979,16 @@ where
         self
     }
 
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>
-    where
-        <Self::S as State>::Repr: Debug + Send + Sync,
-    {
+    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
         self.erase()
     }
 }
 
 impl<E1, S, F, L> ErrorExt for Builder<E1, S, F, L>
 where
-    F: PayloadFn,
-    F::Output: Display + Send + Sync + 'static,
     E1: error::Error + Send + Sync + 'static,
+    F: PayloadFn,
     S: State + ?Sized,
-    <S as State>::Repr: Debug,
     L: Context + ?Sized,
 {
     type Result<E> = E;
@@ -912,20 +998,16 @@ where
         self.into()
     }
 
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>
-    where
-        <Self::S as State>::Repr: Debug + Send + Sync,
-    {
+    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
         self.build_error().erase()
     }
 }
 
-impl<S, F, L> ErrorExt for Builder<Error, S, F, L>
+impl<S1, S, F, L> ErrorExt for Builder<Error<S1>, S, F, L>
 where
+    S1: State + ?Sized,
     F: PayloadFn,
-    F::Output: Display + Send + Sync + 'static,
     S: State + ?Sized,
-    <S as State>::Repr: Debug + 'static,
     L: Context + ?Sized,
 {
     type Result<E> = E;
@@ -941,21 +1023,16 @@ where
         .build_error()
     }
 
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>
-    where
-        <Self::S as State>::Repr: Debug + Send + Sync,
-    {
+    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
         self.build_error().erase()
     }
 }
 
 impl<T, E1, S, F, L> ErrorExt for result::Result<T, Builder<E1, S, F, L>>
 where
-    F: PayloadFn,
-    F::Output: Display + Send + Sync + 'static,
     E1: error::Error + Send + Sync + 'static,
+    F: PayloadFn,
     S: State + ?Sized,
-    <S as State>::Repr: Debug + 'static,
     L: Context + ?Sized,
 {
     type Result<E> = result::Result<T, E>;
@@ -965,10 +1042,7 @@ where
         self.map_err(Error::from)
     }
 
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>
-    where
-        <Self::S as State>::Repr: Debug + Send + Sync,
-    {
+    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
         self.build_error().map_err(|err| err.erase())
     }
 }
@@ -976,11 +1050,8 @@ where
 impl<T, S1, S, F, L> ErrorExt for result::Result<T, Builder<Error<S1>, S, F, L>>
 where
     S1: State + ?Sized,
-    S1::Repr: Debug + Send + Sync,
     F: PayloadFn,
-    F::Output: Display + Send + Sync + 'static,
     S: State + ?Sized,
-    <S as State>::Repr: Debug + 'static,
     L: Context + ?Sized,
 {
     type Result<E> = result::Result<T, E>;
@@ -998,10 +1069,7 @@ where
         })
     }
 
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>
-    where
-        <Self::S as State>::Repr: Debug + Send + Sync,
-    {
+    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
         self.build_error().map_err(|err| err.erase())
     }
 }
@@ -1017,10 +1085,7 @@ where
         self.map_err(Error::from)
     }
 
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>
-    where
-        <Self::S as State>::Repr: Debug + Send + Sync,
-    {
+    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
         self.build_error().map_err(|err| err.erase())
     }
 }
@@ -1028,7 +1093,6 @@ where
 impl<T, S> ErrorExt for result::Result<T, Error<S>>
 where
     S: State,
-    S::Repr: Debug + Send + Sync,
 {
     type Result<E> = result::Result<T, E>;
     type S = S;
@@ -1037,10 +1101,7 @@ where
         self
     }
 
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>
-    where
-        <Self::S as State>::Repr: Debug + Send + Sync,
-    {
+    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
         self.map_err(|err| err.erase())
     }
 }
@@ -1061,7 +1122,7 @@ impl<T> ContextExt for Option<T> {
 
     fn or_context<L>(self, _ty: L) -> Self::Result<Error>
     where
-        L: Literal,
+        L: Context,
     {
         self.ok_or(Error(RawError::new_const::<L>()))
     }
@@ -1075,7 +1136,10 @@ impl<T> BuilderExt for Option<T> {
     type F = Immediate<payload::Empty>;
     type L = context::Blank;
 
-    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>> {
+    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>>
+    where
+        L: Context,
+    {
         self.ok_or(Builder {
             err: Nae::new(),
             context: PhantomData,
@@ -1086,7 +1150,7 @@ impl<T> BuilderExt for Option<T> {
 
     fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F, Self::L>>
     where
-        S: State + Sized,
+        S: State,
     {
         self.ok_or(Builder {
             state: state.into_repr(),

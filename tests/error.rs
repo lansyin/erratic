@@ -109,3 +109,17 @@ fn into_boxed_error() {
     let boxed: Box<dyn std::error::Error + Send + Sync + 'static> = err.into();
     assert_eq!(boxed.to_string(), "oops");
 }
+
+#[test]
+fn wrap_self() -> Result<()> {
+    Ok::<(), Error>(()).with_context(literal!("while testing wrap_self"))?;
+    Ok::<(), Error>(())
+        .with_context(literal!("while testing wrap_self"))
+        .build_error()?;
+    Ok::<(), Error>(())
+        .with_context(literal!("while testing wrap_self"))
+        .build_error()
+        .with_context(literal!("while testing wrap_self with nested error"))?;
+
+    Ok(())
+}
