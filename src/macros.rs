@@ -162,26 +162,19 @@ macro_rules! __priv_mkerr_kvs {
         $crate::__priv_mkerr_kvs!(@sort[$(state=$s)?, $(context=$c)?, $(payload=$p)?, error=$error] $($key=$value,)*)
     };
     (@sort[$(state=$s:expr)?, $(context=$c:expr)?, $(payload=$p:expr)?, $(error=$e:expr)?]) => {{
-        #[allow(unused_imports)]
-        use $crate::BuilderExt;
-
-        let builder = ($crate::macros::__priv_reexport::std::option::Option::None::<()>)
-            $(.ok_or($e))?
-            $(.with_state($s))?
-            $(.with_context($crate::literal!($c)))?
-            $(.with_payload($p))?
-            .unwrap_err();
-        $crate::__priv_mkerr_kvs!(@untype[$($s)?] builder)
+        let builder = ($crate::macros::__priv_reexport::std::option::Option::None::<()>);
+        $(let builder = builder.ok_or($e);)?
+        $(let builder = $crate::BuilderExt::with_state(builder, $s);)?
+        $(let builder = $crate::BuilderExt::with_context(builder, $crate::literal!($c));)?
+        $(let builder = $crate::BuilderExt::with_payload(builder, $p);)?
+        $crate::__priv_mkerr_kvs!(@infer[$($s)?] builder.unwrap_err())
     }};
-    (@untype[] $builder:ident) => {{
-        $crate::Error::<_>::from($builder)
-    }};
-    (@untype[$state:expr] $builder:ident) => {{
-        #[allow(unused_imports)]
-        use $crate::ErrorExt;
-
-        ($builder).build_error()
-    }};
+    (@infer[] $builder:expr) => {
+        $crate::macros::__priv_reexport::std::convert::Into::<$crate::Error::<_>>::into($builder)
+    };
+    (@infer[$state:expr] $builder:expr) => {
+        $crate::ErrorExt::build_error($builder)
+    };
 }
 
 /// Shorthand for [`Err(mkerr!(..))`][`mkerr!`].
