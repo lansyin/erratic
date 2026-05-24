@@ -573,10 +573,10 @@ where
     L: Context + ?Sized,
 {
     fn from(value: Builder<E, S, F, L>) -> Self {
-        let has_state = rtti::is_same_ty::<S::Repr, ()>();
-        let has_context = rtti::is_same_ty::<L, context::Blank>();
-        let has_error = rtti::is_same_ty::<E, Nae>();
-        let has_payload = rtti::is_same_ty::<F::Output, payload::Empty>();
+        let has_state = !rtti::is_same_ty::<S::Repr, ()>();
+        let has_context = !rtti::is_same_ty::<L, context::Blank>();
+        let has_error = !rtti::is_same_ty::<E, Nae>();
+        let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
 
         match (has_state, has_context, has_error, has_payload) {
             (true, false, false, false) => Error(RawError::new_boxed::<_, _, L>(
@@ -612,10 +612,10 @@ where
     L: Context + ?Sized,
 {
     fn from(value: Builder<E, Stateless, F, L>) -> Self {
-        let has_state = rtti::is_same_ty::<S::Repr, ()>();
-        let has_context = rtti::is_same_ty::<L, context::Blank>();
-        let has_error = rtti::is_same_ty::<E, Nae>();
-        let has_payload = rtti::is_same_ty::<F::Output, payload::Empty>();
+        let has_state = !rtti::is_same_ty::<S::Repr, ()>();
+        let has_context = !rtti::is_same_ty::<L, context::Blank>();
+        let has_error = !rtti::is_same_ty::<E, Nae>();
+        let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
 
         match (has_state, has_context, has_error, has_payload) {
             (true, false, false, false) => {
