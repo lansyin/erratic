@@ -341,7 +341,7 @@ impl<S> RawError<S> {
             SelectRef::Const(_body) => unsafe {
                 // Safety: The type is confirmed to be `()`.
                 // The dangling pointer is never read; only its address is materialized.
-                assert_eq!(TypeId::of::<S>(), TypeId::of::<()>());
+                assert!(rtti::is_same_ty::<S, ()>());
                 &*(&() as *const _ as *const S)
             },
             SelectRef::Inline(_body) => unsafe {
@@ -363,7 +363,7 @@ impl<S> RawError<S> {
             SelectOwn::Const(_body) => unsafe {
                 // Safety: The type is confirmed to be `()`.
                 // `MaybeUninit::uninit().assume_init()` is valid for ZSTs.
-                assert_eq!(TypeId::of::<S>(), TypeId::of::<()>());
+                assert!(rtti::is_same_ty::<S, ()>());
                 #[allow(clippy::uninit_assumed_init)]
                 MaybeUninit::<S>::uninit().assume_init()
             },
@@ -406,7 +406,7 @@ impl<S> RawError<S> {
         match self.select_own() {
             SelectOwn::Const(_body) => (None, None, unsafe {
                 // Safety: The type of state must be `()` when the kind is `Const`. `
-                assert_eq!(TypeId::of::<S>(), TypeId::of::<()>());
+                assert!(rtti::is_same_ty::<S, ()>());
                 #[allow(clippy::uninit_assumed_init)]
                 MaybeUninit::<S>::uninit().assume_init()
             }),
@@ -657,7 +657,7 @@ where
     ) -> Option<Box<dyn error::Error + Send + Sync + 'static>> {
         let this = unsafe { this.cast::<Self>() };
         let Align4(this) = *unsafe { this.into_boxed() };
-        if TypeId::of::<E>() == TypeId::of::<Nae>() {
+        if rtti::is_same_ty::<E, Nae>() {
             None
         } else {
             Some(Box::new(this.source))
@@ -722,7 +722,7 @@ where
         let source = unsafe { this.project(|body| &raw const (*body).source) };
         let err = source.deref();
 
-        if TypeId::of::<E>() == TypeId::of::<Nae>() {
+        if rtti::is_same_ty::<E, Nae>() {
             None
         } else {
             Some(err as &(dyn error::Error + Send + Sync + 'static))
@@ -739,7 +739,7 @@ where
         let this = unsafe { this.cast::<Self>() };
         let payload = unsafe { this.project(|body| &raw const (*body).payload) };
 
-        if TypeId::of::<P>() == TypeId::of::<payload::Empty>() {
+        if rtti::is_same_ty::<P, payload::Empty>() {
             None
         } else {
             Some(payload.deref() as &(dyn Display + Send + Sync + 'static))
@@ -755,7 +755,7 @@ where
         let this = unsafe { this.cast::<Self>() };
         let context = unsafe { this.project(|body| &raw const (*body).context) };
 
-        if TypeId::of::<C>() == TypeId::of::<context::Unit>() {
+        if rtti::is_same_ty::<C, context::Unit>() {
             None
         } else {
             Some(context.deref() as &(dyn Display + Send + Sync + 'static))
@@ -833,8 +833,8 @@ where
         format_debug(
             f,
             &self.state,
-            (TypeId::of::<C>() != TypeId::of::<context::Unit>()).then_some(&self.context),
-            (TypeId::of::<P>() != TypeId::of::<payload::Empty>()).then_some(&self.payload),
+            (!rtti::is_same_ty::<C, context::Unit>()).then_some(&self.context),
+            (!rtti::is_same_ty::<P, payload::Empty>()).then_some(&self.payload),
             Some(&self.source),
         )
     }
@@ -851,8 +851,8 @@ where
         format_display(
             f,
             &self.state,
-            (TypeId::of::<C>() != TypeId::of::<context::Unit>()).then_some(&self.context),
-            (TypeId::of::<P>() != TypeId::of::<payload::Empty>()).then_some(&self.payload),
+            (!rtti::is_same_ty::<C, context::Unit>()).then_some(&self.context),
+            (!rtti::is_same_ty::<P, payload::Empty>()).then_some(&self.payload),
             Some(&self.source),
         )
     }
@@ -866,7 +866,7 @@ where
     C: Display + Send + Sync + 'static,
 {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        (TypeId::of::<E>() != TypeId::of::<Nae>()).then_some(&self.source as _)
+        (!rtti::is_same_ty::<E, Nae>()).then_some(&self.source as _)
     }
 }
 
