@@ -6,7 +6,7 @@ pub trait Literal: 'static {
     const LITERAL: &'static str;
 }
 
-/// A zero-sized context placeholder for [Error][crate::Error].
+/// A zero-sized context placeholder for [Builder][crate::Builder].
 #[derive(Debug)]
 pub struct Blank(#[allow(unused)] [()]);
 
