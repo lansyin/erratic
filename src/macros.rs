@@ -180,8 +180,11 @@ macro_rules! __priv_mkerr_kvs {
 /// Shorthand for [`Err(mkerr!(..))`][`mkerr!`].
 #[macro_export]
 macro_rules! mkres {
-    ($($tt:tt)*) => {
-        $crate::macros::__priv_reexport::std::result::Result::Err($crate::mkerr!($($tt)*))
+    ($($key:ident=$value:expr),+ $(,)?) => {
+        $crate::macros::__priv_reexport::std::result::Result::Err($crate::mkerr!($($key=$value),+))
+    };
+    ($fmt:literal $($args:tt)*) => {
+        $crate::macros::__priv_reexport::std::result::Result::Err($crate::mkerr!($fmt $($args)*))
     };
 }
 
