@@ -149,19 +149,19 @@ macro_rules! mkerr {
 #[macro_export]
 #[doc(hidden)]
 macro_rules! __priv_mkerr_kvs {
-    (@sort[$(state=$s:expr)?, $(context=$c:expr)?, $(payload=$p:expr)?, $(error=$e:expr)?] state=$state:expr, $($key:ident=$value:expr,)*) => {
-        $crate::__priv_mkerr_kvs!(@sort[state=$state, $(context=$c)?, $(payload=$p)?, $(error=$e)?] $($key=$value,)*)
+    (@sort[$($_:expr)?, $($c:expr)?, $($p:expr)?, $($e:expr)?] state=$s:expr, $($k:ident=$v:expr,)*) => {
+        $crate::__priv_mkerr_kvs!(@sort[$s, $($c)?, $($p)?, $($e)?] $($k=$v,)*)
     };
-    (@sort[$(state=$s:expr)?, $(context=$c:expr)?, $(payload=$p:expr)?, $(error=$e:expr)?] context=$context:expr, $($key:ident=$value:expr,)*) => {
-        $crate::__priv_mkerr_kvs!(@sort[$(state=$s)?, context=$context, $(payload=$p)?, $(error=$e)?] $($key=$value,)*)
+    (@sort[$($s:expr)?, $($_:expr)?, $($p:expr)?, $($e:expr)?] context=$c:expr, $($k:ident=$v:expr,)*) => {
+        $crate::__priv_mkerr_kvs!(@sort[$($s)?, $c, $($p)?, $($e)?] $($k=$v,)*)
     };
-    (@sort[$(state=$s:expr)?, $(context=$c:expr)?, $(payload=$p:expr)?, $(error=$e:expr)?] payload=$payload:expr, $($key:ident=$value:expr,)*) => {
-        $crate::__priv_mkerr_kvs!(@sort[$(state=$s)?, $(context=$c)?, payload=$payload, $(error=$e)?] $($key=$value,)*)
+    (@sort[$($s:expr)?, $($c:expr)?, $($_:expr)?, $($e:expr)?] payload=$p:expr, $($k:ident=$v:expr,)*) => {
+        $crate::__priv_mkerr_kvs!(@sort[$($s)?, $($c)?, $p, $($e)?] $($k=$v,)*)
     };
-    (@sort[$(state=$s:expr)?, $(context=$c:expr)?, $(payload=$p:expr)?, $(error=$e:expr)?] error=$error:expr, $($key:ident=$value:expr,)*) => {
-        $crate::__priv_mkerr_kvs!(@sort[$(state=$s)?, $(context=$c)?, $(payload=$p)?, error=$error] $($key=$value,)*)
+    (@sort[$($s:expr)?, $($c:expr)?, $($p:expr)?, $($_:expr)?] error=$e:expr, $($k:ident=$v:expr,)*) => {
+        $crate::__priv_mkerr_kvs!(@sort[$($s)?, $($c)?, $($p)?, $e] $($k=$v,)*)
     };
-    (@sort[$(state=$s:expr)?, $(context=$c:expr)?, $(payload=$p:expr)?, $(error=$e:expr)?]) => {{
+    (@sort[$($s:expr)?, $($c:expr)?, $($p:expr)?, $($e:expr)?]) => {{
         let builder = ($crate::macros::__priv_reexport::std::option::Option::None::<()>);
         $(let builder = builder.ok_or($e);)?
         $(let builder = $crate::BuilderExt::with_state(builder, $s);)?
