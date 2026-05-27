@@ -214,6 +214,14 @@ impl Error {
     pub fn stateless(self) -> Self {
         self
     }
+
+    /// Converts to a state-tagged error without storing any runtime state.
+    pub fn with_phantom_state<S>(self) -> Error<S>
+    where
+        S: State,
+    {
+        Error(self.0.with_phantom_state::<S::Repr>())
+    }
 }
 
 impl<S> Error<S>
@@ -486,6 +494,9 @@ where
     S: State,
 {
     fn from(err: Error<S>) -> Self {
+        if err.state().is_none() {
+            return err.extract_state().unwrap_err();
+        }
         Error(RawError::new_boxed::<_, _, context::Blank>(
             None,
             err.erase(),
@@ -499,11 +510,7 @@ where
     S: State,
 {
     fn from(value: Error) -> Self {
-        Error::<S>(RawError::new_boxed::<_, _, context::Blank>(
-            None,
-            value.erase(),
-            payload::Empty::new(),
-        ))
+        value.with_phantom_state()
     }
 }
 

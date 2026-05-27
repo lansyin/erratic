@@ -138,6 +138,20 @@ impl RawError<Infallible> {
             const_body: ManuallyDrop::new(Align4Ref::new(body, Self::KIND_CONST)),
         }
     }
+
+    /// Converts to a state-tagged error without storing any runtime state.
+    pub fn with_phantom_state<S>(self) -> RawError<S>
+    where
+        S: 'static,
+    {
+        match self.select_own() {
+            SelectOwn::Const(body) => RawError {
+                const_body: ManuallyDrop::new(body),
+            },
+            SelectOwn::Inline(_body) => unreachable!(),
+            SelectOwn::Boxed(body) => RawError { boxed_body: body },
+        }
+    }
 }
 
 impl<S> RawError<S> {
