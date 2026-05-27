@@ -242,12 +242,7 @@ where
         // so `&RawError<S::Repr>` and `&ImplError<S>` have identical layout.
         unsafe { mem::transmute::<&RawError<S::Repr>, &ImplError<S>>(&self.0) }
     }
-}
 
-impl<S> Error<S>
-where
-    S: State + ?Sized,
-{
     /// Creates an `Error` from any [`Error`][std::error::Error].
     ///
     /// Equivalent to `E::into()` via the blanket `From` impl.
@@ -295,12 +290,7 @@ where
             payload,
         ))
     }
-}
 
-impl<S> Error<S>
-where
-    S: State + ?Sized,
-{
     /// Returns a reference to the context, if present.
     pub fn context(&self) -> Option<&(dyn Display + Send + Sync + 'static)> {
         self.0.context()
@@ -1058,6 +1048,54 @@ where
     }
 }
 
+impl<T> BuilderExt for Option<T> {
+    type Result<E> = result::Result<T, E>;
+
+    type E = Nae;
+    type S = Stateless;
+    type F = Immediate<payload::Empty>;
+    type L = context::Blank;
+
+    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>>
+    where
+        L: Context,
+    {
+        self.ok_or(Builder {
+            err: Nae::new(),
+            context: PhantomData,
+            state: None,
+            payload_fn: Immediate(payload::Empty::new()),
+        })
+    }
+
+    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F, Self::L>>
+    where
+        S: State,
+    {
+        self.ok_or(Builder {
+            state: Some(state.into_repr()),
+            err: Nae::new(),
+            context: PhantomData,
+            payload_fn: Immediate(payload::Empty::new()),
+        })
+    }
+
+    fn with_payload_fn<F>(
+        self,
+        payload_fn: F,
+    ) -> Self::Result<Builder<Self::E, Self::S, F, Self::L>>
+    where
+        F: PayloadFn,
+    {
+        self.ok_or(Builder {
+            err: Nae::new(),
+            context: PhantomData,
+            state: None,
+            payload_fn,
+        })
+    }
+}
+
 /// Extension trait for materializing or erasing an error.
 pub trait ErrorExt: Sized {
     type Result<E>;
@@ -1205,53 +1243,5 @@ where
 
     fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
         self.map_err(|err| err.erase())
-    }
-}
-
-impl<T> BuilderExt for Option<T> {
-    type Result<E> = result::Result<T, E>;
-
-    type E = Nae;
-    type S = Stateless;
-    type F = Immediate<payload::Empty>;
-    type L = context::Blank;
-
-    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>>
-    where
-        L: Context,
-    {
-        self.ok_or(Builder {
-            err: Nae::new(),
-            context: PhantomData,
-            state: None,
-            payload_fn: Immediate(payload::Empty::new()),
-        })
-    }
-
-    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F, Self::L>>
-    where
-        S: State,
-    {
-        self.ok_or(Builder {
-            state: Some(state.into_repr()),
-            err: Nae::new(),
-            context: PhantomData,
-            payload_fn: Immediate(payload::Empty::new()),
-        })
-    }
-
-    fn with_payload_fn<F>(
-        self,
-        payload_fn: F,
-    ) -> Self::Result<Builder<Self::E, Self::S, F, Self::L>>
-    where
-        F: PayloadFn,
-    {
-        self.ok_or(Builder {
-            err: Nae::new(),
-            context: PhantomData,
-            state: None,
-            payload_fn,
-        })
     }
 }
