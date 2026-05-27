@@ -124,7 +124,7 @@ macro_rules! literal {
 ///
 /// # Order
 ///
-/// The key-value pairs can be provided in any order.
+/// Key-value pairs can be provided in any order, and the format string must come at the end.
 #[macro_export]
 macro_rules! mkerr {
     ($($key:ident=$value:expr),+ $(, $($fmt:literal $($args:tt)*)?)?) => {
