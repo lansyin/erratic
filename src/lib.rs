@@ -37,8 +37,7 @@
 //!
 //! # Binding State
 //! When propagating an error that requires special handling, you can supply a generic state
-//! alongside it. If the state implements `Default`, other errors can be wrapped and
-//! returned directly via `?` without explicitly setting the state.
+//! alongside it.
 //!
 //! When the state is small enough and none of the source error, context, or payload is attached,
 //! the state is inlined without any heap allocation.
@@ -58,7 +57,7 @@
 //!         .with_state(WriteLog::FileNotFound)? // No alloc.
 //!         .write_all(b"Hello, World!")
 //!         .with_context(literal!("while writing to"))
-//!         .with_payload(filename)?; // Falls back to the default state value.
+//!         .with_payload(filename)?;
 //!     Ok(())
 //! }
 //! ```
@@ -72,15 +71,15 @@
 //! (32-bit platform, little-endian)
 //! (Context Only)
 //! [XXXXXX00|XXXXXXXX|XXXXXXXX|XXXXXXXX]
-//!                                      \
-//!                                       `rodata-> [Context]
-//! (Small State)
+//!                                     \
+//!                                     `rodata-> [Context]
+//! (State Only)
 //! [00000010|     ~    State     ~     ]
 //!
 //! (Otherwise)
 //! [XXXXXX01|XXXXXXXX|XXXXXXXX|XXXXXXXX]
-//!        \
-//!         `heap-> [&'static VTable|State|Error|Payload|Context]
+//!                                     \
+//!                                     `heap-> [VTable|State|Error|Payload|Context]
 //! ```
 //!
 
