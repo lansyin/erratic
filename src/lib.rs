@@ -70,17 +70,17 @@
 //!
 //! ```plaintext
 //! (32-bit platform, little-endian)
-//! (Context)
+//! (Context Only)
 //! [XXXXXX00|XXXXXXXX|XXXXXXXX|XXXXXXXX]
 //!                                      \
-//!                                       `rodata-> [&'static str]
+//!                                       `rodata-> [Context]
 //! (Small State)
 //! [00000010|     ~    State     ~     ]
 //!
 //! (Otherwise)
 //! [XXXXXX01|XXXXXXXX|XXXXXXXX|XXXXXXXX]
 //!        \
-//!         `heap-> [ ~ State ~ |&'static VTable| ~ Error ~ | ~ Payload ~ |&'static str/()]
+//!         `heap-> [&'static VTable|State|Error|Payload|Context]
 //! ```
 //!
 
