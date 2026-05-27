@@ -7,10 +7,11 @@ use std::mem;
 #[test]
 fn from_error_round_trip() {
     let err = mkerr!(error = TestError("oops")).stateless();
-    let parts = err.into_parts::<TestError, TestMessage>();
-    assert!(parts.0.is_some());
-    assert_eq!(parts.0.unwrap().0, "oops");
-    assert!(parts.1.is_none());
+    let (context, payload, source) = err.into_parts::<TestMessage, TestError>();
+    assert!(source.is_some());
+    assert_eq!(source.unwrap().0, "oops");
+    assert!(payload.is_none());
+    assert!(context.is_none());
 }
 
 #[test]
@@ -19,7 +20,8 @@ fn builder_with_error_builds_correctly() {
         .with_context(literal!("context"))
         .with_payload(TestMessage("payload".into()))
         .build();
-    let (source, payload) = err.into_parts::<TestError, TestMessage>();
+    let (context, payload, source) = err.into_parts::<TestMessage, TestError>();
+    assert!(matches!(context, Some("context")));
     assert!(source.is_some());
     assert_eq!(source.as_ref().unwrap().0, "oops");
     assert!(payload.is_some());

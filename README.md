@@ -8,8 +8,10 @@ This library provides `Error<S = Stateless>`, an **optionally** dynamic dispatch
 enabling applications to handle errors uniformly across different contexts.
 
 ## Quick Start
+
 In most cases, `Error` can serve as a drop-in replacement for `Box<dyn Error>`.
 Compared to the latter, it occupies only 1 usize, making the happy path faster.
+
 ```rust
 use erratic::*;
 
@@ -20,6 +22,7 @@ fn write_log(filename: String) -> Result<()> {
 ```
 
 ## Attaching Context & Payload
+
 When constructing an error, you can optionally attach a static context and/or a dynamic payload.
 If attached, their memory is merged into a single allocation when the upstream error is erased.
 If omitted, no extra memory is allocated for them. If only a context is provided, no heap allocation
@@ -39,21 +42,17 @@ fn write_log(filename: String) -> Result<()> {
 ```
 
 ## Binding State
-When propagating an error that requires special handling, you can supply a generic state
-alongside it. If the state implements `Default`, other errors can be wrapped and
-returned directly via `?` without explicitly setting the state.
 
-When the state is small enough and none of the source error, context, or payload is attached,
+When propagating an error that requires special handling, you can supply a generic state
+alongside it. When the state is small enough and none of the source error, context, or payload is attached,
 the state is inlined without any heap allocation.
 
 ```rust
 use erratic::*;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 enum WriteLog {
     FileNotFound,
-    #[default]
-    Other,
 }
 
 fn write_log(filename: String) -> std::result::Result<(), Error<WriteLog>> {
@@ -67,6 +66,7 @@ fn write_log(filename: String) -> std::result::Result<(), Error<WriteLog>> {
 ```
 
 ## Representation
+
 Type-wise, `Error<S>` is an internally tagged union, and it requires pointers to constant or
 heap-allocated data to be aligned to 4 bytes, freeing up the lower 2 bits to encode
 the discriminant. This design allows heap allocation to be avoided when unnecessary.
@@ -86,8 +86,8 @@ the discriminant. This design allows heap allocation to be avoided when unnecess
         `heap-> [ ~ State ~ |&'static VTable| ~ Error ~ | ~ Payload ~ |&'static str/()]
 ```
 
-
 ## Contributing
-Contributions are warmly welcomed! Whether you have a bug report, feature request, or 
-an improvement in mind, feel free to open an issue or submit a pull request. 
+
+Contributions are warmly welcomed! Whether you have a bug report, feature request, or
+an improvement in mind, feel free to open an issue or submit a pull request.
 All ideas—big or small—help make this library better for everyone.

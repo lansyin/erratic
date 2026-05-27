@@ -46,11 +46,9 @@
 //! # use std::{fs::File, io::Write, fmt::Debug};
 //! use erratic::*;
 //!
-//! #[derive(Debug, Default)]
+//! #[derive(Debug)]
 //! enum WriteLog {
 //!     FileNotFound,
-//!     #[default]
-//!     Other,
 //! }
 //!
 //! fn write_log(filename: String) -> std::result::Result<(), Error<WriteLog>> {
@@ -99,7 +97,9 @@ pub mod payload;
 pub mod state;
 
 use std::{
-    self, error,
+    self,
+    convert::Infallible,
+    error,
     fmt::{self, Debug, Display},
     marker::PhantomData,
     mem, result,
@@ -129,7 +129,7 @@ impl Error {
         Builder {
             err,
             context: PhantomData,
-            state: (),
+            state: None,
             payload_fn: Immediate(payload::Empty::new()),
         }
     }
@@ -144,7 +144,7 @@ impl Error {
         Builder {
             err: Nae::new(),
             context: PhantomData,
-            state: state.into_repr(),
+            state: Some(state.into_repr()),
             payload_fn: Immediate(payload::Empty::new()),
         }
     }
@@ -157,7 +157,7 @@ impl Error {
         Builder {
             err: Nae::new(),
             context: PhantomData,
-            state: (),
+            state: None,
             payload_fn: Immediate(payload),
         }
     }
@@ -172,7 +172,7 @@ impl Error {
         Builder {
             err: Nae::new(),
             context: PhantomData,
-            state: (),
+            state: None,
             payload_fn,
         }
     }
@@ -192,7 +192,7 @@ impl Error {
         Builder {
             err: Nae::new(),
             context: PhantomData,
-            state: (),
+            state: None,
             payload_fn: Immediate(payload::Empty::new()),
         }
     }
@@ -200,13 +200,13 @@ impl Error {
     /// Extracts the source error and payload by type.
     ///
     /// Returns `None` when the corresponding requested type do not match.
-    pub fn into_parts<E, P>(self) -> (Option<E>, Option<P>)
+    pub fn into_parts<P, E>(self) -> (Option<&'static str>, Option<P>, Option<E>)
     where
         E: 'static,
         P: 'static,
     {
-        let (source, payload, _) = self.0.into_parts::<E, P>();
-        (source, payload)
+        let (_state, context, payload, source) = self.0.into_parts::<P, E>();
+        (context, payload, source)
     }
 
     /// Helper for type inference when the state is not needed.
@@ -238,7 +238,6 @@ where
 impl<S> Error<S>
 where
     S: State + ?Sized,
-    S::Repr: Default,
 {
     /// Creates an `Error` from any [`Error`][std::error::Error].
     ///
@@ -270,7 +269,7 @@ where
         }
 
         Self(RawError::new_boxed::<_, _, context::Blank>(
-            S::Repr::default(),
+            None,
             Nae::new(),
             payload::Empty::new(),
         ))
@@ -282,7 +281,7 @@ where
         P: Display + Send + Sync + 'static,
     {
         Self(RawError::new_boxed::<_, P, context::Blank>(
-            S::Repr::default(),
+            None,
             Nae::new(),
             payload,
         ))
@@ -372,25 +371,25 @@ where
     }
 
     /// Returns a reference to the attached state.
-    pub fn state(&self) -> &S {
-        S::from_repr_ref(self.0.state())
+    pub fn state(&self) -> Option<&S> {
+        self.0.state().map(S::from_repr_ref)
     }
 
-    /// Consumes `self` and returns the source error, payload, and state.
+    /// Consumes `self` and returns the state, context, payload, and error.
     ///
-    /// Returns `(None, None, state)` when the requested types do not match.
-    pub fn into_parts<E, P>(self) -> (Option<E>, Option<P>, S)
+    /// Returns `None` when the requested types do not match.
+    pub fn into_parts<P, E>(self) -> (Option<S>, Option<&'static str>, Option<P>, Option<E>)
     where
         E: 'static,
         P: 'static,
     {
-        let (source, payload, state) = self.0.into_parts::<E, P>();
-        (source, payload, S::from_repr(state))
+        let (state, context, payload, error) = self.0.into_parts::<P, E>();
+        (state.map(S::from_repr), context, payload, error)
     }
 
     /// Consumes `self` and returns the attached state.
-    pub fn into_state(self) -> S {
-        S::from_repr(self.0.into_state())
+    pub fn into_state(self) -> Option<S> {
+        self.0.into_state().map(S::from_repr)
     }
 }
 
@@ -459,7 +458,6 @@ impl<E, S> From<E> for Error<S>
 where
     E: error::Error + Send + Sync + 'static,
     S: State + ?Sized,
-    S::Repr: Default,
 {
     fn from(err: E) -> Self {
         let Err(err) = match_else!(rtti::concretize::<E, ImplError<S>>(err),
@@ -467,7 +465,7 @@ where
         );
 
         Error(RawError::new_boxed::<_, _, context::Blank>(
-            S::Repr::default(),
+            None,
             err,
             payload::Empty::new(),
         ))
@@ -479,12 +477,8 @@ where
     S: State,
 {
     fn from(err: Error<S>) -> Self {
-        let Err(err) = match_else!(rtti::concretize::<Error<S>, Error<()>>(err),
-            Ok(err_unit) => return Error(err_unit.0),
-        );
-
         Error(RawError::new_boxed::<_, _, context::Blank>(
-            (),
+            None,
             err.erase(),
             payload::Empty::new(),
         ))
@@ -494,11 +488,10 @@ where
 impl<S> From<Error> for Error<S>
 where
     S: State,
-    S::Repr: Default,
 {
     fn from(value: Error) -> Self {
         Error::<S>(RawError::new_boxed::<_, _, context::Blank>(
-            S::Repr::default(),
+            None,
             value.erase(),
             payload::Empty::new(),
         ))
@@ -517,7 +510,7 @@ where
     L: ?Sized,
 {
     err: E,
-    state: S::Repr,
+    state: Option<S::Repr>,
     payload_fn: F,
     context: PhantomData<L>,
 }
@@ -543,13 +536,16 @@ where
     L: Context + ?Sized,
 {
     fn from(value: Builder<E, S, F, L>) -> Self {
-        let has_state = !rtti::is_same_ty::<S::Repr, ()>();
+        let has_state = !rtti::is_same_ty::<S::Repr, Infallible>();
         let has_context = !rtti::is_same_ty::<L, context::Blank>();
         let has_error = !rtti::is_same_ty::<E, Nae>();
         let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
 
         match (has_state, has_context, has_error, has_payload) {
-            (_, false, false, false) => Error::<S>(RawError::new_inline_or_boxed(value.state)),
+            (false, false, false, false) => unreachable!(),
+            (true, false, false, false) => Error::<S>(RawError::new_inline_or_boxed(
+                value.state.expect("checked by has_state"),
+            )),
             (false, true, false, false) => {
                 let Ok(body) = match_else!(rtti::concretize::<_, RawError<S::Repr>>(RawError::new_const::<L>()),
                     Err(_) => unreachable!(),
@@ -573,25 +569,28 @@ where
     L: Context + ?Sized,
 {
     fn from(value: Builder<E, S, F, L>) -> Self {
-        let has_state = !rtti::is_same_ty::<S::Repr, ()>();
+        let has_state = !rtti::is_same_ty::<S::Repr, Infallible>();
         let has_context = !rtti::is_same_ty::<L, context::Blank>();
         let has_error = !rtti::is_same_ty::<E, Nae>();
         let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
 
         match (has_state, has_context, has_error, has_payload) {
+            (false, false, false, false) => unreachable!(),
             (true, false, false, false) => Error(RawError::new_boxed::<_, _, L>(
-                (),
-                ImplError::<S>(RawError::new_inline_or_boxed(value.state)),
+                None,
+                ImplError::<S>(RawError::new_inline_or_boxed(
+                    value.state.expect("checked by has_state"),
+                )),
                 payload::Empty::new(),
             )),
             (false, true, false, false) => Error(RawError::new_const::<L>()),
             (false, _, _, _) => Error(RawError::new_boxed::<_, _, L>(
-                (),
+                None,
                 value.err,
                 value.payload_fn.call(),
             )),
             _ => Error(RawError::new_boxed::<_, _, context::Blank>(
-                (),
+                None,
                 ImplError::<S>(RawError::new_boxed::<_, _, L>(
                     value.state,
                     value.err,
@@ -608,7 +607,6 @@ where
     F: PayloadFn,
     E: error::Error + Send + Sync + 'static,
     S: State,
-    S::Repr: Default,
     L: Context + ?Sized,
 {
     fn from(value: Builder<E, Stateless, F, L>) -> Self {
@@ -620,7 +618,7 @@ where
         match (has_state, has_context, has_error, has_payload) {
             (true, false, false, false) => {
                 Error(RawError::<S::Repr>::new_boxed::<_, _, context::Blank>(
-                    S::Repr::default(),
+                    None,
                     Nae::new(),
                     payload::Empty::new(),
                 ))
@@ -632,7 +630,7 @@ where
                 Error(body)
             }
             _ => Error(RawError::new_boxed::<_, _, L>(
-                S::Repr::default(),
+                None,
                 value.err,
                 value.payload_fn.call(),
             )),
@@ -645,7 +643,6 @@ where
     S1: State + ?Sized,
     F: PayloadFn,
     S: State + ?Sized,
-    S::Repr: Default,
     L: Context + ?Sized,
 {
     fn from(value: Builder<Error<S1>, S, F, L>) -> Self {
@@ -778,7 +775,7 @@ where
         self.map_err(|err| Builder {
             err,
             context: PhantomData,
-            state: (),
+            state: None,
             payload_fn: Immediate(payload::Empty::new()),
         })
     }
@@ -790,7 +787,7 @@ where
         self.map_err(|err| Builder {
             err,
             context: PhantomData,
-            state: state.into_repr(),
+            state: Some(state.into_repr()),
             payload_fn: Immediate(payload::Empty::new()),
         })
     }
@@ -805,7 +802,7 @@ where
         self.map_err(|err| Builder {
             err,
             context: PhantomData,
-            state: (),
+            state: None,
             payload_fn,
         })
     }
@@ -829,7 +826,7 @@ where
         self.map_err(|err| Builder {
             err,
             context: PhantomData,
-            state: (),
+            state: None,
             payload_fn: Immediate(payload::Empty::new()),
         })
     }
@@ -841,7 +838,7 @@ where
         self.map_err(|err| Builder {
             err,
             context: PhantomData,
-            state: state.into_repr(),
+            state: Some(state.into_repr()),
             payload_fn: Immediate(payload::Empty::new()),
         })
     }
@@ -856,7 +853,7 @@ where
         self.map_err(|err| Builder {
             err,
             context: PhantomData,
-            state: (),
+            state: None,
             payload_fn,
         })
     }
@@ -892,7 +889,7 @@ where
         S: State,
     {
         Builder {
-            state: state.into_repr(),
+            state: Some(state.into_repr()),
             err: self.err,
             context: self.context,
             payload_fn: self.payload_fn,
@@ -945,7 +942,7 @@ where
         S: State,
     {
         self.map_err(|err| Builder {
-            state: state.into_repr(),
+            state: Some(state.into_repr()),
             err: err.err,
             context: err.context,
             payload_fn: err.payload_fn,
@@ -1143,7 +1140,7 @@ impl<T> BuilderExt for Option<T> {
         self.ok_or(Builder {
             err: Nae::new(),
             context: PhantomData,
-            state: (),
+            state: None,
             payload_fn: Immediate(payload::Empty::new()),
         })
     }
@@ -1153,7 +1150,7 @@ impl<T> BuilderExt for Option<T> {
         S: State,
     {
         self.ok_or(Builder {
-            state: state.into_repr(),
+            state: Some(state.into_repr()),
             err: Nae::new(),
             context: PhantomData,
             payload_fn: Immediate(payload::Empty::new()),
@@ -1170,7 +1167,7 @@ impl<T> BuilderExt for Option<T> {
         self.ok_or(Builder {
             err: Nae::new(),
             context: PhantomData,
-            state: (),
+            state: None,
             payload_fn,
         })
     }

@@ -9,9 +9,10 @@ use crate::{
 use std::{
     self,
     any::TypeId,
+    convert::Infallible,
     error,
     fmt::{self, Debug, Display},
-    mem::{self, ManuallyDrop, MaybeUninit},
+    mem::{self, ManuallyDrop},
     ptr::NonNull,
     result,
 };
@@ -119,7 +120,7 @@ impl<S> RawError<S> {
     }
 }
 
-impl RawError<()> {
+impl RawError<Infallible> {
     /// Constructs a const-variant [`RawError`] from a typed literal.
     pub fn new_const<L>() -> Self
     where
@@ -153,7 +154,7 @@ impl<S> RawError<S> {
             Ok(this) => return this,
         );
         Self::new_boxed::<Nae, payload::Empty, context::Blank>(
-            state,
+            Some(state),
             Nae::new(),
             payload::Empty::new(),
         )
@@ -163,7 +164,7 @@ impl<S> RawError<S> {
     ///
     /// The source, payload, and context are packed into a single heap allocation
     /// alongside a vtable for type-erased access.
-    pub fn new_boxed<E, P, L>(state: S, source: E, payload: P) -> Self
+    pub fn new_boxed<E, P, L>(state: Option<S>, source: E, payload: P) -> Self
     where
         S: Debug + Send + Sync + 'static,
         E: error::Error + Send + Sync + 'static,
@@ -336,38 +337,28 @@ impl<S> RawError<S> {
     }
 
     /// Returns a shared reference to the stored state.
-    pub fn state(&self) -> &S {
+    pub fn state(&self) -> Option<&S> {
         match self.select_ref() {
-            SelectRef::Const(_body) => unsafe {
-                // Safety: The type is confirmed to be `()`.
-                // The dangling pointer is never read; only its address is materialized.
-                assert!(rtti::is_same_ty::<S, ()>());
-                &*(&() as *const _ as *const S)
-            },
+            SelectRef::Const(_body) => None,
             SelectRef::Inline(_body) => unsafe {
                 // Safety: Access `InlineBody::value` is safe.
-                self.inline_body.borrow_value()
+                Some(self.inline_body.borrow_value())
             },
             SelectRef::Boxed(body) => unsafe {
                 // Safety: Projection from `DynBody` to `DynBody::state` is safe.
                 body.borrow()
                     .project(|body| &raw const (*body).state)
                     .deref()
+                    .as_ref()
             },
         }
     }
 
     /// Consumes `self` and returns the stored state.
-    pub fn into_state(self) -> S {
+    pub fn into_state(self) -> Option<S> {
         match self.select_own() {
-            SelectOwn::Const(_body) => unsafe {
-                // Safety: The type is confirmed to be `()`.
-                // `MaybeUninit::uninit().assume_init()` is valid for ZSTs.
-                assert!(rtti::is_same_ty::<S, ()>());
-                #[allow(clippy::uninit_assumed_init)]
-                MaybeUninit::<S>::uninit().assume_init()
-            },
-            SelectOwn::Inline(body) => body.into_value(),
+            SelectOwn::Const(_body) => None,
+            SelectOwn::Inline(body) => Some(body.into_value()),
             SelectOwn::Boxed(body) => unsafe {
                 // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
                 let vtable = body
@@ -397,20 +388,26 @@ impl<S> RawError<S> {
 
     /// Consumes `self` and extracts the source error and payload by type.
     ///
-    /// Returns `(None, None, state)` if the types do not match or no source/payload exists.
-    pub fn into_parts<E, P>(self) -> (Option<E>, Option<P>, S)
+    /// Returns `None` if the types do not match or no source/payload exists.
+    ///
+    /// # Existence Guarantee
+    /// It's guaranteed that at least one components exist.
+    pub fn into_parts<P, E>(self) -> (Option<S>, Option<&'static str>, Option<P>, Option<E>)
     where
         E: 'static,
         P: 'static,
     {
         match self.select_own() {
-            SelectOwn::Const(_body) => (None, None, unsafe {
-                // Safety: The type of state must be `()` when the kind is `Const`. `
-                assert!(rtti::is_same_ty::<S, ()>());
-                #[allow(clippy::uninit_assumed_init)]
-                MaybeUninit::<S>::uninit().assume_init()
-            }),
-            SelectOwn::Inline(body) => (None, None, body.into_value()),
+            SelectOwn::Const(body) => (
+                None,
+                Some(
+                    // Safety: The project to context is inbound.
+                    unsafe { body.borrow().project(|v| &raw const (*v).context).copied() },
+                ),
+                None,
+                None,
+            ),
+            SelectOwn::Inline(body) => (Some(body.into_value()), None, None, None),
             SelectOwn::Boxed(body) => unsafe {
                 // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
                 let vtable = body
@@ -419,6 +416,7 @@ impl<S> RawError<S> {
                     .copied();
                 let mut err: Option<E> = None;
                 let mut payload: Option<P> = None;
+                let mut context: Option<&'static str> = None;
                 let state = (vtable.into_parts)(
                     body,
                     TypeId::of::<E>(),
@@ -428,9 +426,11 @@ impl<S> RawError<S> {
                     TypeId::of::<P>(),
                     // Safety: Same as above for `payload`.
                     NonNull::new_unchecked(&raw mut payload as *mut ()),
+                    // Safety: Same as above for `context`.
+                    NonNull::new_unchecked(&raw mut context as *mut ()),
                 );
 
-                (err, payload, state)
+                (state, context, payload, err)
             },
         }
     }
@@ -569,7 +569,7 @@ where
     P: 'static,
     C: 'static,
 {
-    state: S,
+    state: Option<S>,
     vtable: &'static DynBodyVTable<S>,
     source: E,
     payload: P,
@@ -589,10 +589,17 @@ struct DynBodyVTable<S>
 where
     S: 'static,
 {
-    into_state: unsafe fn(Align4Own<DynBody<S>>) -> S,
+    into_state: unsafe fn(Align4Own<DynBody<S>>) -> Option<S>,
     into_source:
         unsafe fn(Align4Own<DynBody<S>>) -> Option<Box<dyn error::Error + Send + Sync + 'static>>,
-    into_parts: unsafe fn(Align4Own<DynBody<S>>, TypeId, NonNull<()>, TypeId, NonNull<()>) -> S,
+    into_parts: unsafe fn(
+        Align4Own<DynBody<S>>,
+        TypeId,
+        NonNull<()>,
+        TypeId,
+        NonNull<()>,
+        NonNull<()>,
+    ) -> Option<S>,
     into_boxed_error:
         unsafe fn(Align4Own<DynBody<S>>) -> Box<dyn error::Error + Send + Sync + 'static>,
     source: unsafe fn(Ref<'_, DynBody<S>>) -> Option<&(dyn error::Error + Send + Sync + 'static)>,
@@ -642,7 +649,7 @@ where
     /// - `this` must be a valid `Align4Own` pointing to a heap-allocated `DynBody<S, E, P, C>`.
     /// - The cast to `Self` is valid because the vtable was set to point to this
     ///   monomorphization of `into_state`.
-    unsafe fn into_state(this: Align4Own<DynBody<S>>) -> S {
+    unsafe fn into_state(this: Align4Own<DynBody<S>>) -> Option<S> {
         let this = *unsafe { this.cast::<Self>().into_boxed() };
         this.0.state
     }
@@ -670,15 +677,16 @@ where
     /// # Safety
     ///
     /// - `this` must be a valid `Align4Own` pointing to `DynBody<S, E, P, C>`.
-    /// - `source_dst` and `payload_dst` must be valid, aligned, mutable pointers
-    ///   to `Option<E>` and `Option<P>` respectively, or to types with compatible layout.
+    /// - `source_dst`, `payload_dst`, and `context_dst` must be valid, aligned, mutable
+    ///   pointers to `Option<E>`, `Option<P>`, and `Option<&'static str>` respectively.
     unsafe fn into_parts(
         this: Align4Own<DynBody<S>>,
         source_ty: TypeId,
         source_dst: NonNull<()>,
         payload_ty: TypeId,
         payload_dst: NonNull<()>,
-    ) -> S {
+        context_dst: NonNull<()>,
+    ) -> Option<S> {
         let Align4(this) = *unsafe { this.cast::<Self>().into_boxed() };
         if TypeId::of::<E>() == source_ty {
             // Safety: The caller guarantees `source_dst` points to a valid `Option<E>`.
@@ -689,6 +697,11 @@ where
             // Safety: The caller guarantees `payload_dst` points to a valid `Option<P>`.
             let dst = unsafe { payload_dst.cast::<Option<P>>().as_mut() };
             dst.replace(this.payload);
+        }
+        if !rtti::is_same_ty::<C, context::Unit>() {
+            // Safety: The caller guarantees `context_dst` points to a valid `Option<&'static str>`.
+            let dst = unsafe { context_dst.cast::<Option<C>>().as_mut() };
+            dst.replace(this.context);
         }
         this.state
     }
@@ -832,7 +845,7 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         format_debug(
             f,
-            &self.state,
+            self.state.as_ref(),
             (!rtti::is_same_ty::<C, context::Unit>()).then_some(&self.context),
             (!rtti::is_same_ty::<P, payload::Empty>()).then_some(&self.payload),
             Some(&self.source),
@@ -850,7 +863,7 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         format_display(
             f,
-            &self.state,
+            self.state.as_ref(),
             (!rtti::is_same_ty::<C, context::Unit>()).then_some(&self.context),
             (!rtti::is_same_ty::<P, payload::Empty>()).then_some(&self.payload),
             Some(&self.source),
@@ -872,7 +885,7 @@ where
 
 fn format_debug<S>(
     f: &mut fmt::Formatter<'_>,
-    state: &S,
+    state: Option<&S>,
     context: Option<&(dyn Display + Send + Sync + 'static)>,
     payload: Option<&(dyn Display + Send + Sync + 'static)>,
     source: Option<&(dyn error::Error + Send + Sync + 'static)>,
@@ -898,7 +911,7 @@ where
             while let Some(source) = next_source {
                 next_source = source.source();
 
-                list.entry(&format!("{source:#}"));
+                list.entry(&format!("{source}"));
             }
 
             list.finish()
@@ -908,7 +921,9 @@ where
     let ds = &mut f.debug_struct("Error");
 
     if !rtti::is_same_ty::<S, ()>() {
-        ds.field("state", &state);
+        if let Some(state) = state {
+            ds.field("state", state);
+        }
     }
 
     if let Some(context) = context {
@@ -928,46 +943,70 @@ where
 
 fn format_display<S>(
     f: &mut fmt::Formatter<'_>,
-    state: &S,
+    state: Option<&S>,
     context: Option<&(dyn Display + Send + Sync + 'static)>,
     payload: Option<&(dyn Display + Send + Sync + 'static)>,
-    mut source: Option<&(dyn error::Error + Send + Sync + 'static)>,
+    source: Option<&(dyn error::Error + Send + Sync + 'static)>,
 ) -> fmt::Result
 where
     S: Debug + 'static,
 {
-    let state = format_args!("{:?}", state);
-    let state: Option<&dyn Display> =
-        (!rtti::is_same_ty::<S, ()>()).then_some(&state as &dyn Display);
+    struct DebugAsDisplay<'a>(pub &'a dyn Debug);
+
+    impl<'a> Display for DebugAsDisplay<'a> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{:?}", self.0)
+        }
+    }
+
+    let state = state.map(|s| DebugAsDisplay(s));
 
     if f.alternate() {
-        match (state, context, payload, source) {
-            (None, None, None, Some(source)) => return write!(f, "{source:#}"),
+        let mut segments = [
+            state.as_ref().map(|s| s as &dyn Display),
+            context.map(|s| s as _),
+            payload.map(|s| s as _),
+            source.map(|s| s as _),
+        ]
+        .into_iter()
+        .flatten()
+        .peekable();
+
+        while let Some(segment) = segments.next() {
+            write!(f, "{:#}", segment)?;
+
+            if segments.peek().is_some() {
+                write!(f, ": ")?;
+            }
+        }
+
+        Ok(())
+    } else {
+        match (&state, context, payload, source) {
+            (None, None, None, None) => unreachable!(),
+            (None, None, None, Some(err)) => Display::fmt(err, f),
             _ => {
-                source = None;
+                let mut segments = [
+                    state.as_ref().map(|s| s as &dyn Display),
+                    context.map(|s| s as _),
+                    payload.map(|s| s as _),
+                ]
+                .into_iter()
+                .flatten()
+                .peekable();
+
+                while let Some(segment) = segments.next() {
+                    write!(f, "{}", segment)?;
+
+                    if segments.peek().is_some() {
+                        write!(f, ": ")?;
+                    }
+                }
+
+                Ok(())
             }
         }
     }
-
-    let mut segments = [
-        state,
-        context.map(|s| s as _),
-        payload.map(|s| s as _),
-        source.map(|s| s as _),
-    ]
-    .into_iter()
-    .flatten()
-    .peekable();
-
-    while let Some(segment) = segments.next() {
-        write!(f, "{}", segment)?;
-
-        if segments.peek().is_some() {
-            write!(f, ": ")?;
-        }
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -979,6 +1018,7 @@ mod tests {
         payload,
     };
     use std::{
+        convert::Infallible,
         error,
         fmt::{self, Display},
         mem,
@@ -1019,7 +1059,7 @@ mod tests {
 
     #[test]
     fn kind_discriminates_const() {
-        let err = RawError::<()>::new_const::<TestContext>();
+        let err = RawError::new_const::<TestContext>();
         assert_eq!(err.kind(), RawError::<()>::KIND_CONST);
     }
 
@@ -1031,7 +1071,11 @@ mod tests {
 
     #[test]
     fn kind_discriminates_boxed() {
-        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty::new());
+        let err = RawError::new_boxed::<_, _, Blank>(
+            None::<Infallible>,
+            TestError("oops"),
+            payload::Empty::new(),
+        );
         assert_eq!(err.kind(), RawError::<()>::KIND_BOXED);
     }
 
@@ -1039,7 +1083,7 @@ mod tests {
 
     #[test]
     fn const_variant_context() {
-        let err = RawError::<()>::new_const::<TestContext>();
+        let err = RawError::new_const::<TestContext>();
         let ctx = err.context();
         assert!(ctx.is_some());
         assert_eq!(ctx.unwrap().to_string(), "test context");
@@ -1047,22 +1091,21 @@ mod tests {
 
     #[test]
     fn const_variant_source_is_none() {
-        let err = RawError::<()>::new_const::<TestContext>();
+        let err = RawError::new_const::<TestContext>();
         assert!(err.source().is_none());
     }
 
     #[test]
     fn const_variant_payload_is_none() {
-        let err = RawError::<()>::new_const::<TestContext>();
+        let err = RawError::new_const::<TestContext>();
         assert!(err.payload().is_none());
     }
 
     #[test]
     fn const_variant_into_state() {
-        let err = RawError::<()>::new_const::<TestContext>();
+        let err = RawError::new_const::<TestContext>();
         let state = err.into_state();
-        // `()` is the only valid state for const variant
-        assert_eq!(state, ());
+        assert!(matches!(state, None));
     }
 
     // --- Inline variant ---
@@ -1070,13 +1113,13 @@ mod tests {
     #[test]
     fn inline_variant_state() {
         let err = RawError::new_inline(42u16).unwrap();
-        assert_eq!(*err.state(), 42);
+        assert!(matches!(err.state(), Some(42)));
     }
 
     #[test]
     fn inline_variant_into_state() {
         let err = RawError::new_inline(42u16).unwrap();
-        assert_eq!(err.into_state(), 42);
+        assert!(matches!(err.state(), Some(42)));
     }
 
     #[test]
@@ -1101,7 +1144,11 @@ mod tests {
 
     #[test]
     fn boxed_variant_source() {
-        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty::new());
+        let err = RawError::new_boxed::<_, _, Blank>(
+            None::<Infallible>,
+            TestError("oops"),
+            payload::Empty::new(),
+        );
         let src = err.source();
         assert!(src.is_some());
         assert_eq!(src.unwrap().to_string(), "oops");
@@ -1109,7 +1156,11 @@ mod tests {
 
     #[test]
     fn boxed_variant_downcast_source() {
-        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty::new());
+        let err = RawError::new_boxed::<_, _, Blank>(
+            None::<Infallible>,
+            TestError("oops"),
+            payload::Empty::new(),
+        );
         let downcasted = err.downcast_source_ref::<TestError>();
         assert!(downcasted.is_some());
         assert_eq!(downcasted.unwrap().0, "oops");
@@ -1117,15 +1168,22 @@ mod tests {
 
     #[test]
     fn boxed_variant_downcast_source_wrong_type() {
-        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty::new());
+        let err = RawError::new_boxed::<_, _, Blank>(
+            None::<Infallible>,
+            TestError("oops"),
+            payload::Empty::new(),
+        );
         let downcasted = err.downcast_source_ref::<String>();
         assert!(downcasted.is_none());
     }
 
     #[test]
     fn boxed_variant_downcast_source_mut() {
-        let mut err =
-            RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty::new());
+        let mut err = RawError::new_boxed::<_, _, Blank>(
+            None::<Infallible>,
+            TestError("oops"),
+            payload::Empty::new(),
+        );
         {
             let downcasted = err.downcast_source_mut::<TestError>();
             assert!(downcasted.is_some());
@@ -1137,7 +1195,11 @@ mod tests {
 
     #[test]
     fn boxed_variant_payload() {
-        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), TestPayload(42));
+        let err = RawError::new_boxed::<_, _, Blank>(
+            None::<Infallible>,
+            TestError("oops"),
+            TestPayload(42),
+        );
         let pl = err.payload();
         assert!(pl.is_some());
         assert_eq!(pl.unwrap().to_string(), "payload(42)");
@@ -1145,7 +1207,11 @@ mod tests {
 
     #[test]
     fn boxed_variant_downcast_payload() {
-        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), TestPayload(42));
+        let err = RawError::new_boxed::<_, _, Blank>(
+            None::<Infallible>,
+            TestError("oops"),
+            TestPayload(42),
+        );
         let downcasted = err.downcast_payload_ref::<TestPayload>();
         assert!(downcasted.is_some());
         assert_eq!(downcasted.unwrap().0, 42);
@@ -1153,8 +1219,11 @@ mod tests {
 
     #[test]
     fn boxed_variant_context() {
-        let err =
-            RawError::new_boxed::<_, _, TestContext>((), TestError("oops"), payload::Empty::new());
+        let err = RawError::new_boxed::<_, _, TestContext>(
+            None::<Infallible>,
+            TestError("oops"),
+            payload::Empty::new(),
+        );
         let ctx = err.context();
         assert!(ctx.is_some());
         assert_eq!(ctx.unwrap().to_string(), "test context");
@@ -1163,14 +1232,19 @@ mod tests {
     #[test]
     fn boxed_variant_nae_source_is_none() {
         // When source is `Nae`, `.source()` should return `None`.
-        let err = RawError::new_boxed::<_, _, Blank>(42u32, Nae::new(), payload::Empty::new());
+        let err =
+            RawError::new_boxed::<_, _, Blank>(Some(42u32), Nae::new(), payload::Empty::new());
         assert!(err.source().is_none());
-        assert_eq!(*err.state(), 42);
+        assert!(matches!(err.state(), Some(42)));
     }
 
     #[test]
     fn boxed_variant_empty_payload_is_none() {
-        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty::new());
+        let err = RawError::new_boxed::<_, _, Blank>(
+            None::<Infallible>,
+            TestError("oops"),
+            payload::Empty::new(),
+        );
         assert!(err.payload().is_none());
     }
 
@@ -1178,7 +1252,11 @@ mod tests {
 
     #[test]
     fn boxed_variant_into_source_returns_boxed_error() {
-        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty::new());
+        let err = RawError::new_boxed::<_, _, Blank>(
+            None::<Infallible>,
+            TestError("oops"),
+            payload::Empty::new(),
+        );
         let src = err.into_source();
         assert!(src.is_some());
         assert_eq!(src.unwrap().to_string(), "oops");
@@ -1186,7 +1264,11 @@ mod tests {
 
     #[test]
     fn boxed_variant_into_source_nae_returns_none() {
-        let err = RawError::new_boxed::<_, _, Blank>((), Nae::new(), payload::Empty::new());
+        let err = RawError::new_boxed::<_, _, Blank>(
+            None::<Infallible>,
+            Nae::new(),
+            payload::Empty::new(),
+        );
         assert!(err.into_source().is_none());
     }
 
@@ -1194,40 +1276,48 @@ mod tests {
 
     #[test]
     fn boxed_variant_into_parts_matches_types() {
-        let err =
-            RawError::new_boxed::<_, _, TestContext>("state", TestError("oops"), TestPayload(99));
-        let (source, payload, state) = err.into_parts::<TestError, TestPayload>();
-        assert_eq!(state, "state");
+        let err = RawError::new_boxed::<_, _, TestContext>(
+            Some("state"),
+            TestError("oops"),
+            TestPayload(99),
+        );
+        let (state, context, payload, source) = err.into_parts::<TestPayload, TestError>();
+        assert!(matches!(state, Some("state")));
         assert!(source.is_some());
         assert_eq!(source.unwrap().0, "oops");
         assert!(payload.is_some());
         assert_eq!(payload.unwrap().0, 99);
+        assert!(matches!(context, Some(TestContext::LITERAL)))
     }
 
     #[test]
     fn boxed_variant_into_parts_wrong_source_type() {
-        let err = RawError::new_boxed::<_, _, Blank>((), TestError("oops"), payload::Empty::new());
-        let (source, payload, _) = err.into_parts::<String, payload::Empty>();
+        let err = RawError::new_boxed::<_, _, Blank>(
+            None::<Infallible>,
+            TestError("oops"),
+            payload::Empty::new(),
+        );
+        let (_, _, payload, source) = err.into_parts::<payload::Empty, String>();
         assert!(source.is_none());
         assert!(payload.is_some());
     }
 
     #[test]
     fn const_variant_into_parts() {
-        let err = RawError::<()>::new_const::<TestContext>();
-        let (source, payload, state) = err.into_parts::<TestError, TestPayload>();
+        let err = RawError::new_const::<TestContext>();
+        let (state, _, payload, source) = err.into_parts::<TestPayload, TestError>();
         assert!(source.is_none());
         assert!(payload.is_none());
-        assert_eq!(state, ());
+        assert_eq!(state, None);
     }
 
     #[test]
     fn inline_variant_into_parts() {
         let err = RawError::new_inline(42u16).unwrap();
-        let (source, payload, state) = err.into_parts::<TestError, TestPayload>();
+        let (state, _, payload, source) = err.into_parts::<TestPayload, TestError>();
         assert!(source.is_none());
         assert!(payload.is_none());
-        assert_eq!(state, 42);
+        assert!(matches!(state, Some(42)));
     }
 
     // --- Drop safety (checked via sanitizer / basic leak check) ---
@@ -1257,7 +1347,11 @@ mod tests {
         impl error::Error for DropWatch {}
 
         {
-            let _err = RawError::new_boxed::<_, _, Blank>((), DropWatch, payload::Empty::new());
+            let _err = RawError::new_boxed::<_, _, Blank>(
+                None::<Infallible>,
+                DropWatch,
+                payload::Empty::new(),
+            );
         } // drop here
         assert!(DROPPED.load(Ordering::SeqCst));
     }
@@ -1265,11 +1359,9 @@ mod tests {
     // --- State round-trip for const variant (S = ()) ---
 
     #[test]
-    fn const_variant_state_is_unit() {
-        let err = RawError::<()>::new_const::<TestContext>();
-        // state() should return a valid &() for const variant
-        let s: &() = err.state();
-        assert_eq!(*s, ());
+    fn const_variant_state_is_none() {
+        let err = RawError::new_const::<TestContext>();
+        assert!(err.state().is_none());
     }
 
     // --- Size checks ---

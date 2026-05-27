@@ -44,6 +44,22 @@ fn display_triple() {
 }
 
 #[test]
+fn display_alt_simple() {
+    assert_eq!(
+        format!("{:#}", generate_simple()),
+        include_str!("ui/display_alt_simple.stderr")
+    );
+}
+
+#[test]
+fn display_alt_triple() {
+    assert_eq!(
+        format!("{:#}", generate_triple()),
+        include_str!("ui/display_alt_triple.stderr")
+    );
+}
+
+#[test]
 fn debug_simple() {
     assert_eq!(
         format!("{:?}", generate_simple()),

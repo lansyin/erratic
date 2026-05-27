@@ -1,5 +1,5 @@
 //! State traits and the [`Stateless`] marker.
-use std::fmt::Debug;
+use std::{convert::Infallible, fmt::Debug};
 
 /// Associates an error state type with its stored representation.
 ///
@@ -56,5 +56,5 @@ where
 pub struct Stateless(#[allow(unused)] [()]);
 
 impl State for Stateless {
-    type Repr = ();
+    type Repr = Infallible;
 }

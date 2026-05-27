@@ -95,8 +95,8 @@ macro_rules! literal {
 ///
 /// ```
 /// # use erratic::*;
-/// # #[derive(Debug, Default)]
-/// # enum State { #[default] NotFound }
+/// # #[derive(Debug)]
+/// # enum State { NotFound }
 /// # fn foo() {
 /// # let filename = "";
 /// # let something_impl_error_or_display = "";
@@ -128,7 +128,6 @@ macro_rules! mkerr {
         fn make_error<'a, S>(args: $crate::macros::__priv_reexport::std::fmt::Arguments<'a>) -> $crate::Error<S>
         where
             S: $crate::state::State + ?Sized,
-            S::Repr: Default,
         {
             if args.as_str().is_some() {
                 struct Literal;
