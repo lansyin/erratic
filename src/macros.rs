@@ -163,7 +163,7 @@ macro_rules! __priv_mkerr_kvs {
         $crate::__priv_mkerr_kvs!(@sort[$($s)?, $c, $($p)?, $($e)?] $($k=$v,)*)
     }};
     (@sort[$($s:expr)?, $($c:expr)?, $($_:expr)?, $($e:expr)?] payload=$p:expr, $($k:ident=$v:expr,)*) => {{
-        $( let _ = $_; compile_error!("payload can only be set once. note: format strings count as payloads.");)?
+        $( let _ = $_; compile_error!("payload can only be set once. note: the format string counts as a payload.");)?
         $crate::__priv_mkerr_kvs!(@sort[$($s)?, $($c)?, $p, $($e)?] $($k=$v,)*)
     }};
     (@sort[$($s:expr)?, $($c:expr)?, $($p:expr)?, $($_:expr)?] error=$e:expr, $($k:ident=$v:expr,)*) => {{
