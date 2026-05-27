@@ -36,8 +36,8 @@
 //! ```
 //!
 //! # Binding State
-//! When propagating an error that requires special handling, you can supply a generic state
-//! alongside it.
+//! When propagating an error that requires special handling, you can attach a generic state
+//! to it. The state is optional and can be cheaply erased or extracted using `extract_state`.
 //!
 //! When the state is small enough and none of the source error, context, or payload is attached,
 //! the state is inlined without any heap allocation.
