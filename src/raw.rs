@@ -541,7 +541,7 @@ impl<S> RawError<S> {
                     .borrow()
                     .project(|body| &raw const (*body).context)
                     .deref();
-                context.to_owned().into()
+                (*context).into()
             },
             SelectOwn::Inline(body) => format!("{:?}", body.borrow_value()).into(),
             SelectOwn::Boxed(body) => unsafe {
