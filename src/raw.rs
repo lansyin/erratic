@@ -120,6 +120,12 @@ impl<S> RawError<S> {
             }
         }
     }
+
+    /// Get the vtable of `DynBody`.
+    fn get_vtable(body: Ref<'_, DynBody>) -> &'static DynBodyVTable {
+        // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
+        unsafe { body.project(|body| &raw const (*body).vtable).copied() }
+    }
 }
 
 impl RawError<Infallible> {
@@ -227,12 +233,8 @@ impl<S> RawError<S> {
                 )
             },
             SelectRef::Boxed(body) => unsafe {
-                // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
-                let vtable = body
-                    .borrow()
-                    .project(|body| &raw const (*body).vtable)
-                    .copied();
-
+                let vtable = Self::get_vtable(body.borrow());
+                // Safety: The body pointer is confirmed valid.
                 (vtable.context)(body.borrow())
             },
             SelectRef::Inline(_body) => None,
@@ -245,12 +247,8 @@ impl<S> RawError<S> {
             SelectRef::Inline(_body) => None,
             SelectRef::Const(_body) => None,
             SelectRef::Boxed(body) => unsafe {
-                // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
-                let vtable = body
-                    .borrow()
-                    .project(|body| &raw const (*body).vtable)
-                    .copied();
-
+                let vtable = Self::get_vtable(body.borrow());
+                // Safety: The body pointer is confirmed valid.
                 (vtable.payload)(body.borrow())
             },
         }
@@ -262,11 +260,8 @@ impl<S> RawError<S> {
             SelectRef::Const(_body) => None,
             SelectRef::Inline(_body) => None,
             SelectRef::Boxed(body) => unsafe {
-                // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
-                let vtable = body
-                    .borrow()
-                    .project(|body| &raw const (*body).vtable)
-                    .copied();
+                let vtable = Self::get_vtable(body.borrow());
+                // Safety: The body pointer is confirmed valid.
                 (vtable.source)(body.borrow())
             },
         }
@@ -283,11 +278,8 @@ impl<S> RawError<S> {
             SelectRef::Const(_body) => None,
             SelectRef::Inline(_body) => None,
             SelectRef::Boxed(body) => unsafe {
-                // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
-                let vtable = body
-                    .borrow()
-                    .project(|body| &raw const (*body).vtable)
-                    .copied();
+                let vtable = Self::get_vtable(body.borrow());
+                // Safety: The body pointer is confirmed valid.
                 (vtable.downcast_source_ref)(body.borrow(), TypeId::of::<E>())
                     .map(|err| err.cast::<E>().deref())
             },
@@ -303,11 +295,8 @@ impl<S> RawError<S> {
             SelectRef::Const(_body) => None,
             SelectRef::Inline(_body) => None,
             SelectRef::Boxed(body) => unsafe {
-                // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
-                let vtable = body
-                    .borrow()
-                    .project(|body| &raw const (*body).vtable)
-                    .copied();
+                let vtable = Self::get_vtable(body.borrow());
+                // Safety: The body pointer is confirmed valid.
                 (vtable.downcast_payload_ref)(body.borrow(), TypeId::of::<P>())
                     .map(|err| err.cast::<P>().deref())
             },
@@ -323,11 +312,8 @@ impl<S> RawError<S> {
             SelectMut::Const(_body) => None,
             SelectMut::Inline(_body) => None,
             SelectMut::Boxed(body) => unsafe {
-                // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
-                let vtable = body
-                    .borrow()
-                    .project(|body| &raw const (*body).vtable)
-                    .copied();
+                let vtable = Self::get_vtable(body.borrow());
+                // Safety: The body pointer is confirmed valid.
                 (vtable.downcast_source_mut)(body.borrow_mut(), TypeId::of::<E>())
                     .map(|err| err.cast::<E>().deref_mut())
             },
@@ -343,11 +329,8 @@ impl<S> RawError<S> {
             SelectMut::Const(_body) => None,
             SelectMut::Inline(_body) => None,
             SelectMut::Boxed(body) => unsafe {
-                // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
-                let vtable = body
-                    .borrow()
-                    .project(|body| &raw const (*body).vtable)
-                    .copied();
+                let vtable = Self::get_vtable(body.borrow());
+                // Safety: The body pointer is confirmed valid.
                 (vtable.downcast_payload_mut)(body.borrow_mut(), TypeId::of::<P>())
                     .map(|err| err.cast::<P>().deref_mut())
             },
@@ -363,13 +346,9 @@ impl<S> RawError<S> {
                 Some(self.inline_body.borrow_value())
             },
             SelectRef::Boxed(body) => unsafe {
-                // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
-                let vtable = body
-                    .borrow()
-                    .project(|body| &raw const (*body).vtable)
-                    .copied();
-
+                let vtable = Self::get_vtable(body.borrow());
                 let mut state = None::<&S>;
+                // Safety: The body and state pointers are confirmed valid.
                 (vtable.state)(
                     body.borrow(),
                     TypeId::of::<S>(),
@@ -388,14 +367,10 @@ impl<S> RawError<S> {
             SelectOwn::Inline(body) => Some(body.into_value()),
             SelectOwn::Boxed(body) => {
                 unsafe {
-                    // Safety:
-                    // Projection from `DynBody` to `DynBody::state` is safe as the only exception that
-                    // the state was erased to Infallible is excluded.
-                    let vtable = body
-                        .borrow()
-                        .project(|body| &raw const (*body).vtable)
-                        .copied();
+                    let vtable = Self::get_vtable(body.borrow());
                     let mut state = None::<S>;
+
+                    // Safety: The body and state pointers are confirmed valid.
                     (vtable.into_state)(
                         body,
                         TypeId::of::<S>(),
@@ -413,11 +388,8 @@ impl<S> RawError<S> {
             SelectOwn::Const(_body) => None,
             SelectOwn::Inline(_body) => None,
             SelectOwn::Boxed(body) => unsafe {
-                // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
-                let vtable = body
-                    .borrow()
-                    .project(|body| &raw const (*body).vtable)
-                    .copied();
+                let vtable = Self::get_vtable(body.borrow());
+                // Safety: The body pointer is confirmed valid.
                 (vtable.into_source)(body)
             },
         }
@@ -446,16 +418,13 @@ impl<S> RawError<S> {
             ),
             SelectOwn::Inline(body) => (Some(body.into_value()), None, None, None),
             SelectOwn::Boxed(body) => unsafe {
-                // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
-                let vtable = body
-                    .borrow()
-                    .project(|body| &raw const (*body).vtable)
-                    .copied();
-
+                let vtable = Self::get_vtable(body.borrow());
                 let mut state: Option<S> = None;
                 let mut context: Option<&'static str> = None;
                 let mut payload: Option<P> = None;
                 let mut err: Option<E> = None;
+
+                // Safety: The body, state, context, payload, and error pointers are confirmed valid.
                 (vtable.into_parts)(
                     body,
                     TypeId::of::<E>(),
@@ -482,13 +451,10 @@ impl<S> RawError<S> {
             SelectOwn::Inline(body) => Ok((body.into_value(), None)),
             SelectOwn::Boxed(body) => {
                 unsafe {
-                    // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
-                    let vtable = body
-                        .borrow()
-                        .project(|body| &raw const (*body).vtable)
-                        .copied();
+                    let vtable = Self::get_vtable(body.borrow());
                     let mut state_dst = None::<S>;
                     let mut error_dst = None::<ManuallyDrop<Align4Own<DynBody>>>;
+                    // Safety: The body, state, error pointers are confirmed valid.
                     (vtable.extract_state)(
                         body,
                         TypeId::of::<S>(),
@@ -545,11 +511,8 @@ impl<S> RawError<S> {
             },
             SelectOwn::Inline(body) => format!("{:?}", body.borrow_value()).into(),
             SelectOwn::Boxed(body) => unsafe {
-                // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
-                let vtable = body
-                    .borrow()
-                    .project(|body| &raw const (*body).vtable)
-                    .copied();
+                let vtable = Self::get_vtable(body.borrow());
+                // Safety: The body pointer is confirmed valid.
                 (vtable.into_boxed_error)(body)
             },
         }
@@ -566,13 +529,8 @@ impl<S> Drop for RawError<S> {
             },
             Self::KIND_BOXED => {
                 unsafe {
-                    // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
-                    let vtable = self
-                        .boxed_body
-                        .borrow()
-                        .project(|body| &raw const (*body).vtable)
-                        .copied();
-
+                    let vtable = Self::get_vtable(self.boxed_body.borrow());
+                    // Safety: The body pointer is confirmed valid.
                     (vtable.drop)(ManuallyDrop::new(ManuallyDrop::take(&mut self.boxed_body)));
                 }
             }
