@@ -391,6 +391,14 @@ where
     pub fn into_state(self) -> Option<S> {
         self.0.into_state().map(S::from_repr)
     }
+
+    /// Preserves the state; retains the error if additional info is present.
+    pub fn extract_state(self) -> result::Result<(S, Option<Error>), Error> {
+        match self.0.extract_state() {
+            Ok((s, o)) => Ok((S::from_repr(s), o.map(Error))),
+            Err(e) => Err(Error(e)),
+        }
+    }
 }
 
 impl<S> From<Error<S>> for Box<dyn error::Error + Send + Sync + 'static>
