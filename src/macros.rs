@@ -113,6 +113,12 @@ macro_rules! literal {
 ///     payload = filename,
 ///     error = err,
 /// );
+/// # let err = mkerr!("oops").stateless().erase();
+/// let _err = mkerr!(
+///     state = State::NotFound,
+///     error = err,
+///     "{filename} not found",
+/// );
 /// # }
 /// ```
 ///
@@ -121,8 +127,8 @@ macro_rules! literal {
 /// The key-value pairs can be provided in any order.
 #[macro_export]
 macro_rules! mkerr {
-    ($($key:ident=$value:expr),+ $(,)?) => {
-        $crate::__priv_mkerr_kvs!(@sort[,,,] $($key=$value,)+)
+    ($($key:ident=$value:expr),+ $(, $($fmt:literal $($args:tt)*)?)?) => {
+        $crate::__priv_mkerr_kvs!(@sort[,,,] $($key=$value,)+ $($(payload=$crate::macros::__priv_reexport::std::format!($fmt $($args)*),)?)?)
     };
     ($fmt:literal $($args:tt)*) => {{
         fn make_error<'a, S>(args: $crate::macros::__priv_reexport::std::fmt::Arguments<'a>) -> $crate::Error<S>
@@ -148,18 +154,22 @@ macro_rules! mkerr {
 #[macro_export]
 #[doc(hidden)]
 macro_rules! __priv_mkerr_kvs {
-    (@sort[$($_:expr)?, $($c:expr)?, $($p:expr)?, $($e:expr)?] state=$s:expr, $($k:ident=$v:expr,)*) => {
+    (@sort[$($_:expr)?, $($c:expr)?, $($p:expr)?, $($e:expr)?] state=$s:expr, $($k:ident=$v:expr,)*) => {{
+        $( let _ = $_; compile_error!("state can only be set once");)?
         $crate::__priv_mkerr_kvs!(@sort[$s, $($c)?, $($p)?, $($e)?] $($k=$v,)*)
-    };
-    (@sort[$($s:expr)?, $($_:expr)?, $($p:expr)?, $($e:expr)?] context=$c:expr, $($k:ident=$v:expr,)*) => {
+    }};
+    (@sort[$($s:expr)?, $($_:expr)?, $($p:expr)?, $($e:expr)?] context=$c:expr, $($k:ident=$v:expr,)*) => {{
+        $( let _ = $_; compile_error!("context can only be set once");)?
         $crate::__priv_mkerr_kvs!(@sort[$($s)?, $c, $($p)?, $($e)?] $($k=$v,)*)
-    };
-    (@sort[$($s:expr)?, $($c:expr)?, $($_:expr)?, $($e:expr)?] payload=$p:expr, $($k:ident=$v:expr,)*) => {
+    }};
+    (@sort[$($s:expr)?, $($c:expr)?, $($_:expr)?, $($e:expr)?] payload=$p:expr, $($k:ident=$v:expr,)*) => {{
+        $( let _ = $_; compile_error!("payload can only be set once. note: format strings count as payloads.");)?
         $crate::__priv_mkerr_kvs!(@sort[$($s)?, $($c)?, $p, $($e)?] $($k=$v,)*)
-    };
-    (@sort[$($s:expr)?, $($c:expr)?, $($p:expr)?, $($_:expr)?] error=$e:expr, $($k:ident=$v:expr,)*) => {
+    }};
+    (@sort[$($s:expr)?, $($c:expr)?, $($p:expr)?, $($_:expr)?] error=$e:expr, $($k:ident=$v:expr,)*) => {{
+        $( let _ = $_; compile_error!("error can only be set once");)?
         $crate::__priv_mkerr_kvs!(@sort[$($s)?, $($c)?, $($p)?, $e] $($k=$v,)*)
-    };
+    }};
     (@sort[$($s:expr)?, $($c:expr)?, $($p:expr)?, $($e:expr)?]) => {{
         let builder = ($crate::macros::__priv_reexport::std::option::Option::None::<()>);
         $(let builder = builder.ok_or($e);)?
@@ -252,6 +262,24 @@ mod tests {
             .with_state(42)
             .with_context(literal!("test"))
             .with_payload("error message")
+            .build();
+
+        assert_eq!(err_from_mkerr.to_string(), err_from_builder.to_string());
+    }
+
+    #[test]
+    fn error_from_hybrid() {
+        let world = "world!";
+        let err_from_mkerr = mkerr!(
+            context = "test",
+            error = mkerr!("source").stateless().erase(),
+            state = 42,
+            "hello {world}"
+        );
+        let err_from_builder = Error::with_error(mkerr!("source").stateless().erase())
+            .with_state(42)
+            .with_context(literal!("test"))
+            .with_payload(format!("hello {world}"))
             .build();
 
         assert_eq!(err_from_mkerr.to_string(), err_from_builder.to_string());
