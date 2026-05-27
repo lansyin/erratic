@@ -26,7 +26,8 @@
 //!
 //! fn write_log(filename: String) -> Result<()> {
 //!     File::open(&filename)
-//!         .or_context(literal!("failed to open the log file"))? // No alloc.
+//!         .ok()
+//!         .with_context(literal!("failed to open the log file"))? // No alloc.
 //!         .write_all(b"Hello, World!")
 //!         .with_context(literal!("while writing to"))
 //!         .with_payload(filename)?; // Alloc once for `io::Error`, `filename`, and `Context`.
@@ -53,7 +54,8 @@
 //!
 //! fn write_log(filename: String) -> std::result::Result<(), Error<WriteLog>> {
 //!     File::open(&filename)
-//!         .or_state(WriteLog::FileNotFound)? // No alloc.
+//!         .ok()
+//!         .with_state(WriteLog::FileNotFound)? // No alloc.
 //!         .write_all(b"Hello, World!")
 //!         .with_context(literal!("while writing to"))
 //!         .with_payload(filename)?; // Falls back to the default state value.
@@ -662,24 +664,135 @@ where
     }
 }
 
-/// Extension trait for [`Result`] and [`Option`] to replace the error with a typed state.
+/// Extension trait for extracting the state to a separate layer.
 pub trait StateExt {
-    type Result<E>;
+    type T;
+    type S;
+    type Result<T, E>;
 
-    /// Replaces the error with [`Error<S>`] carrying the given `state`.
-    fn or_state<S>(self, state: S) -> Self::Result<Error<S>>
+    /// Materializes and then erases the state, returning an opaque `impl Error`.
+    fn extract_state(
+        self,
+    ) -> result::Result<Self::Result<Self::T, (Self::S, Option<Error>)>, Error>
     where
-        S: State;
+        Self::S: Sized;
 }
 
-/// Extension trait for [`Result`] and [`Option`] to replace the error with a static context.
-pub trait ContextExt {
-    type Result<E>;
+impl<S1> StateExt for Error<S1>
+where
+    S1: State,
+{
+    type T = ();
+    type S = S1;
+    type Result<T, E> = E;
 
-    /// Replaces the error with an [`Error`] carrying the given literal context.
-    fn or_context<L>(self, _ty: L) -> Self::Result<Error>
+    fn extract_state(self) -> result::Result<Self::Result<Self::T, (Self::S, Option<Error>)>, Error>
     where
-        L: Literal;
+        Self::S: Sized,
+    {
+        self.extract_state()
+    }
+}
+
+impl<T1, S> StateExt for result::Result<T1, Error<S>>
+where
+    S: State,
+{
+    type T = T1;
+    type S = S;
+    type Result<T, E> = result::Result<T, E>;
+
+    fn extract_state(self) -> result::Result<Self::Result<Self::T, (Self::S, Option<Error>)>, Error>
+    where
+        Self::S: Sized,
+    {
+        match self {
+            Ok(v) => Ok(Ok(v)),
+            Err(err) => err.build_error().extract_state().map(|err| Err(err)),
+        }
+    }
+}
+
+impl<E1, S, F, L> StateExt for Builder<E1, S, F, L>
+where
+    E1: error::Error + Send + Sync + 'static,
+    F: PayloadFn,
+    S: State,
+    L: Context + ?Sized,
+{
+    type T = ();
+    type Result<T, E> = E;
+    type S = S;
+
+    fn extract_state(self) -> result::Result<Self::Result<Self::T, (Self::S, Option<Error>)>, Error>
+    where
+        Self::S: Sized,
+    {
+        self.build_error().extract_state()
+    }
+}
+
+impl<S1, S, F, L> StateExt for Builder<Error<S1>, S, F, L>
+where
+    S1: State + ?Sized,
+    F: PayloadFn,
+    S: State,
+    L: Context + ?Sized,
+{
+    type T = ();
+    type S = S;
+    type Result<T, E> = E;
+
+    fn extract_state(self) -> result::Result<Self::Result<Self::T, (Self::S, Option<Error>)>, Error>
+    where
+        Self::S: Sized,
+    {
+        self.build_error().extract_state()
+    }
+}
+
+impl<T1, E1, S, F, L> StateExt for result::Result<T1, Builder<E1, S, F, L>>
+where
+    E1: error::Error + Send + Sync + 'static,
+    F: PayloadFn,
+    S: State,
+    L: Context + ?Sized,
+{
+    type T = T1;
+    type S = S;
+    type Result<T, E> = result::Result<T, E>;
+
+    fn extract_state(self) -> result::Result<Self::Result<Self::T, (Self::S, Option<Error>)>, Error>
+    where
+        Self::S: Sized,
+    {
+        match self {
+            Ok(v) => Ok(Ok(v)),
+            Err(err) => err.build_error().extract_state().map(|err| Err(err)),
+        }
+    }
+}
+
+impl<T1, S1, S, F, L> StateExt for result::Result<T1, Builder<Error<S1>, S, F, L>>
+where
+    S1: State + ?Sized,
+    F: PayloadFn,
+    S: State,
+    L: Context + ?Sized,
+{
+    type T = T1;
+    type S = S;
+    type Result<T, E> = result::Result<T, E>;
+
+    fn extract_state(self) -> result::Result<Self::Result<Self::T, (Self::S, Option<Error>)>, Error>
+    where
+        Self::S: Sized,
+    {
+        match self {
+            Ok(v) => Ok(Ok(v)),
+            Err(err) => err.build_error().extract_state().map(|err| Err(err)),
+        }
+    }
 }
 
 /// Extension trait for attaching context, state, or payload to an existing error.
@@ -728,40 +841,6 @@ pub trait BuilderExt: Sized {
         P: Display + Send + Sync + 'static,
     {
         self.with_payload_fn(Immediate(payload))
-    }
-}
-
-/// Extension trait for materializing or erasing an error.
-pub trait ErrorExt {
-    type Result<E>;
-    type S: State + ?Sized;
-
-    /// Materializes the final [`Error<Self::S>`].
-    fn build_error(self) -> Self::Result<Error<Self::S>>;
-
-    /// Materializes and then erases the state, returning an opaque `impl Error`.
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>;
-}
-
-impl<T, E1> StateExt for result::Result<T, E1> {
-    type Result<E> = result::Result<T, E>;
-
-    fn or_state<S>(self, state: S) -> Self::Result<Error<S>>
-    where
-        S: State,
-    {
-        self.map_err(|_| Error::<S>(RawError::new_inline_or_boxed(state.into_repr())))
-    }
-}
-
-impl<T, E1> ContextExt for result::Result<T, E1> {
-    type Result<E> = result::Result<T, E>;
-
-    fn or_context<L>(self, _ty: L) -> Self::Result<Error>
-    where
-        L: Context,
-    {
-        self.map_err(|_| Error(RawError::new_const::<L>()))
     }
 }
 
@@ -973,6 +1052,18 @@ where
     }
 }
 
+/// Extension trait for materializing or erasing an error.
+pub trait ErrorExt: Sized {
+    type Result<E>;
+    type S: State + ?Sized;
+
+    /// Materializes the final [`Error<Self::S>`].
+    fn build_error(self) -> Self::Result<Error<Self::S>>;
+
+    /// Materializes and then erases the state, returning an opaque `impl Error`.
+    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>;
+}
+
 impl<S> ErrorExt for Error<S>
 where
     S: State + ?Sized,
@@ -1108,28 +1199,6 @@ where
 
     fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
         self.map_err(|err| err.erase())
-    }
-}
-
-impl<T> StateExt for Option<T> {
-    type Result<E> = result::Result<T, E>;
-
-    fn or_state<S>(self, state: S) -> Self::Result<Error<S>>
-    where
-        S: State,
-    {
-        self.ok_or(Error::<S>(RawError::new_inline_or_boxed(state.into_repr())))
-    }
-}
-
-impl<T> ContextExt for Option<T> {
-    type Result<E> = result::Result<T, E>;
-
-    fn or_context<L>(self, _ty: L) -> Self::Result<Error>
-    where
-        L: Context,
-    {
-        self.ok_or(Error(RawError::new_const::<L>()))
     }
 }
 

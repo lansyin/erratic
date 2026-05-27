@@ -2,7 +2,7 @@ mod common;
 
 use common::{TestError, TestMessage, TestState};
 use erratic::*;
-use std::mem;
+use std::{mem, result};
 
 #[test]
 fn from_error_round_trip() {
@@ -124,4 +124,14 @@ fn wrap_self() -> Result<()> {
         .with_context(literal!("while testing wrap_self with nested error"))?;
 
     Ok(())
+}
+
+#[test]
+fn extract_state() -> Result<()> {
+    let re: result::Result<(), _> = mkres!(state = 12);
+    let re = re.extract_state()?;
+    match re.unwrap_err() {
+        (12, ..) => Ok(()),
+        _ => unreachable!(),
+    }
 }
