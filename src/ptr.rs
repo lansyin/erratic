@@ -208,7 +208,7 @@ impl<T> Align4Own<T> {
     /// The stored address must have been obtained from [`Box::into_raw`] for a valid
     /// heap allocation with the correct layout for `Align4<T>`, and must not have been
     /// freed or aliased.
-    pub unsafe fn into_boxed(self) -> Box<Align4<T>> {
+    pub fn into_boxed(self) -> Box<Align4<T>> {
         unsafe { Box::from_raw(self.into_raw()) }
     }
 
@@ -216,14 +216,17 @@ impl<T> Align4Own<T> {
     ///
     /// # Safety
     ///
-    /// `Align4<T>` and `Align4<U>` must have the same layout (size and alignment).
+    /// `Align4<U>` should have a layout compatible with `Align4<T>`.
+    /// If you are temporarily working with a type that has a different layout,
+    /// you must cast it back to the original type before `drop` is called.
     pub unsafe fn cast<U>(self) -> Align4Own<U> {
-        let (_, meta) = self.ptr.into_parts();
+        // Note: Forget the previous one to avoid double-free.
+        let this = ManuallyDrop::new(self);
 
-        Align4Own::from_boxed(
-            unsafe { Box::from_raw(self.into_raw().cast::<Align4<U>>()) },
-            meta,
-        )
+        Align4Own {
+            ptr: this.ptr,
+            _marker: PhantomData,
+        }
     }
 
     /// Returns a shared reference to the pointee.
