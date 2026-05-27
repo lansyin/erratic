@@ -779,6 +779,7 @@ where
     /// - `this` must be a valid `Align4Own` pointing to `DynBody<S, E, P, C>`.
     /// - `source_dst`, `payload_dst`,`context_dst`, `state_dst` must be valid, aligned, mutable
     ///   pointers to `Option<E>`, `Option<P>`, `Option<&'static str>` and `Option<S>` respectively.
+    #[allow(clippy::too_many_arguments)]
     unsafe fn into_parts(
         mut this: ManuallyDrop<Align4Own<DynBody>>,
         source_ty: TypeId,
