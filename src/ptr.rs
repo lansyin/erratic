@@ -437,7 +437,7 @@ mod tests {
     fn align4_own_boxed_round_trip() {
         let value = Box::new(Align4(42u32));
         let owned = Align4Own::from_boxed(value, Metadata::_1);
-        let restored = unsafe { owned.into_boxed() };
+        let restored = owned.into_boxed();
         assert_eq!(restored.0, 42);
     }
 
@@ -448,7 +448,7 @@ mod tests {
         let owned = Align4Own::from_boxed(value, Metadata::_2);
         // Cast to the same-layout type `[u8; 4]`
         let casted = unsafe { owned.cast::<[u8; 4]>() };
-        let restored = unsafe { casted.into_boxed() };
+        let restored = casted.into_boxed();
         assert_eq!(restored.0, [0x01, 0xEF, 0xCD, 0xAB]); // little-endian
     }
 
