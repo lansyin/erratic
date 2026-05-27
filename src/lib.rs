@@ -666,7 +666,7 @@ pub trait StateExt {
     type S;
     type Result<T, E>;
 
-    /// Materializes and then erases the state, returning an opaque `impl Error`.
+    ///  Extracts the state if it has been set.
     fn extract_state(
         self,
     ) -> result::Result<Self::Result<Self::T, (Self::S, Option<Error>)>, Error>
