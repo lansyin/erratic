@@ -1140,18 +1140,25 @@ where
             state.as_ref().map(|s| s as &dyn Display),
             context.map(|s| s as _),
             payload.map(|s| s as _),
-            source.map(|s| s as _),
         ]
         .into_iter()
         .flatten()
         .peekable();
+        let has_additional_info = segments.peek().is_some();
 
         while let Some(segment) = segments.next() {
-            write!(f, "{:#}", segment)?;
+            write!(f, "{segment}")?;
 
             if segments.peek().is_some() {
                 write!(f, ": ")?;
             }
+        }
+
+        if let Some(source) = source {
+            if has_additional_info {
+                write!(f, "\n  -> ")?;
+            }
+            write!(f, "{source:#}")?;
         }
 
         Ok(())
