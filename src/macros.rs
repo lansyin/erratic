@@ -52,16 +52,16 @@ macro_rules! match_else {
 /// # use erratic::*;
 /// # fn foo() -> Result<()> {
 /// # let foo = || -> std::result::Result<(), std::io::Error> { unimplemented!() };
-/// foo()
-///     .with_context(literal!("file not found"))?;
+/// // Creates an ad-hoc literal value.
+/// foo().with_context(literal!("file not found"))?;
+///
+/// // Defines a list of typed literals.
 /// literal!{
 ///     pub NotFound: "file not found";
 ///     pub InternalError: "internal error";
 /// }
-/// foo()
-///     .with_context(NotFound)?;
-/// foo()
-///     .with_context_ty::<InternalError>()?;
+/// foo().with_context(NotFound)?;
+/// foo().with_context_ty::<InternalError>()?;
 /// # Ok(())
 /// # }
 /// ```
