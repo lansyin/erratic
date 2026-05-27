@@ -120,10 +120,6 @@ impl<S> RawError<S> {
             }
         }
     }
-
-    fn is_state_erased() -> bool {
-        rtti::is_same_ty::<S, Infallible>()
-    }
 }
 
 impl RawError<Infallible> {
@@ -179,11 +175,13 @@ impl<S> RawError<S> {
     {
         // # Safety
         //
-        // The `Align4Own` pointer is cast to `DynBody<S, (), ()>` for uniform storage.
+        // The `Align4Own` pointer is cast to `DynBody<(), (), (), ()>` for uniform storage.
         // This is valid because all monomorphizations of `DynBody<S, E, P, L::Repr>` share
-        // the same `S` prefix and vtable pointer, and the concrete `E`, `P`, `C` are erased.
+        // the same vtable pointer, and the concrete `S`, `E`, `P`, `C` are erased.
         // The cast only changes the type parameter defaults — it does not violate the layout
         // because `()` is a ZST.
+        // Due to `Align4Own`assumes a correct layout, and that's not true after the cast,
+        // we need to put it in a `ManuallyDrop` and drop it via vtable instead.
         let ptr = unsafe {
             Align4Own::from_boxed(
                 Box::new(Align4(DynBody::<S, E, P, L::Repr> {
@@ -350,22 +348,22 @@ impl<S> RawError<S> {
                 // Safety: Access `InlineBody::value` is safe.
                 Some(self.inline_body.borrow_value())
             },
-            SelectRef::Boxed(body) => {
-                if Self::is_state_erased() {
-                    None
-                } else {
-                    // Safety:
-                    // Projection from `DynBody` to `DynBody::state` is safe as the only exception that
-                    // the state was erased to Infallible is excluded.
-                    unsafe {
-                        body.borrow()
-                            .cast::<DynBody<S>>()
-                            .project(|body| &raw const (*body).state)
-                            .deref()
-                            .as_ref()
-                    }
-                }
-            }
+            SelectRef::Boxed(body) => unsafe {
+                // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
+                let vtable = body
+                    .borrow()
+                    .project(|body| &raw const (*body).vtable)
+                    .copied();
+
+                let mut state = None::<&S>;
+                (vtable.state)(
+                    body.borrow(),
+                    TypeId::of::<S>(),
+                    NonNull::from_mut(&mut state).cast(),
+                );
+
+                state
+            },
         }
     }
 
@@ -375,21 +373,21 @@ impl<S> RawError<S> {
             SelectOwn::Const(_body) => None,
             SelectOwn::Inline(body) => Some(body.into_value()),
             SelectOwn::Boxed(body) => {
-                if Self::is_state_erased() {
-                    None
-                } else {
-                    unsafe {
-                        // Safety:
-                        // Projection from `DynBody` to `DynBody::state` is safe as the only exception that
-                        // the state was erased to Infallible is excluded.
-                        let vtable = body
-                            .borrow()
-                            .project(|body| &raw const (*body).vtable)
-                            .copied();
-                        let mut state = None::<S>;
-                        (vtable.into_state)(body, NonNull::from_mut(&mut state).cast());
-                        state
-                    }
+                unsafe {
+                    // Safety:
+                    // Projection from `DynBody` to `DynBody::state` is safe as the only exception that
+                    // the state was erased to Infallible is excluded.
+                    let vtable = body
+                        .borrow()
+                        .project(|body| &raw const (*body).vtable)
+                        .copied();
+                    let mut state = None::<S>;
+                    (vtable.into_state)(
+                        body,
+                        TypeId::of::<S>(),
+                        NonNull::from_mut(&mut state).cast(),
+                    );
+                    state
                 }
             }
         }
@@ -447,15 +445,12 @@ impl<S> RawError<S> {
                 (vtable.into_parts)(
                     body,
                     TypeId::of::<E>(),
-                    // Safety: `&raw mut err` is a valid mutable pointer to a local
-                    // on the stack. It remains valid for the duration of the function call.
                     NonNull::from_mut(&mut err).cast(),
                     TypeId::of::<P>(),
-                    // Safety: Same as above for `payload`.
                     NonNull::from_mut(&mut payload).cast(),
-                    // Safety: Same as above for `context`.
                     NonNull::from_mut(&mut context).cast(),
-                    (!Self::is_state_erased()).then(|| NonNull::from_mut(&mut state).cast()),
+                    TypeId::of::<S>(),
+                    NonNull::from_mut(&mut state).cast(),
                 );
 
                 (state, context, payload, err)
@@ -472,29 +467,28 @@ impl<S> RawError<S> {
             }),
             SelectOwn::Inline(body) => Ok((body.into_value(), None)),
             SelectOwn::Boxed(body) => {
-                if Self::is_state_erased() {
-                    Err(RawError { boxed_body: body })
-                } else {
-                    unsafe {
-                        // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
-                        let vtable = body
-                            .borrow()
-                            .project(|body| &raw const (*body).vtable)
-                            .copied();
-                        let mut out = None::<
-                            Result<
-                                (S, Option<ManuallyDrop<Align4Own<DynBody>>>),
-                                ManuallyDrop<Align4Own<DynBody>>,
-                            >,
-                        >;
-                        (vtable.extract_state)(body, NonNull::from_mut(&mut out).cast());
+                unsafe {
+                    // Safety: Projection from `DynBody` to `DynBody::vtable` is safe.
+                    let vtable = body
+                        .borrow()
+                        .project(|body| &raw const (*body).vtable)
+                        .copied();
+                    let mut state_dst = None::<S>;
+                    let mut error_dst = None::<ManuallyDrop<Align4Own<DynBody>>>;
+                    (vtable.extract_state)(
+                        body,
+                        TypeId::of::<S>(),
+                        NonNull::from_mut(&mut state_dst).cast(),
+                        NonNull::from_mut(&mut error_dst).cast(),
+                    );
 
-                        match out.expect("extract_state must fully initialize the output") {
-                            Ok((state, body)) => {
-                                Ok((state, body.map(|body| RawError { boxed_body: body })))
-                            }
-                            Err(body) => Err(RawError { boxed_body: body }),
+                    match (state_dst, error_dst) {
+                        (Some(state), Some(body)) => {
+                            Ok((state, Some(RawError { boxed_body: body })))
                         }
+                        (Some(state), None) => Ok((state, None)),
+                        (None, Some(body)) => Err(RawError { boxed_body: body }),
+                        (None, None) => unreachable!(),
                     }
                 }
             }
@@ -657,7 +651,7 @@ struct DynBodyVTable {
     /// See [DynBody::drop].
     drop: unsafe fn(ManuallyDrop<Align4Own<DynBody>>),
     /// See [DynBody::into_state].
-    into_state: unsafe fn(ManuallyDrop<Align4Own<DynBody>>, NonNull<()>),
+    into_state: unsafe fn(ManuallyDrop<Align4Own<DynBody>>, TypeId, NonNull<()>),
     /// See [DynBody::into_source].
     into_source: unsafe fn(
         ManuallyDrop<Align4Own<DynBody>>,
@@ -670,16 +664,19 @@ struct DynBodyVTable {
         TypeId,
         NonNull<()>,
         NonNull<()>,
-        Option<NonNull<()>>,
+        TypeId,
+        NonNull<()>,
     ),
     /// See [DynBody::extract_state].
-    extract_state: unsafe fn(ManuallyDrop<Align4Own<DynBody>>, NonNull<()>),
+    extract_state: unsafe fn(ManuallyDrop<Align4Own<DynBody>>, TypeId, NonNull<()>, NonNull<()>),
     /// See [DynBody::into_boxed_error].
     into_boxed_error: unsafe fn(
         ManuallyDrop<Align4Own<DynBody>>,
     ) -> Box<dyn error::Error + Send + Sync + 'static>,
     /// See [DynBody::source].
     source: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn error::Error + Send + Sync + 'static)>,
+    /// See [DynBody::state].
+    state: unsafe fn(Ref<'_, DynBody>, TypeId, NonNull<()>),
     /// See [DynBody::payload].
     payload: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn Display + Send + Sync + 'static)>,
     /// See [DynBody::context].
@@ -710,6 +707,7 @@ impl DynBodyVTable {
             extract_state: DynBody::<S, E, P, L>::extract_state,
             into_boxed_error: DynBody::<S, E, P, L>::into_boxed_error,
             source: DynBody::<S, E, P, L>::source,
+            state: DynBody::<S, E, P, L>::state,
             payload: DynBody::<S, E, P, L>::payload,
             context: DynBody::<S, E, P, L>::context,
             downcast_source_ref: DynBody::<S, E, P, L>::downcast_source_ref,
@@ -742,12 +740,18 @@ where
     ///
     /// - `this` must be a valid `Align4Own` pointing to a heap-allocated `DynBody<S, E, P, C>`.
     /// - `state_dst` must be a valid, aligned, mutable pointer to `Option<S>`.
-    unsafe fn into_state(mut this: ManuallyDrop<Align4Own<DynBody>>, state_dst: NonNull<()>) {
+    unsafe fn into_state(
+        mut this: ManuallyDrop<Align4Own<DynBody>>,
+        state_ty: TypeId,
+        state_dst: NonNull<()>,
+    ) {
         let Align4(mut this) =
             *unsafe { ManuallyDrop::take(&mut this).cast::<Self>().into_boxed() };
-        let dst = unsafe { state_dst.cast::<Option<S>>().as_mut() };
-
-        *dst = this.state.take();
+        if TypeId::of::<S>() == state_ty {
+            // Safety: The caller guarantees `state_dst` points to a valid `Option<S>`.
+            let dst = unsafe { state_dst.cast::<Option<S>>().as_mut() };
+            *dst = this.state.take();
+        }
     }
 
     /// Extracts the source error as a trait object from the boxed body.
@@ -759,7 +763,7 @@ where
         mut this: ManuallyDrop<Align4Own<DynBody>>,
     ) -> Option<Box<dyn error::Error + Send + Sync + 'static>> {
         let this = unsafe { ManuallyDrop::take(&mut this).cast::<Self>() };
-        let Align4(this) = *unsafe { this.into_boxed() };
+        let Align4(this) = *this.into_boxed();
         if rtti::is_same_ty::<E, Nae>() {
             None
         } else {
@@ -782,7 +786,8 @@ where
         payload_ty: TypeId,
         payload_dst: NonNull<()>,
         context_dst: NonNull<()>,
-        state_dst: Option<NonNull<()>>,
+        state_ty: TypeId,
+        state_dst: NonNull<()>,
     ) {
         let Align4(mut this) =
             *unsafe { ManuallyDrop::take(&mut this).cast::<Self>().into_boxed() };
@@ -801,55 +806,58 @@ where
             let dst = unsafe { context_dst.cast::<Option<C>>().as_mut() };
             dst.replace(this.context);
         }
-        if let Some(state_dst) = state_dst {
+        if TypeId::of::<S>() == state_ty {
             let dst = unsafe { state_dst.cast::<Option<S>>().as_mut() };
             *dst = this.state.take();
         }
     }
 
-    /// Extracts the state from the boxed body.
+    /// Extracts the state from the boxed body. This function guarantees at least one of the `Option` will be filled.
     ///
     /// # Safety
     ///
     /// - `this` must be a valid `Align4Own` pointing to `DynBody<S, E, P, C>`.
-    /// - `state_dst` must be a valid, aligned, mutable pointer to
-    ///   `Option<Result<(S, Option<ManuallyDrop<Align4Own<DynBody>>>), ManuallyDrop<Align4Own<DynBody>>>>`.
-    unsafe fn extract_state(mut this: ManuallyDrop<Align4Own<DynBody>>, state_dst: NonNull<()>) {
+    /// - `state_dst` must be a valid, aligned, mutable pointer to `Option<StateTy>`.
+    /// - `error_dst` must be a valid, aligned, mutable pointer to `Option<ManuallyDrop<Align4Own<DynBody>>>`
+    unsafe fn extract_state(
+        mut this: ManuallyDrop<Align4Own<DynBody>>,
+        state_ty: TypeId,
+        state_dst: NonNull<()>,
+        error_dst: NonNull<()>,
+    ) {
         let this = unsafe { ManuallyDrop::take(&mut this).cast::<Self>() };
 
-        // Safety: Projecting to `state` is inbound.
-        let state = unsafe {
-            this.borrow_mut()
-                .project(|e| &raw mut (*e).state)
-                .deref_mut()
-                .take()
-        };
+        if TypeId::of::<S>() == state_ty {
+            let dst = unsafe { state_dst.cast::<Option<S>>().as_mut() };
+            // Safety: Projecting to `state` is inbound.
+            *dst = unsafe {
+                this.borrow_mut()
+                    .project(|e| &raw mut (*e).state)
+                    .deref_mut()
+                    .take()
+            };
+        }
+
         let has_context = !rtti::is_same_ty::<C, context::Unit>();
         let has_payload = !rtti::is_same_ty::<P, payload::Empty>();
         let has_source = !rtti::is_same_ty::<E, Nae>();
-        let dst = unsafe {
-            state_dst
-                .cast::<Option<
-                    Result<
-                        (S, Option<ManuallyDrop<Align4Own<DynBody>>>),
-                        ManuallyDrop<Align4Own<DynBody>>,
-                    >,
-                >>()
-                .as_mut()
-        };
 
-        // Safety:
-        // Erase the remaining fields to ZSTs is dangerous as the destructor assumes a correct layout.
-        // So we wrap it in `ManuallyDrop` to prevent the destructor from being automatically called.
-        dst.replace(match (state, has_context, has_payload, has_source) {
-            (None, false, false, false) => unreachable!(),
-            (None, _, _, _) => Err(ManuallyDrop::new(unsafe { this.cast::<DynBody>() })),
-            (Some(state), false, false, false) => Ok((state, None)),
-            (Some(state), _, _, _) => Ok((
-                state,
-                Some(ManuallyDrop::new(unsafe { this.cast::<DynBody>() })),
-            )),
-        });
+        match (has_context, has_payload, has_source) {
+            (false, false, false) => {
+                mem::drop(this.into_boxed());
+            }
+            _ => {
+                let error_dst = unsafe {
+                    error_dst
+                        .cast::<Option<ManuallyDrop<Align4Own<DynBody>>>>()
+                        .as_mut()
+                };
+                // Safety:
+                // Erase the remaining fields to ZSTs is dangerous as the destructor assumes a correct layout.
+                // So we wrap it in `ManuallyDrop` to prevent the destructor from being automatically called.
+                error_dst.replace(ManuallyDrop::new(unsafe { this.cast::<DynBody>() }));
+            }
+        };
     }
 
     /// Convert the thin `DynBody` pointer to `Box<Error>` without reallocation.
@@ -885,6 +893,25 @@ where
             None
         } else {
             Some(err as &(dyn error::Error + Send + Sync + 'static))
+        }
+    }
+
+    /// Returns a reference to the state.
+    ///
+    /// # Safety
+    ///
+    /// - `this` must point to a valid `DynBody<S, E, P, C>`.
+    /// - The `source` field must be initialized.
+    unsafe fn state(this: Ref<'_, DynBody>, state_ty: TypeId, state_dst: NonNull<()>) {
+        let this = unsafe { this.cast::<Self>() };
+
+        if TypeId::of::<S>() == state_ty {
+            let dst = unsafe { state_dst.cast::<Option<&S>>().as_mut() };
+            let state = unsafe { this.project(|body| &raw const (*body).state) }.deref();
+
+            if let Some(state) = state {
+                dst.replace(state);
+            }
         }
     }
 
