@@ -556,9 +556,12 @@ where
 
         match (has_state, has_context, has_error, has_payload) {
             (false, false, false, false) => unreachable!(),
-            (true, false, false, false) => Error::<S>(RawError::new_inline_or_boxed(
-                value.state.expect("checked by has_state"),
-            )),
+            (true, false, false, false) => {
+                Error::<S>(RawError::new_inline_or_boxed(match value.state {
+                    Some(state) => state,
+                    None => unreachable!(), // Note: It's unreachable because `has_state = true`.
+                }))
+            }
             (false, true, false, false) => {
                 let Ok(body) = match_else!(rtti::concretize::<_, RawError<S::Repr>>(RawError::new_const::<L>()),
                     Err(_) => unreachable!(),
@@ -583,25 +586,18 @@ where
     L: Context + ?Sized,
 {
     fn from(value: Builder<E, S, F, L>) -> Self {
-        let has_state = !rtti::is_same_ty::<S::Repr, Infallible>();
         let has_context = !rtti::is_same_ty::<L, context::Blank>();
         let has_error = !rtti::is_same_ty::<E, Nae>();
         let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
 
-        match (has_state, has_context, has_error, has_payload) {
-            (false, false, false, false) => unreachable!(),
-            (true, false, false, false) => Error(RawError::new_boxed::<_, _, L>(
+        match (has_context, has_error, has_payload) {
+            (false, false, false) => Error(RawError::new_boxed::<_, _, L>(
                 None,
-                ImplError::<S>(RawError::new_inline_or_boxed(
-                    value.state.expect("checked by has_state"),
-                )),
+                ImplError::<S>(RawError::new_inline_or_boxed(match value.state {
+                    Some(state) => state,
+                    None => unreachable!(), // Note: It's unreachable because `S` is constrained as `Sized` here.
+                })),
                 payload::Empty::new(),
-            )),
-            (false, true, false, false) => Error(RawError::new_const::<L>()),
-            (false, _, _, _) => Error(RawError::new_boxed::<_, _, L>(
-                None,
-                value.err,
-                value.payload_fn.call(),
             )),
             _ => Error(RawError::new_boxed::<_, _, context::Blank>(
                 None,
@@ -625,25 +621,13 @@ where
     L: Context + ?Sized,
 {
     fn from(value: Builder<E, Stateless, F, L>) -> Self {
-        let has_state = !rtti::is_same_ty::<S::Repr, Infallible>();
         let has_context = !rtti::is_same_ty::<L, context::Blank>();
         let has_error = !rtti::is_same_ty::<E, Nae>();
         let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
 
-        match (has_state, has_context, has_error, has_payload) {
-            (true, false, false, false) => {
-                Error(RawError::<S::Repr>::new_boxed::<_, _, context::Blank>(
-                    None,
-                    Nae::new(),
-                    payload::Empty::new(),
-                ))
-            }
-            (false, true, false, false) => {
-                let Ok(body) = match_else!(rtti::concretize::<_, RawError<S::Repr>>(RawError::new_const::<L>()),
-                    Err(_) => unreachable!(),
-                );
-                Error(body)
-            }
+        match (has_context, has_error, has_payload) {
+            (false, false, false) => unreachable!(),
+            (true, false, false) => Error(RawError::new_const::<L>()).with_phantom_state(),
             _ => Error(RawError::new_boxed::<_, _, L>(
                 None,
                 value.err,
