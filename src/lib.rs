@@ -218,7 +218,7 @@ impl Error {
     /// Converts to a state-tagged error without storing any runtime state.
     pub fn with_phantom_state<S>(self) -> Error<S>
     where
-        S: State,
+        S: State + ?Sized,
     {
         Error(self.0.with_phantom_state::<S::Repr>())
     }
