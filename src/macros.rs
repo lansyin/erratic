@@ -1,6 +1,8 @@
 #[doc(hidden)]
 pub mod __priv_reexport {
-    pub use std;
+    extern crate alloc;
+    pub use alloc::{format, string};
+    pub use core;
 }
 
 /// Like `let-else`, but also handles the remaining cases — for [`Result`][core::result::Result] only.
@@ -22,10 +24,10 @@ macro_rules! match_else {
         match $exp {
             Ok($pat) => {
                 #[allow(clippy::diverging_sub_expression)]
-                let _: $crate::macros::__priv_reexport::std::convert::Infallible = $body;
+                let _: $crate::macros::__priv_reexport::core::convert::Infallible = $body;
             }
-            Err(err) => $crate::macros::__priv_reexport::std::result::Result::<
-                $crate::macros::__priv_reexport::std::convert::Infallible,
+            Err(err) => $crate::macros::__priv_reexport::core::result::Result::<
+                $crate::macros::__priv_reexport::core::convert::Infallible,
                 _,
             >::Err(err),
         }
@@ -34,11 +36,11 @@ macro_rules! match_else {
         match $exp {
             Err($pat) => {
                 #[allow(clippy::diverging_sub_expression)]
-                let _: $crate::macros::__priv_reexport::std::convert::Infallible = $body;
+                let _: $crate::macros::__priv_reexport::core::convert::Infallible = $body;
             }
-            Ok(value) => $crate::macros::__priv_reexport::std::result::Result::<
+            Ok(value) => $crate::macros::__priv_reexport::core::result::Result::<
                 _,
-                $crate::macros::__priv_reexport::std::convert::Infallible,
+                $crate::macros::__priv_reexport::core::convert::Infallible,
             >::Ok(value),
         }
     };
@@ -134,10 +136,10 @@ macro_rules! literal {
 #[macro_export]
 macro_rules! mkerr {
     ($($key:ident=$value:expr),+ $(, $($fmt:literal $($args:tt)*)?)?) => {
-        $crate::__priv_mkerr_kvs!(@sort[,,,] $($key=$value,)+ $($(payload=$crate::macros::__priv_reexport::std::format!($fmt $($args)*),)?)?)
+        $crate::__priv_mkerr_kvs!(@sort[,,,] $($key=$value,)+ $($(payload=$crate::macros::__priv_reexport::format!($fmt $($args)*),)?)?)
     };
     ($fmt:literal $($args:tt)*) => {{
-        fn make_error<'a, S>(args: $crate::macros::__priv_reexport::std::fmt::Arguments<'a>) -> $crate::Error<S>
+        fn make_error<'a, S>(args: $crate::macros::__priv_reexport::core::fmt::Arguments<'a>) -> $crate::Error<S>
         where
             S: $crate::state::State + ?Sized,
         {
@@ -150,10 +152,10 @@ macro_rules! mkerr {
 
                 $crate::Error::from_context(Literal)
             } else {
-                $crate::Error::from_payload($crate::macros::__priv_reexport::std::string::ToString::to_string(&args))
+                $crate::Error::from_payload($crate::macros::__priv_reexport::string::ToString::to_string(&args))
             }
         }
-        make_error($crate::macros::__priv_reexport::std::format_args!($fmt $($args)*))
+        make_error($crate::macros::__priv_reexport::core::format_args!($fmt $($args)*))
     }};
 }
 
@@ -177,7 +179,7 @@ macro_rules! __priv_mkerr_kvs {
         $crate::__priv_mkerr_kvs!(@sort[$($s)?, $($c)?, $($p)?, $e] $($k=$v,)*)
     }};
     (@sort[$($s:expr)?, $($c:expr)?, $($p:expr)?, $($e:expr)?]) => {{
-        let builder = ($crate::macros::__priv_reexport::std::option::Option::None::<()>);
+        let builder = ($crate::macros::__priv_reexport::core::option::Option::None::<()>);
         $(let builder = builder.ok_or($e);)?
         $(let builder = $crate::BuilderExt::with_state(builder, $s);)?
         $(let builder = $crate::BuilderExt::with_context(builder, $crate::literal!($c));)?
@@ -185,7 +187,7 @@ macro_rules! __priv_mkerr_kvs {
         $crate::__priv_mkerr_kvs!(@infer[$($s)?] builder.unwrap_err())
     }};
     (@infer[] $builder:expr) => {
-        $crate::macros::__priv_reexport::std::convert::Into::<$crate::Error::<_>>::into($builder)
+        $crate::macros::__priv_reexport::core::convert::Into::<$crate::Error::<_>>::into($builder)
     };
     (@infer[$state:expr] $builder:expr) => {
         $crate::ErrorExt::build_error($builder)
@@ -196,15 +198,20 @@ macro_rules! __priv_mkerr_kvs {
 #[macro_export]
 macro_rules! mkres {
     ($($key:ident=$value:expr),+ $(, $($fmt:literal $($args:tt)*)?)?) => {
-        $crate::macros::__priv_reexport::std::result::Result::Err($crate::mkerr!($($key=$value),+ $($(, $fmt $($args)*)?)?))
+        $crate::macros::__priv_reexport::core::result::Result::Err($crate::mkerr!($($key=$value),+ $($(, $fmt $($args)*)?)?))
     };
     ($fmt:literal $($args:tt)*) => {
-        $crate::macros::__priv_reexport::std::result::Result::Err($crate::mkerr!($fmt $($args)*))
+        $crate::macros::__priv_reexport::core::result::Result::Err($crate::mkerr!($fmt $($args)*))
     };
 }
 
 #[cfg(test)]
 mod tests {
+    use alloc::{
+        format,
+        string::{String, ToString},
+    };
+
     use crate::*;
 
     // Ensure the macros do not require type annotations in the most common cases

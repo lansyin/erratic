@@ -119,8 +119,10 @@
 //!                                      `heap-> [VTable|State|Error|Payload|Context]
 //! ```
 //!
-
+#![no_std]
 #![allow(clippy::type_complexity)]
+
+extern crate alloc;
 
 mod ptr;
 mod raw;
@@ -134,8 +136,8 @@ pub mod nae;
 pub mod payload;
 pub mod state;
 
-use std::{
-    self,
+use alloc::boxed::Box;
+use core::{
     convert::Infallible,
     error,
     fmt::{self, Debug, Display},

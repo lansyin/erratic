@@ -1,5 +1,5 @@
 //! Payload placeholder for [`Builder`][crate::Builder].
-use std::fmt::{self, Display};
+use core::fmt::{self, Display};
 
 /// A zero-sized payload placeholder for [Error][crate::Error].
 #[derive(Debug)]

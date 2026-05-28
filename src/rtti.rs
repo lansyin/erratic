@@ -1,4 +1,4 @@
-use std::{
+use core::{
     any::{Any, TypeId},
     mem::ManuallyDrop,
     result,
@@ -41,6 +41,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::String;
+
     use super::*;
 
     #[test]

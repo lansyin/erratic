@@ -1,5 +1,5 @@
 //! Error placeholder for [`Builder`][crate::Builder].
-use std::{
+use core::{
     error,
     fmt::{self, Display},
 };

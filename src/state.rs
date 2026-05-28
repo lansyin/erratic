@@ -1,5 +1,5 @@
 //! State traits and the [`Stateless`] marker.
-use std::{convert::Infallible, fmt::Debug};
+use core::{convert::Infallible, fmt::Debug};
 
 /// Associates an error state type with its stored representation.
 ///

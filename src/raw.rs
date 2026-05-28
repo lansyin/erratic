@@ -1,13 +1,5 @@
-use crate::{
-    context::{self, Literal},
-    match_else,
-    nae::Nae,
-    payload,
-    ptr::{Align4, Align4Own, Align4PtrCompat, Align4Ref, Metadata, Mut, Ref},
-    rtti,
-};
-use std::{
-    self,
+use alloc::{boxed::Box, format};
+use core::{
     any::TypeId,
     convert::Infallible,
     error,
@@ -15,6 +7,15 @@ use std::{
     mem::{self, ManuallyDrop},
     ptr::NonNull,
     result,
+};
+
+use crate::{
+    context::{self, Literal},
+    match_else,
+    nae::Nae,
+    payload,
+    ptr::{Align4, Align4Own, Align4PtrCompat, Align4Ref, Metadata, Mut, Ref},
+    rtti,
 };
 
 /// Triple-state error storage.
@@ -1164,17 +1165,19 @@ where
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::{String, ToString};
+    use core::{
+        convert::Infallible,
+        error,
+        fmt::{self, Display},
+        mem,
+    };
+
     use super::*;
     use crate::{
         context::{Blank, Literal},
         nae::Nae,
         payload,
-    };
-    use std::{
-        convert::Infallible,
-        error,
-        fmt::{self, Display},
-        mem,
     };
 
     // --- Test helpers ---
@@ -1478,7 +1481,7 @@ mod tests {
     /// Allocate a boxed variant and ensure it can be observed to drop.
     #[test]
     fn boxed_variant_drop_does_not_leak() {
-        use std::sync::atomic::{AtomicBool, Ordering};
+        use core::sync::atomic::{AtomicBool, Ordering};
 
         static DROPPED: AtomicBool = AtomicBool::new(false);
 

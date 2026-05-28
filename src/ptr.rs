@@ -1,4 +1,5 @@
-use std::{
+use alloc::boxed::Box;
+use core::{
     marker::PhantomData,
     mem::{self, ManuallyDrop, MaybeUninit},
     ptr::{self, NonNull},
@@ -419,7 +420,7 @@ impl<'a, T> Mut<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::mem;
+    use core::mem;
 
     /// Verifies that `Align4Ptr::from_parts` / `into_parts` round-trips address and metadata.
     #[test]
