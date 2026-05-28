@@ -297,6 +297,11 @@ where
         ))
     }
 
+    /// Returns `true` if there is a state stored inside the error.
+    pub fn has_state(&self) -> bool {
+        self.0.state().is_some()
+    }
+
     /// Returns a reference to the context, if present.
     pub fn context(&self) -> Option<&(dyn Display + Send + Sync + 'static)> {
         self.0.context()
