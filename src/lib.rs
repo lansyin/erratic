@@ -38,7 +38,7 @@
 //!     let r = r.upgrade()
 //!         .with_context(literal!("reader expired"))?; // No alloc.
 //!     r.read(buf)
-//!         .with_context(literal!("failed to write to"))
+//!         .with_context(literal!("failed to read from"))
 //!         .with_payload(r.name())?; // Alloc once for error, name, and context.
 //!     Ok(())
 //! }
