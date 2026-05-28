@@ -163,19 +163,19 @@ macro_rules! mkerr {
 #[doc(hidden)]
 macro_rules! __priv_mkerr_kvs {
     (@sort[$($_:expr)?, $($c:expr)?, $($p:expr)?, $($e:expr)?] state=$s:expr, $($k:ident=$v:expr,)*) => {{
-        $( let _ = $_; compile_error!("state can only be set once");)?
+        $( let _ = $_; $crate::macros::__priv_reexport::core::compile_error!("state can only be set once");)?
         $crate::__priv_mkerr_kvs!(@sort[$s, $($c)?, $($p)?, $($e)?] $($k=$v,)*)
     }};
     (@sort[$($s:expr)?, $($_:expr)?, $($p:expr)?, $($e:expr)?] context=$c:expr, $($k:ident=$v:expr,)*) => {{
-        $( let _ = $_; compile_error!("context can only be set once");)?
+        $( let _ = $_; $crate::macros::__priv_reexport::core::compile_error!("context can only be set once");)?
         $crate::__priv_mkerr_kvs!(@sort[$($s)?, $c, $($p)?, $($e)?] $($k=$v,)*)
     }};
     (@sort[$($s:expr)?, $($c:expr)?, $($_:expr)?, $($e:expr)?] payload=$p:expr, $($k:ident=$v:expr,)*) => {{
-        $( let _ = $_; compile_error!("payload can only be set once. note: the format string counts as a payload.");)?
+        $( let _ = $_; $crate::macros::__priv_reexport::core::compile_error!("payload can only be set once. note: the format string counts as a payload.");)?
         $crate::__priv_mkerr_kvs!(@sort[$($s)?, $($c)?, $p, $($e)?] $($k=$v,)*)
     }};
     (@sort[$($s:expr)?, $($c:expr)?, $($p:expr)?, $($_:expr)?] error=$e:expr, $($k:ident=$v:expr,)*) => {{
-        $( let _ = $_; compile_error!("error can only be set once");)?
+        $( let _ = $_; $crate::macros::__priv_reexport::core::compile_error!("error can only be set once");)?
         $crate::__priv_mkerr_kvs!(@sort[$($s)?, $($c)?, $($p)?, $e] $($k=$v,)*)
     }};
     (@sort[$($s:expr)?, $($c:expr)?, $($p:expr)?, $($e:expr)?]) => {{
