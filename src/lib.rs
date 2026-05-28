@@ -652,11 +652,24 @@ where
     L: Context + ?Sized,
 {
     fn from(value: Builder<Error<S1>, S, F, L>) -> Self {
-        Error(RawError::new_boxed::<_, _, L>(
-            value.state,
-            value.err.erase(),
-            value.payload_fn.call(),
-        ))
+        let from_stateless = !rtti::is_same_ty::<S::Repr, Infallible>();
+        let has_state = !rtti::is_same_ty::<S::Repr, Infallible>();
+        let has_context = !rtti::is_same_ty::<L, context::Blank>();
+        let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
+
+        match (from_stateless, has_state, has_context, has_payload) {
+            (true, false, false, false) => {
+                let Ok(body) = match_else!(rtti::concretize::<_, RawError<Infallible>>(value.err.0),
+                    Err(_) => unreachable!(),
+                );
+                Error::<Stateless>(body).with_phantom_state::<S>()
+            }
+            _ => Error(RawError::new_boxed::<_, _, L>(
+                value.state,
+                value.err.erase(),
+                value.payload_fn.call(),
+            )),
+        }
     }
 }
 
