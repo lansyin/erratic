@@ -1,10 +1,10 @@
 [package]
 name = "erratic"
-version = "0.8.6"
+version = "0.8.7"
 edition = "2024"
 rust-version = "1.95.0"
 authors = ["Little Lan <lansyin@foxmail.com>"]
-categories = ["rust-patterns"]
+categories = ["rust-patterns", "no-std"]
 description = "Handling errors in an efficient way. "
 keywords = ["error", "error-handling"]
 license = "MIT"
