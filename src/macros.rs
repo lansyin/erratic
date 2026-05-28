@@ -106,7 +106,7 @@ macro_rules! literal {
 /// let _err = mkerr!("{} not found", filename).stateless();
 /// let _err = mkerr!(state = State::NotFound);
 /// let _err = mkerr!(context = "file not found").stateless();
-/// let _err = mkerr!(context = "file not found while opening", payload = filename).stateless();
+/// let _err = mkerr!(context = "failed to open", payload = filename).stateless();
 /// let _err = mkerr!(
 ///     state = State::NotFound,
 ///     context = "while opening",
@@ -114,17 +114,23 @@ macro_rules! literal {
 ///     error = err,
 /// );
 /// # let err = mkerr!("oops").stateless().erase();
+/// # let get_user_manual_url = || "";
 /// let _err = mkerr!(
 ///     state = State::NotFound,
 ///     error = err,
-///     "{filename} not found",
+///     "{filename} not found, check guides at {}",
+///     get_user_manual_url(),
 /// );
 /// # }
 /// ```
 ///
-/// # Order
+/// # Format String
 ///
-/// Key-value pairs can be provided in any order, and the format string must come at the end.
+/// The format string is mutually exclusive with the payload.
+///
+/// # Argument Order
+///
+/// Key-value pairs can be provided in any order, but must appear **before** the format string.
 #[macro_export]
 macro_rules! mkerr {
     ($($key:ident=$value:expr),+ $(, $($fmt:literal $($args:tt)*)?)?) => {
