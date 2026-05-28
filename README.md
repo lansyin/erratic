@@ -66,8 +66,9 @@ fn try_write(w: &mut Writer, data: &[u8; 64]) -> Result<(), Error<State>> {
 }
 ```
 
-The state is optional and can be extracted at runtime. A stateful error can thus be cheaply converted
-into a stateless error, while retaining the same type with distinct memory layouts.
+The state is optional and can be extracted at runtime, enabling stateless errors to have different layouts
+within a single type. A stateful error can be cheaply converted into a stateless one (via `extract_state`),
+while a stateless error can be cheaply converted into a stateful one (via `with_phantom_state`).
 
 ```rust
 use erratic::*;
