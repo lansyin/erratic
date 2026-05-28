@@ -1,79 +1,104 @@
-//! This library provides `Error<S = Stateless>`, an **optionally** dynamic dispatched error type,
+//! This library provides `Error<S = Stateless>`, an error type with **optional** dynamic dispatch,
 //! enabling applications to handle errors uniformly across different contexts.
 //!
 //! # Quick Start
+//!
 //! In most cases, `Error` can serve as a drop-in replacement for `Box<dyn Error>`.
 //! Compared to the latter, it occupies only 1 usize, making the happy path faster.
 //! ```
 //! # use std::{fs::File, io::Write};
 //! use erratic::*;
 //!
-//! fn write(filename: &str, content: &[u8]) -> Result<()> {
+//! fn write(filename: &str) -> Result<()> {
 //!     File::open(filename)?.write_all(b"Hello, World!")?;
 //!     Ok(())
 //! }
 //! ```
 //!
 //! # Attaching Context & Payload
+//!
 //! When constructing an error, you can optionally attach a static context and/or a dynamic payload.
-//! If attached, their memory is merged into a single allocation when the upstream error is erased.
+//! If attached, the memory is merged into a single allocation when the upstream error is erased.
 //! If omitted, no extra memory is allocated for them. If only a context is provided, no heap allocation
 //! occurs at all.
 //!
 //! ```
-//! # struct Tunnel;
-//! # impl Tunnel {
-//! #     fn write(&mut self, _: &[u8]) -> Result<()> { unimplemented!() }
-//! #     fn addr(&self) -> String { unimplemented!() }
-//! #     fn reserve_buffer(&self, _: usize) -> Result<()> { unimplemented!() }
+//! # use std::sync::Weak;
+//! # struct Reader;
+//! # impl Reader {
+//! #     fn read(&self, _: &[u8]) -> Result<()> { unimplemented!() }
+//! #     fn name(&self) -> String { unimplemented!() }
 //! # }
 //! use erratic::*;
 //!
-//! fn write_nonblocking(t: &mut Tunnel, bytes: &[u8]) -> Result<()> {
-//!     t.reserve_buffer(bytes.len())
-//!         .ok()
-//!         .with_context(literal!("retry later"))?; // No alloc.
-//!     t.write(bytes)
-//!         .with_context(literal!("unable writing to"))
-//!         .with_payload(t.addr())?; // Alloc once for error, addr, and context.
+//! fn read_weak(r: &mut Weak<Reader>, buf: &mut [u8]) -> Result<()> {
+//!     if buf.is_empty() {
+//!         return mkres!("buf must not be empty"); // No alloc so long as no format args.
+//!     }
+//!     let r = r.upgrade()
+//!         .with_context(literal!("reader expired"))?; // No alloc.
+//!     r.read(buf)
+//!         .with_context(literal!("failed to write to"))
+//!         .with_payload(r.name())?; // Alloc once for error, name, and context.
 //!     Ok(())
 //! }
 //! ```
 //!
 //! # Binding State
-//! When propagating an error that requires special handling, you can attach a generic state
-//! to it. The state is optional and can be cheaply erased or extracted using `extract_state`.
 //!
-//! When the state is small enough and none of the source error, context, or payload is attached,
+//! When propagating an error that requires special handling, you can attach a generic state to it.
+//! If the state is small enough and neither the source error, context, nor payload is attached,
 //! the state is inlined without any heap allocation.
 //!
 //! ```
-//! # struct Tunnel;
-//! # impl Tunnel {
+//! # use std::{result::Result};
+//! # struct Writer;
+//! # impl Writer {
 //! #     fn write(&mut self, _: &[u8]) -> erratic::Result<()> { unimplemented!() }
-//! #     fn addr(&self) -> String { unimplemented!() }
-//! #     fn reserve_buffer(&self, _: usize) -> erratic::Result<()> { unimplemented!() }
+//! #     fn name(&self) -> String { unimplemented!() }
+//! #     fn ready_for_write(&self, _: usize) -> erratic::Result<()> { unimplemented!() }
 //! # }
 //! use erratic::*;
-//! use std::result::Result;
 //!
 //! #[derive(Debug)]
-//! enum State {
-//!     RetryLater,
-//! }
+//! enum State { RetryLater }
 //!
-//! fn write_nonblocking(t: &mut Tunnel, bytes: &[u8]) -> Result<(), Error<State>> {
-//!     t.reserve_buffer(bytes.len())
+//! fn try_write(w: &mut Writer, data: &[u8; 64]) -> Result<(), Error<State>> {
+//!     w.ready_for_write(64)
 //!         .ok()
 //!         .with_state(State::RetryLater)?; // No alloc.
-//!     t.write(bytes)
-//!         .with_context(literal!("unable writing to"))
-//!         .with_payload(t.addr())?; // Alloc once for error, addr, and context.
+//!     w.write(data)
+//!         .with_context(literal!("failed to write to"))
+//!         .with_payload(w.name())?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! The state is optional and can be extracted at runtime. A stateful error can thus be cheaply converted
+//! into a stateless error, while retaining the same type with distinct memory layouts.
+//!
+//! ```
+//! # use std::{thread, result};
+//! # struct Writer;
+//! # #[derive(Debug)]
+//! # enum State { RetryLater }
+//! # fn try_write(_: &mut Writer, data: &[u8; 64]) -> result::Result<(), Error<State>> { unimplemented!() }
+//! use erratic::*;
+//!
+//! fn write(w: &mut Writer, data: &[u8; 64]) -> Result<()> {
+//!     while let Err((state, _)) = try_write(w, data).extract_state()? {
+//!         match state {
+//!             State::RetryLater => {
+//!                 thread::yield_now();
+//!             }
+//!         }
+//!     }
 //!     Ok(())
 //! }
 //! ```
 //!
 //! # Representation
+//!
 //! Type-wise, `Error<S>` is an internally tagged union, and it requires pointers to constant or
 //! heap-allocated data to be aligned to 4 bytes, freeing up the lower 2 bits to encode
 //! the discriminant. This design allows heap allocation to be avoided when unnecessary.
@@ -83,14 +108,14 @@
 //! (Context Only)
 //! [XXXXXX00|XXXXXXXX|XXXXXXXX|XXXXXXXX]
 //!                                     \
-//!                                     `rodata-> [Context]
+//!                                      `rodata-> [Context]
 //! (State Only)
 //! [00000010|     ~    State     ~     ]
 //!
 //! (Otherwise)
 //! [XXXXXX01|XXXXXXXX|XXXXXXXX|XXXXXXXX]
 //!                                     \
-//!                                     `heap-> [VTable|State|Error|Payload|Context]
+//!                                      `heap-> [VTable|State|Error|Payload|Context]
 //! ```
 //!
 
@@ -174,7 +199,7 @@ impl Error {
         }
     }
 
-    /// Starts building an `Error` with a lazily-evaluated payload.
+    /// Starts building an `Error` with a lazily evaluated payload.
     ///
     /// The closure `payload_fn` is called only when the error is materialized.
     pub fn with_payload_fn<F>(payload_fn: F) -> Builder<Nae, Stateless, F, context::Blank>
@@ -211,7 +236,7 @@ impl Error {
 
     /// Extracts the source error and payload by type.
     ///
-    /// Returns `None` when the corresponding requested type do not match.
+    /// Returns `None` when the corresponding requested type does not match.
     pub fn into_parts<P, E>(self) -> (Option<&'static str>, Option<P>, Option<E>)
     where
         E: 'static,
@@ -410,7 +435,7 @@ where
         self.0.into_state().map(S::from_repr)
     }
 
-    /// Extracts the state; retains the error if additional info is present.
+    /// Extracts the state; retains the error if additional information is present.
     pub fn extract_state(self) -> result::Result<(S, Option<Error>), Error> {
         match self.0.extract_state() {
             Ok((s, o)) => Ok((S::from_repr(s), o.map(Error))),
