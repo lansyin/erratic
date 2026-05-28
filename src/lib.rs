@@ -616,7 +616,7 @@ where
     L: Context + ?Sized,
 {
     fn from(value: Builder<E, Stateless, F, L>) -> Self {
-        let has_state = !rtti::is_same_ty::<S::Repr, ()>();
+        let has_state = !rtti::is_same_ty::<S::Repr, Infallible>();
         let has_context = !rtti::is_same_ty::<L, context::Blank>();
         let has_error = !rtti::is_same_ty::<E, Nae>();
         let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
