@@ -302,6 +302,14 @@ where
         self.0.state().is_some()
     }
 
+    /// Converts to a stateless error. Returns `None` when no extra details remain after dropping the state.
+    pub fn try_into_stateless(self) -> Option<Error> {
+        match self.0.extract_state() {
+            Ok((_, Some(err))) | Err(err) => Some(Error(err)),
+            _ => None,
+        }
+    }
+
     /// Returns a reference to the context, if present.
     pub fn context(&self) -> Option<&(dyn Display + Send + Sync + 'static)> {
         self.0.context()
