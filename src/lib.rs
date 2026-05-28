@@ -8,8 +8,8 @@
 //! # use std::{fs::File, io::Write};
 //! use erratic::*;
 //!
-//! fn write_log(filename: String) -> Result<()> {
-//!     File::open(&filename)?.write_all(b"Hello, World!")?;
+//! fn write(filename: &str, content: &[u8]) -> Result<()> {
+//!     File::open(filename)?.write_all(b"Hello, World!")?;
 //!     Ok(())
 //! }
 //! ```
@@ -21,16 +21,21 @@
 //! occurs at all.
 //!
 //! ```
-//! # use std::{fs::File, io::Write};
+//! # struct Tunnel;
+//! # impl Tunnel {
+//! #     fn write(&mut self, _: &[u8]) -> Result<()> { unimplemented!() }
+//! #     fn addr(&self) -> String { unimplemented!() }
+//! #     fn reserve_buffer(&self, _: usize) -> Result<()> { unimplemented!() }
+//! # }
 //! use erratic::*;
 //!
-//! fn write_log(filename: String) -> Result<()> {
-//!     File::open(&filename)
+//! fn write_nonblocking(t: &mut Tunnel, bytes: &[u8]) -> Result<()> {
+//!     t.reserve_buffer(bytes.len())
 //!         .ok()
-//!         .with_context(literal!("failed to open the log file"))? // No alloc.
-//!         .write_all(b"Hello, World!")
-//!         .with_context(literal!("while writing to"))
-//!         .with_payload(filename)?; // Alloc once for `io::Error`, `filename`, and `Context`.
+//!         .with_context(literal!("retry later"))?; // No alloc.
+//!     t.write(bytes)
+//!         .with_context(literal!("unable writing to"))
+//!         .with_payload(t.addr())?; // Alloc once for error, addr, and context.
 //!     Ok(())
 //! }
 //! ```
@@ -43,21 +48,27 @@
 //! the state is inlined without any heap allocation.
 //!
 //! ```
-//! # use std::{fs::File, io::Write, fmt::Debug};
+//! # struct Tunnel;
+//! # impl Tunnel {
+//! #     fn write(&mut self, _: &[u8]) -> erratic::Result<()> { unimplemented!() }
+//! #     fn addr(&self) -> String { unimplemented!() }
+//! #     fn reserve_buffer(&self, _: usize) -> erratic::Result<()> { unimplemented!() }
+//! # }
 //! use erratic::*;
+//! use std::result::Result;
 //!
 //! #[derive(Debug)]
-//! enum WriteLog {
-//!     FileNotFound,
+//! enum State {
+//!     RetryLater,
 //! }
 //!
-//! fn write_log(filename: String) -> std::result::Result<(), Error<WriteLog>> {
-//!     File::open(&filename)
+//! fn write_nonblocking(t: &mut Tunnel, bytes: &[u8]) -> Result<(), Error<State>> {
+//!     t.reserve_buffer(bytes.len())
 //!         .ok()
-//!         .with_state(WriteLog::FileNotFound)? // No alloc.
-//!         .write_all(b"Hello, World!")
-//!         .with_context(literal!("while writing to"))
-//!         .with_payload(filename)?;
+//!         .with_state(State::RetryLater)?; // No alloc.
+//!     t.write(bytes)
+//!         .with_context(literal!("unable writing to"))
+//!         .with_payload(t.addr())?; // Alloc once for error, addr, and context.
 //!     Ok(())
 //! }
 //! ```
@@ -228,15 +239,12 @@ impl<S> Error<S>
 where
     S: State + ?Sized,
 {
-    /// Erases the state type, returning an opaque [`Error`][error::Error].
-    ///
-    /// The returned error implements `std::error::Error`, `Send`, and `Sync`,
-    /// making it suitable for propagation through `?` or storage in `Box<dyn Error>`.
+    /// Returns an opaque [`Error`][error::Error].
     pub fn erase(self) -> impl error::Error + Send + Sync + 'static {
         ImplError::<S>(self.0)
     }
 
-    /// Returns a reference to an opaque [`Error`][error::Error] without consuming `self`.
+    /// Returns a reference to an opaque [`Error`][error::Error].
     pub fn erase_ref(&self) -> &(impl error::Error + Send + Sync + 'static) {
         // Safety: `ImplError<S>` is `#[repr(transparent)]` over `RawError<S::Repr>`,
         // so `&RawError<S::Repr>` and `&ImplError<S>` have identical layout.
@@ -244,8 +252,6 @@ where
     }
 
     /// Creates an `Error` from any [`Error`][std::error::Error].
-    ///
-    /// Equivalent to `E::into()` via the blanket `From` impl.
     pub fn from_error<E>(err: E) -> Self
     where
         E: error::Error + Send + Sync + 'static,
@@ -253,7 +259,7 @@ where
         err.into()
     }
 
-    /// Creates an `Error` from a typed literal context.
+    /// Creates an `Error` from a typed literal value.
     pub fn from_context<L>(_ty: L) -> Self
     where
         L: Literal,
@@ -261,7 +267,7 @@ where
         Self::from_context_ty::<L>()
     }
 
-    /// Creates an `Error` from a literal context type, inferred at the call site.
+    /// Creates an `Error` from a typed literal, inferred at the call site.
     pub fn from_context_ty<L>() -> Self
     where
         L: Literal,
@@ -279,7 +285,7 @@ where
         ))
     }
 
-    /// Creates an `Error` with a dynamic payload.
+    /// Creates an `Error` from a payload.
     pub fn from_payload<P>(payload: P) -> Self
     where
         P: Display + Send + Sync + 'static,
@@ -296,7 +302,7 @@ where
         self.0.context()
     }
 
-    /// Returns a reference to the displayable payload, if present.
+    /// Returns a reference to the payload, if present.
     pub fn payload(&self) -> Option<&(dyn Display + Send + Sync + 'static)> {
         self.0.payload()
     }
@@ -364,7 +370,7 @@ impl<S> Error<S>
 where
     S: State,
 {
-    /// Creates an `Error` with `state` inlined.
+    /// Creates an `Error` from a state value.
     pub fn from_state(state: S) -> Self {
         Error(RawError::new_inline_or_boxed(S::into_repr(state)))
     }
@@ -391,7 +397,7 @@ where
         self.0.into_state().map(S::from_repr)
     }
 
-    /// Preserves the state; retains the error if additional info is present.
+    /// Extracts the state; retains the error if additional info is present.
     pub fn extract_state(self) -> result::Result<(S, Option<Error>), Error> {
         match self.0.extract_state() {
             Ok((s, o)) => Ok((S::from_repr(s), o.map(Error))),
@@ -534,6 +540,7 @@ where
     }
 }
 
+// Builder Case #1: generic error; state -> state
 impl<E, S, F, L> From<Builder<E, S, F, L>> for Error<S>
 where
     F: PayloadFn,
@@ -567,6 +574,7 @@ where
     }
 }
 
+// Builder Case #2: generic error; state -> stateless
 impl<E, S, F, L> From<Builder<E, S, F, L>> for Error
 where
     F: PayloadFn,
@@ -608,6 +616,7 @@ where
     }
 }
 
+// Builder Case #3: generic error; stateless -> state
 impl<E, S, F, L> From<Builder<E, Stateless, F, L>> for Error<S>
 where
     F: PayloadFn,
@@ -644,6 +653,7 @@ where
     }
 }
 
+// Builder Case #4: erratic error; state -> state
 impl<S1, S, F, L> From<Builder<Error<S1>, S, F, L>> for Error<S>
 where
     S1: State + ?Sized,
@@ -652,7 +662,7 @@ where
     L: Context + ?Sized,
 {
     fn from(value: Builder<Error<S1>, S, F, L>) -> Self {
-        let from_stateless = !rtti::is_same_ty::<S::Repr, Infallible>();
+        let from_stateless = !rtti::is_same_ty::<S1::Repr, Infallible>();
         let has_state = !rtti::is_same_ty::<S::Repr, Infallible>();
         let has_context = !rtti::is_same_ty::<L, context::Blank>();
         let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
@@ -666,6 +676,64 @@ where
             }
             _ => Error(RawError::new_boxed::<_, _, L>(
                 value.state,
+                value.err.erase(),
+                value.payload_fn.call(),
+            )),
+        }
+    }
+}
+
+// Builder Case #5: erratic error; state -> stateless
+impl<S1, S, F, L> From<Builder<Error<S1>, S, F, L>> for Error
+where
+    S1: State + ?Sized,
+    F: PayloadFn,
+    S: State,
+    L: Context + ?Sized,
+{
+    fn from(value: Builder<Error<S1>, S, F, L>) -> Self {
+        let from_stateless = !rtti::is_same_ty::<S1::Repr, Infallible>();
+        let has_context = !rtti::is_same_ty::<L, context::Blank>();
+        let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
+
+        match (from_stateless, has_context, has_payload) {
+            (true, false, false) => {
+                let Ok(body) = match_else!(rtti::concretize::<_, RawError<Infallible>>(value.err.0),
+                    Err(_) => unreachable!(),
+                );
+                Error::<Stateless>(body)
+            }
+            _ => Error(RawError::new_boxed::<_, _, L>(
+                None,
+                value.err.erase(),
+                value.payload_fn.call(),
+            )),
+        }
+    }
+}
+
+// Builder Case #6: erratic error; stateless -> state
+impl<S1, S, F, L> From<Builder<Error<S1>, Stateless, F, L>> for Error<S>
+where
+    S1: State + ?Sized,
+    F: PayloadFn,
+    S: State,
+    L: Context + ?Sized,
+{
+    fn from(value: Builder<Error<S1>, Stateless, F, L>) -> Self {
+        let from_stateless = !rtti::is_same_ty::<S1::Repr, Infallible>();
+        let has_context = !rtti::is_same_ty::<L, context::Blank>();
+        let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
+
+        match (from_stateless, has_context, has_payload) {
+            (true, false, false) => {
+                let Ok(body) = match_else!(rtti::concretize::<_, RawError<Infallible>>(value.err.0),
+                    Err(_) => unreachable!(),
+                );
+                Error::<Stateless>(body).with_phantom_state::<S>()
+            }
+            _ => Error(RawError::new_boxed::<_, _, L>(
+                None,
                 value.err.erase(),
                 value.payload_fn.call(),
             )),
