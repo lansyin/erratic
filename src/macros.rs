@@ -189,8 +189,8 @@ macro_rules! __priv_mkerr_kvs {
 /// Shorthand for [`Err(mkerr!(..))`][`mkerr!`].
 #[macro_export]
 macro_rules! mkres {
-    ($($key:ident=$value:expr),+ $(,)?) => {
-        $crate::macros::__priv_reexport::std::result::Result::Err($crate::mkerr!($($key=$value),+))
+    ($($key:ident=$value:expr),+ $(, $($fmt:literal $($args:tt)*)?)?) => {
+        $crate::macros::__priv_reexport::std::result::Result::Err($crate::mkerr!($($key=$value),+ $($(, $fmt $($args)*)?)?))
     };
     ($fmt:literal $($args:tt)*) => {
         $crate::macros::__priv_reexport::std::result::Result::Err($crate::mkerr!($fmt $($args)*))
@@ -312,5 +312,29 @@ mod tests {
     fn error_from_literal_without_allocation() {
         let err = mkerr!("file not found").stateless();
         assert!(!err.has_payload_of::<String>());
+    }
+
+    #[test]
+    fn mkerr_and_mkres_share_same_capabilities() {
+        let world = "world";
+        let exclamation = "!";
+        let err_from_mkerr = mkerr!(
+            context = "test",
+            error = mkerr!("source").stateless().erase(),
+            state = 42,
+            "hello {world}{}",
+            exclamation,
+        );
+        let err_from_mkres: result::Result<(), _> = mkres!(
+            context = "test",
+            error = mkerr!("source").stateless().erase(),
+            state = 42,
+            "hello {world}{}",
+            exclamation,
+        );
+        assert_eq!(
+            err_from_mkerr.to_string(),
+            err_from_mkres.unwrap_err().to_string()
+        );
     }
 }
