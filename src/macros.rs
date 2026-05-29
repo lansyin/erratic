@@ -5,17 +5,18 @@ pub mod __priv_reexport {
     pub use core;
 }
 
-/// Like `let-else`, but also handles the remaining cases — for [`Result`][core::result::Result] only.
+/// Like `let-else`, with access to variant bindings in other branches, for [`Result`][core::result::Result] only.
 ///
 /// # Examples
 ///
 /// ```
 /// # use erratic::match_else;
-/// # fn try_send(_: ()) -> Result<(), ()> { unimplemented!() }
-/// # fn foo(packet: ()) {
-/// let Err(packet) = match_else!(try_send(packet),
-///     Ok(_) => return,
-/// );
+/// # fn try_send(_: ()) -> Result<i32, ()> { unimplemented!() }
+/// # fn foo(packet: ()) -> i32 {
+/// let Err(packet) = match_else!(try_send(packet), Ok(n) => {
+///     return n;
+/// });
+/// # 0i32
 /// # }
 /// ```
 #[macro_export]
