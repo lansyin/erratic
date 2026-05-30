@@ -26,21 +26,21 @@
 //! # use std::sync::Weak;
 //! # struct Reader;
 //! # impl Reader {
-//! #     fn read(&self, _: &[u8]) -> Result<()> { unimplemented!() }
+//! #     fn read(&self, _: &[u8]) -> Result<u64> { unimplemented!() }
 //! #     fn name(&self) -> String { unimplemented!() }
 //! # }
 //! use erratic::*;
 //!
-//! fn read_weak(r: &mut Weak<Reader>, buf: &mut [u8]) -> Result<()> {
+//! fn read_weak(r: &mut Weak<Reader>, buf: &mut [u8]) -> Result<u64> {
 //!     if buf.is_empty() {
 //!         return mkres!("buf must not be empty"); // No alloc so long as no format args.
 //!     }
 //!     let r = r.upgrade()
 //!         .with_context(literal!("reader expired"))?; // No alloc.
-//!     r.read(buf)
+//!     let n = r.read(buf)
 //!         .with_context(literal!("failed to read from"))
 //!         .with_payload(r.name())?; // Alloc once for error, name, and context.
-//!     Ok(())
+//!     Ok(n)
 //! }
 //! ```
 //!
