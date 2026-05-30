@@ -264,7 +264,7 @@ impl<T> Align4Own<T> {
     ///
     /// Same as [`borrow`](Align4Own::borrow).
     /// The caller must ensure no other mutable aliases exist.
-    pub fn borrow_mut(&self) -> Mut<'_, T> {
+    pub fn borrow_mut(&mut self) -> Mut<'_, T> {
         let (addr, _) = self.ptr.into_parts();
         let ptr: *mut Align4<T> = ptr::with_exposed_provenance_mut(addr);
         let ptr = ptr.cast::<T>();
@@ -311,10 +311,19 @@ impl<'a, T> Align4Ref<'a, T> {
     /// # Safety
     ///
     /// The stored address must point to a valid, initialized `T`.
-    pub fn borrow(&self) -> Ref<'_, T> {
+    pub fn borrow(&self) -> Ref<'a, T> {
         let (addr, _) = self.ptr.into_parts();
         let ptr: *const Align4<T> = ptr::with_exposed_provenance(addr);
         let ptr = ptr.cast::<T>();
+        Ref {
+            ptr: unsafe { NonNull::new_unchecked(ptr.cast_mut()) },
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn borrow_raw(&self) -> Ref<'a, Align4<T>> {
+        let (addr, _) = self.ptr.into_parts();
+        let ptr: *const Align4<T> = ptr::with_exposed_provenance(addr);
         Ref {
             ptr: unsafe { NonNull::new_unchecked(ptr.cast_mut()) },
             _marker: PhantomData,
@@ -325,7 +334,6 @@ impl<'a, T> Align4Ref<'a, T> {
 /// Typed shared reference wrapping a [`NonNull`] pointer.
 ///
 /// Designed for safe field projection via [`Ref::deref`] and [`Ref::project`].
-#[derive(Clone, Copy)]
 pub struct Ref<'a, T> {
     ptr: NonNull<T>,
     _marker: PhantomData<&'a Align4<T>>,
@@ -383,6 +391,17 @@ where
     }
 }
 
+impl<'a, T> Clone for Ref<'a, T> {
+    fn clone(&self) -> Self {
+        Self {
+            ptr: self.ptr,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<'a, T> Copy for Ref<'a, T> {}
+
 /// Typed mutable reference wrapping a [`NonNull`] pointer.
 ///
 /// Designed for safe field projection via [`Mut::deref_mut`] and [`Mut::project`].
@@ -418,13 +437,29 @@ impl<'a, T> Mut<'a, T> {
         }
     }
 
+    #[allow(dead_code)]
+    pub fn reborrow(&mut self) -> Ref<'_, T> {
+        Ref {
+            ptr: self.ptr,
+            _marker: PhantomData,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn reborrow_mut(&mut self) -> Mut<'_, T> {
+        Mut {
+            ptr: self.ptr,
+            _marker: PhantomData,
+        }
+    }
+
     /// Dereferences to a mutable reference.
     ///
     /// # Safety
     ///
     /// The caller must ensure the pointer is valid, properly aligned, and dereferenceable
     /// for the lifetime `'a`.
-    pub fn deref_mut(&mut self) -> &'a mut T {
+    pub fn deref_mut(mut self) -> &'a mut T {
         unsafe { self.ptr.as_mut() }
     }
 }
