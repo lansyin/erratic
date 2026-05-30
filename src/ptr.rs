@@ -430,6 +430,7 @@ impl<'a, T> Mut<'a, T> {
     /// `f` must return a pointer that is derived from the input pointer
     /// (i.e., pointing within the same allocation) and must be properly aligned for `F`.
     /// The resulting reference must not violate aliasing rules (e.g., no overlapping borrows).
+    #[allow(dead_code)]
     pub unsafe fn project<F>(self, f: fn(*mut T) -> *mut F) -> Mut<'a, F> {
         Mut {
             ptr: unsafe { NonNull::new_unchecked(f(self.ptr.as_ptr())) },
