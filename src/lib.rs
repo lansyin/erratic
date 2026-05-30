@@ -1354,7 +1354,7 @@ where
 
 impl<T, S> ErrorExt for result::Result<T, Error<S>>
 where
-    S: State,
+    S: State + ?Sized,
 {
     type Result<E> = result::Result<T, E>;
     type S = S;
