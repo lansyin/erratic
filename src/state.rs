@@ -55,8 +55,6 @@ where
 }
 
 /// Marker type indicating no meaningful state.
-///
-/// Maps to `()` as the stored representation.
 #[derive(Debug)]
 pub struct Stateless(#[allow(unused)] [()]);
 
