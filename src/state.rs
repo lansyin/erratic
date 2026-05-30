@@ -1,5 +1,10 @@
 //! State traits and the [`Stateless`] marker.
-use core::{convert::Infallible, fmt::Debug};
+use core::{convert::Infallible, error::Error as _, fmt::Debug};
+
+use crate::{
+    Error,
+    render::{DebugSourceChain, DisplayAsDebug},
+};
 
 /// Associates an error state type with its stored representation.
 ///
@@ -57,4 +62,62 @@ pub struct Stateless(#[allow(unused)] [()]);
 
 impl State for Stateless {
     type Repr = Infallible;
+}
+
+/// An [`Error<S>`] with its state temporarily extracted. It maintains a compatible
+/// storage layout to reattach the state later.
+pub struct Vacant<S>(Option<Error<S>>)
+where
+    S: State;
+
+impl<S> Vacant<S>
+where
+    S: State,
+{
+    pub(crate) fn new(err: Option<Error<S>>) -> Self {
+        Self(err)
+    }
+
+    /// Restores the original error by reattaching the extracted state.
+    pub fn with_state(self, state: S) -> Error<S> {
+        let Some(mut err) = self.0 else {
+            return Error::from_state(state);
+        };
+        err.0
+            .try_set_state(State::into_repr(state))
+            .expect("Vacant must be created with correct state storage type");
+
+        err
+    }
+
+    /// Converts into a stateless error. Returns `None` if no error details remain.
+    pub fn try_into_stateless(self) -> Option<Error> {
+        self.0.map(|s| {
+            s.try_into_stateless()
+                .expect("Vacant must not be created with an empty Error")
+        })
+    }
+}
+
+impl<S> Debug for Vacant<S>
+where
+    S: State,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut ds = f.debug_struct("Vacant");
+
+        if let Some(err) = &self.0 {
+            if let Some(context) = err.context() {
+                ds.field("context", &DisplayAsDebug(context));
+            }
+            if let Some(payload) = err.payload() {
+                ds.field("payload", &DisplayAsDebug(payload));
+            }
+            if let Some(source) = err.erase_ref().source() {
+                ds.field("source", &DebugSourceChain(&source));
+            }
+        }
+
+        ds.finish()
+    }
 }

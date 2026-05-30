@@ -126,6 +126,7 @@ extern crate alloc;
 
 mod ptr;
 mod raw;
+mod render;
 mod rtti;
 
 #[doc(hidden)]
@@ -150,7 +151,7 @@ use crate::{
     nae::Nae,
     payload::{Immediate, PayloadFn},
     raw::RawError,
-    state::{State, Stateless},
+    state::{State, Stateless, Vacant},
 };
 
 pub type Result<T> = result::Result<T, Error>;
@@ -439,9 +440,12 @@ where
     }
 
     /// Extracts the state; retains the error if additional information is present.
-    pub fn extract_state(self) -> result::Result<(S, Option<Error>), Error> {
+    pub fn extract_state(self) -> result::Result<(S, Vacant<S>), Error> {
         match self.0.extract_state() {
-            Ok((s, o)) => Ok((S::from_repr(s), o.map(Error))),
+            Ok((s, o)) => Ok((
+                S::from_repr(s),
+                Vacant::new(o.map(|e| Error::<S>(e.with_phantom_state::<S::Repr>()))),
+            )),
             Err(e) => Err(Error(e)),
         }
     }
@@ -769,13 +773,13 @@ where
 /// Extension trait for extracting the state to a separate layer.
 pub trait StateExt {
     type T;
-    type S;
+    type S: State;
     type Result<T, E>;
 
     ///  Extracts the state if it has been set.
     fn extract_state(
         self,
-    ) -> result::Result<Self::Result<Self::T, (Self::S, Option<Error>)>, Error>
+    ) -> result::Result<Self::Result<Self::T, (Self::S, Vacant<Self::S>)>, Error>
     where
         Self::S: Sized;
 }
@@ -788,7 +792,9 @@ where
     type S = S1;
     type Result<T, E> = E;
 
-    fn extract_state(self) -> result::Result<Self::Result<Self::T, (Self::S, Option<Error>)>, Error>
+    fn extract_state(
+        self,
+    ) -> result::Result<Self::Result<Self::T, (Self::S, Vacant<Self::S>)>, Error>
     where
         Self::S: Sized,
     {
@@ -804,7 +810,9 @@ where
     type S = S;
     type Result<T, E> = result::Result<T, E>;
 
-    fn extract_state(self) -> result::Result<Self::Result<Self::T, (Self::S, Option<Error>)>, Error>
+    fn extract_state(
+        self,
+    ) -> result::Result<Self::Result<Self::T, (Self::S, Vacant<Self::S>)>, Error>
     where
         Self::S: Sized,
     {
@@ -826,7 +834,9 @@ where
     type Result<T, E> = E;
     type S = S;
 
-    fn extract_state(self) -> result::Result<Self::Result<Self::T, (Self::S, Option<Error>)>, Error>
+    fn extract_state(
+        self,
+    ) -> result::Result<Self::Result<Self::T, (Self::S, Vacant<Self::S>)>, Error>
     where
         Self::S: Sized,
     {
@@ -845,7 +855,9 @@ where
     type S = S;
     type Result<T, E> = E;
 
-    fn extract_state(self) -> result::Result<Self::Result<Self::T, (Self::S, Option<Error>)>, Error>
+    fn extract_state(
+        self,
+    ) -> result::Result<Self::Result<Self::T, (Self::S, Vacant<Self::S>)>, Error>
     where
         Self::S: Sized,
     {
@@ -864,7 +876,9 @@ where
     type S = S;
     type Result<T, E> = result::Result<T, E>;
 
-    fn extract_state(self) -> result::Result<Self::Result<Self::T, (Self::S, Option<Error>)>, Error>
+    fn extract_state(
+        self,
+    ) -> result::Result<Self::Result<Self::T, (Self::S, Vacant<Self::S>)>, Error>
     where
         Self::S: Sized,
     {
@@ -886,7 +900,9 @@ where
     type S = S;
     type Result<T, E> = result::Result<T, E>;
 
-    fn extract_state(self) -> result::Result<Self::Result<Self::T, (Self::S, Option<Error>)>, Error>
+    fn extract_state(
+        self,
+    ) -> result::Result<Self::Result<Self::T, (Self::S, Vacant<Self::S>)>, Error>
     where
         Self::S: Sized,
     {

@@ -113,6 +113,18 @@ impl<T> Align4PtrCompat<T> {
             value_mut.read()
         }
     }
+
+    pub fn set_value(&mut self, value: T) {
+        unsafe {
+            // Safety: store_offset was checked before creating an Align4PtrCompat.
+            let store_offset = Self::store_offset().unwrap_unchecked();
+
+            // Safety: The offset is validated prior to creating Align4PtrCompat.
+            // The raw pointer, though invalidated by the newly created reference,
+            // is not used afterward.
+            *(self.store.as_ptr().offset(store_offset) as *mut T) = value;
+        }
+    }
 }
 
 impl<T> Drop for Align4PtrCompat<T> {
