@@ -66,9 +66,10 @@ fn try_write(w: &mut Writer, data: &[u8; 64]) -> Result<(), Error<State>> {
 }
 ```
 
-The state is optional and can be extracted at runtime, enabling stateless errors to have different layouts
-within a single type. A stateful error can be cheaply converted into a stateless one (via `extract_state`),
-while a stateless error can be cheaply converted into a stateful one (via `with_phantom_state`).
+The state is optional and can be extracted at runtime, which enables errors to share a single type with different
+layouts. A stateful error can be cheaply converted into a stateless one (via `extract_state`) and vice versa
+(via `with_phantom_state`). Using the `?` operator between stateful and stateless errors is supported, achieved by
+making `Stateless` unsized.
 
 ```rust
 use erratic::*;
@@ -87,11 +88,11 @@ fn write(w: &mut Writer, data: &[u8; 64]) -> Result<()> {
 
 ## Backtrace
 
-When the `backtrace` crate feature is enabled and either the `RUST_BACKTRACE` or `RUST_LIB_BACKTRACE`
-environment variable is set, [`Error<S>`] automatically captures a backtrace if none is present in
+When the `backtrace` feature is enabled and either the `RUST_BACKTRACE` or `RUST_LIB_BACKTRACE`
+environment variable is set, `Error<S>` automatically captures a backtrace if none is present in
 the error chain.
 
-The captured backtrace will be included in the error's output during formatting, unless the minus flag
+The captured backtrace will be included in the error's output during formatting, unless the minus sign
 (i.e. `{:-}`) is specified to suppress it. This functionality aids debugging for complex nested error
 workflows.
 
