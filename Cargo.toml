@@ -13,3 +13,7 @@ homepage = "https://github.com/lansyin/erratic"
 repository = "https://github.com/lansyin/erratic"
 
 [dependencies]
+
+[features]
+default = []
+backtrace = []

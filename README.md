@@ -85,6 +85,16 @@ fn write(w: &mut Writer, data: &[u8; 64]) -> Result<()> {
 }
 ```
 
+## Backtrace
+
+When the `backtrace` crate feature is enabled and either the `RUST_BACKTRACE` or `RUST_LIB_BACKTRACE`
+environment variable is set, [`Error<S>`] automatically captures a backtrace if none is present in
+the error chain.
+
+The captured backtrace will be included in the error's output during formatting, unless the minus flag
+(i.e. `{:-}`) is specified to suppress it. This functionality aids debugging for complex nested error
+workflows.
+
 ## Representation
 
 Type-wise, `Error<S>` is an internally tagged union, and it requires pointers to constant or

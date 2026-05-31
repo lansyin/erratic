@@ -30,7 +30,7 @@ fn generate_triple() -> Error<TestState> {
 #[test]
 fn display_simple() {
     assert_eq!(
-        format!("{}", generate_simple()),
+        format!("{:-}", generate_simple()),
         include_str!("ui/display_simple.stderr")
     );
 }
@@ -38,7 +38,7 @@ fn display_simple() {
 #[test]
 fn display_triple() {
     assert_eq!(
-        format!("{}", generate_triple()),
+        format!("{:-}", generate_triple()),
         include_str!("ui/display_triple.stderr")
     );
 }
@@ -46,7 +46,7 @@ fn display_triple() {
 #[test]
 fn display_alt_simple() {
     assert_eq!(
-        format!("{:#}", generate_simple()),
+        format!("{:-#}", generate_simple()),
         include_str!("ui/display_alt_simple.stderr")
     );
 }
@@ -54,7 +54,7 @@ fn display_alt_simple() {
 #[test]
 fn display_alt_triple() {
     assert_eq!(
-        format!("{:#}", generate_triple()),
+        format!("{:-#}", generate_triple()),
         include_str!("ui/display_alt_triple.stderr")
     );
 }
@@ -62,7 +62,7 @@ fn display_alt_triple() {
 #[test]
 fn debug_simple() {
     assert_eq!(
-        format!("{:?}", generate_simple()),
+        format!("{:-?}", generate_simple()),
         include_str!("ui/debug_simple.stderr")
     );
 }
@@ -70,7 +70,7 @@ fn debug_simple() {
 #[test]
 fn debug_triple() {
     assert_eq!(
-        format!("{:?}", generate_triple()),
+        format!("{:-?}", generate_triple()),
         include_str!("ui/debug_triple.stderr")
     );
 }
@@ -78,7 +78,7 @@ fn debug_triple() {
 #[test]
 fn debug_alt_simple() {
     assert_eq!(
-        format!("{:#?}", generate_simple()),
+        format!("{:-#?}", generate_simple()),
         include_str!("ui/debug_alt_simple.stderr")
     );
 }
@@ -86,7 +86,7 @@ fn debug_alt_simple() {
 #[test]
 fn debug_alt_triple() {
     assert_eq!(
-        format!("{:#?}", generate_triple()),
+        format!("{:-#?}", generate_triple()),
         include_str!("ui/debug_alt_triple.stderr")
     );
 }

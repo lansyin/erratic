@@ -98,6 +98,16 @@
 //! }
 //! ```
 //!
+//! # Backtrace
+//!
+//! When the `backtrace` crate feature is enabled and either the `RUST_BACKTRACE` or `RUST_LIB_BACKTRACE`
+//! environment variable is set, [`Error<S>`] automatically captures a backtrace if none is present in
+//! the error chain.
+//!
+//! The captured backtrace will be included in the error's output during formatting, unless the minus flag
+//! (i.e. `{:-}`) is specified to suppress it. This functionality aids debugging for complex nested error
+//! workflows.
+//!
 //! # Representation
 //!
 //! Type-wise, `Error<S>` is an internally tagged union, and it requires pointers to constant or
@@ -124,6 +134,7 @@
 
 extern crate alloc;
 
+mod backtrace;
 mod ptr;
 mod raw;
 mod render;
@@ -352,25 +363,22 @@ where
     /// Returns `true` if the wrapped source error is of type `E`.
     pub fn has_source_of<E>(&self) -> bool
     where
-        E: 'static,
+        E: error::Error + 'static,
     {
         self.0.downcast_source_ref::<E>().is_some()
+    }
+
+    /// Returns a reference to the source error, if any.
+    pub fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        self.0.source()
     }
 
     /// Attempts to downcast the wrapped source error to `E` by shared reference.
     pub fn downcast_source_ref<E>(&self) -> Option<&E>
     where
-        E: 'static,
+        E: error::Error + 'static,
     {
         self.0.downcast_source_ref::<E>()
-    }
-
-    /// Attempts to downcast the wrapped source error to `E` by mutable reference.
-    pub fn downcast_source_mut<E>(&mut self) -> Option<&mut E>
-    where
-        E: 'static,
-    {
-        self.0.downcast_source_mut::<E>()
     }
 
     /// Returns `true` if the attached payload is of type `P`.
@@ -439,7 +447,7 @@ where
         self.0.into_state().map(S::from_repr)
     }
 
-    /// Extracts the state; retains the error if additional information is present.
+    /// Try to extract the state.  
     pub fn extract_state(self) -> result::Result<(S, Vacant<S>), Error> {
         match self.0.extract_state() {
             Ok((s, o)) => Ok((
@@ -506,9 +514,7 @@ where
     S: State + ?Sized,
 {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        self.0
-            .source()
-            .map(|src| src as &(dyn error::Error + 'static))
+        self.0.source().map(|s| s as _)
     }
 }
 

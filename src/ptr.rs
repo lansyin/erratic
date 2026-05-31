@@ -393,10 +393,7 @@ where
 
 impl<'a, T> Clone for Ref<'a, T> {
     fn clone(&self) -> Self {
-        Self {
-            ptr: self.ptr,
-            _marker: PhantomData,
-        }
+        *self
     }
 }
 

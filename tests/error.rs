@@ -1,7 +1,7 @@
 mod common;
 
 use common::{TestError, TestMessage, TestState};
-use erratic::*;
+use erratic::{nae::Nae, *};
 use std::{mem, result};
 
 #[test]
@@ -38,20 +38,20 @@ fn downcast_source_ok() {
 #[test]
 fn downcast_source_wrong_type() {
     let err = mkerr!(error = TestError("oops")).stateless();
-    assert!(!err.has_source_of::<String>());
+    assert!(!err.has_source_of::<Nae>());
 }
 
 #[test]
 fn erase_makes_opaque() {
     let err = mkerr!(error = TestError("oops")).stateless();
-    assert_eq!(err.erase().to_string(), "oops");
+    assert_eq!(format!("{:-}", err.erase()), "oops");
 }
 
 #[test]
 fn erase_ref_lifetime() {
     let err = mkerr!(error = TestError("oops")).stateless();
     let opaque: &(dyn std::error::Error + Send + Sync + 'static) = err.erase_ref();
-    assert_eq!(opaque.to_string(), "oops");
+    assert_eq!(format!("{opaque:-}"), "oops");
 }
 
 #[test]
@@ -109,7 +109,7 @@ fn error_is_send_sync() {
 fn into_boxed_error() {
     let err = mkerr!(error = TestError("oops")).stateless();
     let boxed: Box<dyn std::error::Error + Send + Sync + 'static> = err.into();
-    assert_eq!(boxed.to_string(), "oops");
+    assert_eq!(format!("{boxed:-}"), "oops");
 }
 
 #[test]

@@ -63,7 +63,7 @@ impl State for Stateless {
 }
 
 /// An [`Error<S>`] with its state temporarily extracted. It maintains a compatible
-/// storage layout to reattach the state later.
+/// storage layout to support reattachment.
 pub struct Vacant<S>(Option<Error<S>>)
 where
     S: State;

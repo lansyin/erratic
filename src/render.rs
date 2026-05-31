@@ -33,7 +33,7 @@ impl<'a> fmt::Debug for DebugSourceChain<'a> {
         while let Some(source) = next_source {
             next_source = source.source();
 
-            list.entry(&format!("{source}"));
+            list.entry(&format!("{source:-}"));
         }
 
         list.finish()
@@ -45,11 +45,13 @@ pub fn format_debug<S>(
     state: Option<&S>,
     context: Option<&(dyn Display + Send + Sync + 'static)>,
     payload: Option<&(dyn Display + Send + Sync + 'static)>,
-    source: Option<&(dyn error::Error + Send + Sync + 'static)>,
+    source: Option<&(dyn error::Error + 'static)>,
+    backtrace: Option<&dyn Debug>,
 ) -> fmt::Result
 where
     S: Debug + 'static,
 {
+    let show_less = f.sign_minus();
     let ds = &mut f.debug_struct("Error");
 
     if !rtti::is_same_ty::<S, ()>()
@@ -70,6 +72,10 @@ where
         ds.field("source", &DebugSourceChain(source));
     }
 
+    if !show_less && let Some(backtrace) = backtrace {
+        ds.field("backtrace", &backtrace);
+    }
+
     ds.finish()
 }
 
@@ -78,11 +84,13 @@ pub fn format_display<S>(
     state: Option<&S>,
     context: Option<&(dyn Display + Send + Sync + 'static)>,
     payload: Option<&(dyn Display + Send + Sync + 'static)>,
-    source: Option<&(dyn error::Error + Send + Sync + 'static)>,
+    source: Option<&(dyn error::Error + 'static)>,
+    backtrace: Option<&dyn Display>,
 ) -> fmt::Result
 where
     S: Debug + 'static,
 {
+    let show_less = f.sign_minus();
     let state = state.map(|s| DebugAsDisplay(s));
 
     if f.alternate() {
@@ -108,14 +116,14 @@ where
             if has_additional_info {
                 write!(f, "\n  -> ")?;
             }
-            write!(f, "{source:#}")?;
+            write!(f, "{source:-#}")?;
         }
-
-        Ok(())
     } else {
         match (&state, context, payload, source) {
             (None, None, None, None) => unreachable!(),
-            (None, None, None, Some(err)) => Display::fmt(err, f),
+            (None, None, None, Some(err)) => {
+                Display::fmt(err, f)?;
+            }
             _ => {
                 let mut segments = [
                     state.as_ref().map(|s| s as &dyn Display),
@@ -133,9 +141,13 @@ where
                         write!(f, ": ")?;
                     }
                 }
-
-                Ok(())
             }
         }
     }
+
+    if !show_less && let Some(backtrace) = backtrace {
+        write!(f, "\n{backtrace}")?;
+    }
+
+    Ok(())
 }

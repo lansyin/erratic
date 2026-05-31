@@ -1,6 +1,5 @@
 #[doc(hidden)]
 pub mod __priv_reexport {
-    extern crate alloc;
     pub use alloc::{format, string};
     pub use core;
 }
@@ -261,7 +260,10 @@ mod tests {
             .with_payload("error message")
             .build();
 
-        assert_eq!(err_from_mkerr.to_string(), err_from_builder.to_string());
+        assert_eq!(
+            format!("{err_from_mkerr:-#}"),
+            format!("{err_from_builder:-#}")
+        );
     }
 
     #[test]
@@ -278,7 +280,10 @@ mod tests {
             .with_payload("error message")
             .build();
 
-        assert_eq!(err_from_mkerr.to_string(), err_from_builder.to_string());
+        assert_eq!(
+            format!("{err_from_mkerr:-#}"),
+            format!("{err_from_builder:-#}")
+        );
     }
 
     #[test]
@@ -296,7 +301,10 @@ mod tests {
             .with_payload(format!("hello {world}"))
             .build();
 
-        assert_eq!(err_from_mkerr.to_string(), err_from_builder.to_string());
+        assert_eq!(
+            format!("{err_from_mkerr:-#}"),
+            format!("{err_from_builder:-#}")
+        );
     }
 
     #[test]

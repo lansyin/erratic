@@ -2,7 +2,7 @@ use alloc::{boxed::Box, format};
 use core::{
     any::TypeId,
     convert::Infallible,
-    error,
+    error::{self, Error},
     fmt::{self, Debug, Display},
     mem::{self, ManuallyDrop, MaybeUninit},
     ptr::NonNull,
@@ -10,8 +10,8 @@ use core::{
 };
 
 use crate::{
-    context::{self, Literal},
-    match_else,
+    backtrace::WithBacktrace,
+    context, match_else,
     nae::Nae,
     payload,
     ptr::{Align4, Align4Own, Align4PtrCompat, Align4Ref, Metadata, Mut, Ref},
@@ -127,8 +127,17 @@ impl RawError<Infallible> {
     /// Constructs a const-variant [`RawError`] from a typed literal.
     pub fn new_const<L>() -> Self
     where
-        L: Literal + ?Sized,
+        L: context::Context + ?Sized,
     {
+        #[cfg(feature = "backtrace")]
+        if let Ok(source) = WithBacktrace::try_attach(Nae::new()) {
+            return RawError::<Infallible>::new_boxed_::<_, _, L>(
+                None,
+                source,
+                payload::Empty::new(),
+            );
+        }
+
         // Note: Relies on const promotion to produce a new constant.
         let body: &'static Align4<ConstBody> = &const {
             Align4(ConstBody {
@@ -157,17 +166,31 @@ impl RawError<Infallible> {
 
 impl<S> RawError<S> {
     /// Constructs an inline-variant [`RawError`] with `state` stored directly.
-    pub fn new_inline(state: S) -> result::Result<Self, S> {
+    pub fn try_new_inline(state: S) -> result::Result<Self, S>
+    where
+        S: Debug + Send + Sync + 'static,
+    {
+        #[cfg(feature = "backtrace")]
+        if let Ok(source) = WithBacktrace::try_attach(Nae::new()) {
+            return Ok(Self::new_boxed_::<_, _, context::Blank>(
+                Some(state),
+                source,
+                payload::Empty::new(),
+            ));
+        }
+
         Ok(Self {
             inline_body: ManuallyDrop::new(Align4PtrCompat::new(Self::KIND_INLINE, state)?),
         })
     }
 
+    /// Constructs a [RawError], storing the given state inline when the state fits within
+    /// the inline storage.
     pub fn new_inline_or_boxed(state: S) -> Self
     where
         S: Debug + Send + Sync + 'static,
     {
-        let Err(state) = match_else!(Self::new_inline(state),
+        let Err(state) = match_else!(Self::try_new_inline(state),
             Ok(this) => return this,
         );
         Self::new_boxed::<Nae, payload::Empty, context::Blank>(
@@ -186,35 +209,48 @@ impl<S> RawError<S> {
         S: Debug + Send + Sync + 'static,
         E: error::Error + Send + Sync + 'static,
         P: Display + Send + Sync + 'static,
-        L: Literal + context::Context + ?Sized,
+        L: context::Context + ?Sized,
     {
+        match WithBacktrace::try_attach(source) {
+            Ok(source) => Self::new_boxed_::<_, _, L>(state, source, payload),
+            Err(source) => Self::new_boxed_::<_, _, L>(state, source, payload),
+        }
+    }
+
+    fn new_boxed_<E, P, L>(state: Option<S>, source: E, payload: P) -> Self
+    where
+        S: Debug + Send + Sync + 'static,
+        E: error::Error + Send + Sync + 'static,
+        P: Display + Send + Sync + 'static,
+        L: context::Context + ?Sized,
+    {
+        let (vtable, state) = DynBody::<S, E, P, L::Repr>::vtable_from_state(state);
+
         // # Safety
         //
-        // The `Align4Own` pointer is cast to `DynBody<(), (), (), ()>` for uniform storage.
+        // The `Align4Own` pointer is cast to `DynBody<Infallible, (), (), ()>` for uniform storage.
         // This is valid because all monomorphizations of `DynBody<S, E, P, L::Repr>` share
         // the same vtable pointer, and the concrete `S`, `E`, `P`, `C` are erased.
         // The cast only changes the type parameter defaults — it does not violate the layout
         // because `()` is a ZST.
         // Due to `Align4Own`assumes a correct layout, and that's not true after the cast,
         // we need to put it in a `ManuallyDrop` and drop it via vtable instead.
-        let ptr = unsafe {
-            let (vtable, state) = DynBody::<S, E, P, L::Repr>::vtable_from_state(state);
-
-            Align4Own::from_boxed(
-                Box::new(Align4(DynBody::<S, E, P, L::Repr> {
-                    vtable,
-                    state,
-                    source,
-                    payload,
-                    context: L::new_context(),
-                })),
-                Self::KIND_BOXED,
-            )
-            .cast::<DynBody>()
-        };
-
         Self {
-            boxed_body: ManuallyDrop::new(ptr),
+            boxed_body: unsafe {
+                ManuallyDrop::new(
+                    Align4Own::from_boxed(
+                        Box::new(Align4(DynBody::<S, E, P, L::Repr> {
+                            vtable,
+                            state,
+                            source,
+                            payload,
+                            context: L::new_context(),
+                        })),
+                        RawError::<S>::KIND_BOXED,
+                    )
+                    .cast::<DynBody>(),
+                )
+            },
         }
     }
 
@@ -252,7 +288,7 @@ impl<S> RawError<S> {
     }
 
     /// Returns a reference to the wrapped source error, if present.
-    pub fn source(&self) -> Option<&(dyn error::Error + Send + Sync + 'static)> {
+    pub fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self.select_ref() {
             SelectRef::Const(_body) => None,
             SelectRef::Inline(_body) => None,
@@ -269,23 +305,9 @@ impl<S> RawError<S> {
     /// Returns `None` if the source is not of type `E` or does not exist.
     pub fn downcast_source_ref<E>(&self) -> Option<&E>
     where
-        E: 'static,
+        E: error::Error + 'static,
     {
-        match self.select_ref() {
-            SelectRef::Const(_body) => None,
-            SelectRef::Inline(_body) => None,
-            SelectRef::Boxed(body) => unsafe {
-                let vtable = DynBody::vtable(body.borrow());
-                let mut result = None::<&E>;
-                // Safety: The body pointer is confirmed valid.
-                (vtable.downcast_source_ref)(
-                    body.borrow(),
-                    TypeId::of::<E>(),
-                    NonNull::from_mut(&mut result).cast(),
-                );
-                result
-            },
-        }
+        self.source()?.downcast_ref::<E>()
     }
 
     /// Attempts to downcast the stored payload to `P`.
@@ -303,28 +325,6 @@ impl<S> RawError<S> {
                 (vtable.downcast_payload_ref)(
                     body.borrow(),
                     TypeId::of::<P>(),
-                    NonNull::from_mut(&mut result).cast(),
-                );
-                result
-            },
-        }
-    }
-
-    /// Attempts to downcast the stored source error to `E` by mutable reference.
-    pub fn downcast_source_mut<E>(&mut self) -> Option<&mut E>
-    where
-        E: 'static,
-    {
-        match self.select_mut() {
-            SelectMut::Const(_body) => None,
-            SelectMut::Inline(_body) => None,
-            SelectMut::Boxed(body) => unsafe {
-                let vtable = DynBody::vtable(body.borrow());
-                let mut result = None::<&mut E>;
-                // Safety: The body pointer is confirmed valid.
-                (vtable.downcast_source_mut)(
-                    body.borrow_mut(),
-                    TypeId::of::<E>(),
                     NonNull::from_mut(&mut result).cast(),
                 );
                 result
@@ -596,6 +596,7 @@ where
             self.context(),
             self.payload(),
             self.source(),
+            WithBacktrace::search_debug(self),
         )
     }
 }
@@ -611,6 +612,7 @@ where
             self.context(),
             self.payload(),
             self.source(),
+            WithBacktrace::search_display(self),
         )
     }
 }
@@ -694,19 +696,15 @@ struct DynBodyVTable {
     /// See [DynBody::try_set_state].
     try_set_state: unsafe fn(Mut<DynBody>, TypeId, NonNull<()>) -> bool,
     /// See [DynBody::source].
-    source: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn error::Error + Send + Sync + 'static)>,
+    source: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn error::Error + 'static)>,
     /// See [DynBody::state].
     state: unsafe fn(Ref<'_, DynBody>, TypeId, NonNull<()>),
     /// See [DynBody::payload].
     payload: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn Display + Send + Sync + 'static)>,
     /// See [DynBody::context].
     context: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn Display + Send + Sync + 'static)>,
-    /// See [DynBody::downcast_source_ref].
-    downcast_source_ref: unsafe fn(Ref<'_, DynBody>, TypeId, NonNull<()>),
     /// See [DynBody::downcast_payload_ref].
     downcast_payload_ref: unsafe fn(Ref<'_, DynBody>, TypeId, NonNull<()>),
-    /// See [DynBody::downcast_source_mut].
-    downcast_source_mut: unsafe fn(Mut<'_, DynBody>, TypeId, NonNull<()>),
     /// See [DynBody::downcast_payload_mut].
     downcast_payload_mut: unsafe fn(Mut<'_, DynBody>, TypeId, NonNull<()>),
 }
@@ -731,9 +729,7 @@ impl DynBodyVTable {
             state: DynBody::<S, E, P, L>::state,
             payload: DynBody::<S, E, P, L>::payload,
             context: DynBody::<S, E, P, L>::context,
-            downcast_source_ref: DynBody::<S, E, P, L>::downcast_source_ref,
             downcast_payload_ref: DynBody::<S, E, P, L>::downcast_payload_ref,
-            downcast_source_mut: DynBody::<S, E, P, L>::downcast_source_mut,
             downcast_payload_mut: DynBody::<S, E, P, L>::downcast_payload_mut,
         }
     }
@@ -887,10 +883,14 @@ where
     ) -> Option<Box<dyn error::Error + Send + Sync + 'static>> {
         let Align4(this) = *unsafe { ManuallyDrop::take(&mut this).cast::<Self>().into_boxed() };
         if rtti::is_same_ty::<E, Nae>() {
-            None
-        } else {
-            let parts = this.destruct();
-            Some(Box::new(parts.1))
+            return None;
+        };
+
+        let (_, source, ..) = this.destruct();
+
+        match rtti::concretize::<_, WithBacktrace>(source) {
+            Ok(with_backtrace) => with_backtrace.into_source(),
+            Err(source) => Some(Box::new(source)),
         }
     }
 
@@ -916,10 +916,18 @@ where
         let Align4(this) = *unsafe { ManuallyDrop::take(&mut this).cast::<Self>().into_boxed() };
         let (state, source, payload, context) = this.destruct();
 
-        if !rtti::is_same_ty::<E, Nae>() && TypeId::of::<E>() == source_ty {
-            // Safety: The caller guarantees `source_dst` points to a valid `Option<E>`.
-            let dst = unsafe { source_dst.cast::<Option<E>>().as_mut() };
-            dst.replace(source);
+        if !rtti::is_same_ty::<E, Nae>() {
+            match rtti::concretize::<_, WithBacktrace>(source) {
+                Ok(with_backtrace) => unsafe {
+                    with_backtrace.take_source(source_ty, source_dst);
+                },
+                Err(source) if TypeId::of::<E>() == source_ty => {
+                    // Safety: The caller guarantees `source_dst` points to a valid `Option<E>`.
+                    let dst = unsafe { source_dst.cast::<Option<E>>().as_mut() };
+                    dst.replace(source);
+                }
+                _ => {}
+            }
         }
         if !rtti::is_same_ty::<P, payload::Empty>() && TypeId::of::<P>() == payload_ty {
             // Safety: The caller guarantees `payload_dst` points to a valid `Option<P>`.
@@ -959,7 +967,13 @@ where
 
         let has_context = !rtti::is_same_ty::<C, context::Unit>();
         let has_payload = !rtti::is_same_ty::<P, payload::Empty>();
-        let has_source = !rtti::is_same_ty::<E, Nae>();
+        let has_source = !{
+            // TODO: This will discard the backtrace. It's ideal to keep
+            // the backtrace even if the error becomes empty.
+            (rtti::is_same_ty::<E, Nae>())
+                || (rtti::is_same_ty::<E, WithBacktrace>()
+                    && this.borrow().deref().source.source().is_none())
+        };
 
         match (has_context, has_payload, has_source) {
             (false, false, false) => {
@@ -1026,15 +1040,19 @@ where
     /// # Safety
     ///
     /// - `this` must point to a valid `DynBody<S, E, P, C>`.
-    unsafe fn source(
-        this: Ref<'_, DynBody>,
-    ) -> Option<&(dyn error::Error + Send + Sync + 'static)> {
+    unsafe fn source(this: Ref<'_, DynBody>) -> Option<&(dyn error::Error + 'static)> {
         let this = unsafe { this.cast::<Self>().deref() };
 
         if rtti::is_same_ty::<E, Nae>() {
-            None
-        } else {
-            Some(&this.source as &(dyn error::Error + Send + Sync + 'static))
+            return None;
+        }
+
+        match (
+            rtti::is_same_ty::<E, WithBacktrace>(),
+            WithBacktrace::searching(),
+        ) {
+            (true, false) => this.source.source(),
+            (true, true) | (false, _) => Some(&this.source as _),
         }
     }
 
@@ -1086,23 +1104,6 @@ where
         }
     }
 
-    /// Attempts to downcast the source field to the requested type `E`.
-    ///
-    /// Writes `Some(&E)` into `dst` if the type matches, otherwise does nothing.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must point to a valid `DynBody<S, E, P, C>`.
-    /// - `dst` must be a valid, aligned, mutable pointer to `Option<&Ty>`.
-    unsafe fn downcast_source_ref(this: Ref<'_, DynBody>, ty: TypeId, dst: NonNull<()>) {
-        let this = unsafe { this.cast::<Self>().deref() };
-
-        if !rtti::is_same_ty::<E, Nae>() && TypeId::of::<E>() == ty {
-            let dst = unsafe { dst.cast::<Option<&E>>().as_mut() };
-            *dst = Some(&this.source);
-        }
-    }
-
     /// Attempts to downcast the payload field to the requested type `P`.
     ///
     /// Writes `Some(&P)` into `dst` if the type matches, otherwise does nothing.
@@ -1117,23 +1118,6 @@ where
         if !rtti::is_same_ty::<P, payload::Empty>() && TypeId::of::<P>() == ty {
             let dst = unsafe { dst.cast::<Option<&P>>().as_mut() };
             *dst = Some(&this.payload);
-        }
-    }
-
-    /// Attempts to downcast the source field to the requested type `E` (mutable).
-    ///
-    /// Writes `Some(&mut E)` into `dst` if the type matches, otherwise does nothing.
-    ///
-    /// # Safety
-    ///
-    /// Same as [`downcast_source_ref`](DynBody::downcast_source_ref) with mutable access.
-    /// - `dst` must be a valid, aligned, mutable pointer to `Option<&mut Ty>`.
-    unsafe fn downcast_source_mut(this: Mut<'_, DynBody>, ty: TypeId, dst: NonNull<()>) {
-        let this = unsafe { this.cast::<Self>().deref_mut() };
-
-        if !rtti::is_same_ty::<E, Nae>() && TypeId::of::<E>() == ty {
-            let dst = unsafe { dst.cast::<Option<&mut E>>().as_mut() };
-            *dst = Some(&mut this.source);
         }
     }
 
@@ -1182,7 +1166,8 @@ where
             self.try_get_state(),
             (!rtti::is_same_ty::<C, context::Unit>()).then_some(&self.context),
             (!rtti::is_same_ty::<P, payload::Empty>()).then_some(&self.payload),
-            Some(&self.source),
+            self.source(),
+            WithBacktrace::search_debug(self),
         )
     }
 }
@@ -1200,7 +1185,8 @@ where
             self.try_get_state(),
             (!rtti::is_same_ty::<C, context::Unit>()).then_some(&self.context),
             (!rtti::is_same_ty::<P, payload::Empty>()).then_some(&self.payload),
-            Some(&self.source),
+            self.source(),
+            WithBacktrace::search_display(self),
         )
     }
 }
@@ -1213,13 +1199,25 @@ where
     C: Display + Send + Sync + 'static,
 {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        (!rtti::is_same_ty::<E, Nae>()).then_some(&self.source as _)
+        if rtti::is_same_ty::<E, Nae>() {
+            return None;
+        }
+        match (
+            rtti::is_same_ty::<E, WithBacktrace>(),
+            WithBacktrace::searching(),
+        ) {
+            (true, false) => self.source.source(),
+            (true, true) | (false, _) => Some(&self.source as _),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use alloc::string::{String, ToString};
+    use alloc::{
+        format,
+        string::{String, ToString},
+    };
     use core::{
         convert::Infallible,
         error,
@@ -1267,18 +1265,21 @@ mod tests {
 
     // --- RawError kind() discrimination ---
 
+    #[cfg(not(feature = "backtrace"))]
     #[test]
     fn kind_discriminates_const() {
         let err = RawError::new_const::<TestContext>();
         assert_eq!(err.kind(), RawError::<()>::KIND_CONST);
     }
 
+    #[cfg(not(feature = "backtrace"))]
     #[test]
     fn kind_discriminates_inline() {
-        let err = RawError::new_inline(4216u16).unwrap();
+        let err = RawError::try_new_inline(4216u16).unwrap();
         assert_eq!(err.kind(), RawError::<u16>::KIND_INLINE);
     }
 
+    #[cfg(not(feature = "backtrace"))]
     #[test]
     fn kind_discriminates_boxed() {
         let err = RawError::new_boxed::<_, _, Blank>(
@@ -1322,31 +1323,31 @@ mod tests {
 
     #[test]
     fn inline_variant_state() {
-        let err = RawError::new_inline(42u16).unwrap();
+        let err = RawError::try_new_inline(42u16).unwrap();
         assert!(matches!(err.state(), Some(42)));
     }
 
     #[test]
     fn inline_variant_into_state() {
-        let err = RawError::new_inline(42u16).unwrap();
+        let err = RawError::try_new_inline(42u16).unwrap();
         assert!(matches!(err.state(), Some(42)));
     }
 
     #[test]
     fn inline_variant_context_is_none() {
-        let err = RawError::new_inline(42u16).unwrap();
+        let err = RawError::try_new_inline(42u16).unwrap();
         assert!(err.context().is_none());
     }
 
     #[test]
     fn inline_variant_source_is_none() {
-        let err = RawError::new_inline(42u16).unwrap();
+        let err = RawError::try_new_inline(42u16).unwrap();
         assert!(err.source().is_none());
     }
 
     #[test]
     fn inline_variant_payload_is_none() {
-        let err = RawError::new_inline(42u16).unwrap();
+        let err = RawError::try_new_inline(42u16).unwrap();
         assert!(err.payload().is_none());
     }
 
@@ -1383,24 +1384,8 @@ mod tests {
             TestError("oops"),
             payload::Empty::new(),
         );
-        let downcasted = err.downcast_source_ref::<String>();
+        let downcasted = err.downcast_source_ref::<Nae>();
         assert!(downcasted.is_none());
-    }
-
-    #[test]
-    fn boxed_variant_downcast_source_mut() {
-        let mut err = RawError::new_boxed::<_, _, Blank>(
-            None::<Infallible>,
-            TestError("oops"),
-            payload::Empty::new(),
-        );
-        {
-            let downcasted = err.downcast_source_mut::<TestError>();
-            assert!(downcasted.is_some());
-            downcasted.unwrap().0 = "fixed";
-        }
-        let downcasted = err.downcast_source_ref::<TestError>();
-        assert_eq!(downcasted.unwrap().0, "fixed");
     }
 
     #[test]
@@ -1523,7 +1508,7 @@ mod tests {
 
     #[test]
     fn inline_variant_into_parts() {
-        let err = RawError::new_inline(42u16).unwrap();
+        let err = RawError::try_new_inline(42u16).unwrap();
         let (state, _, payload, source) = err.into_parts::<TestPayload, TestError>();
         assert!(source.is_none());
         assert!(payload.is_none());
@@ -1601,12 +1586,12 @@ mod tests {
         {
             let err =
                 RawError::new_boxed::<_, _, Blank>(None::<Infallible>, Nae::new(), format!("oops"));
-            assert!(matches!(err.extract_state(), Err(err) if err.to_string() == "oops"));
+            assert!(matches!(err.extract_state(), Err(err) if format!("{err:-}") == "oops"));
         }
         {
             let err = RawError::new_boxed::<_, _, Blank>(Some(42i32), Nae::new(), format!("oops"));
             assert!(
-                matches!(err.extract_state(), Ok((42i32, Some(err))) if err.to_string() == "oops")
+                matches!(err.extract_state(), Ok((42i32, Some(err))) if format!("{err:-}") == "oops")
             );
         }
     }
