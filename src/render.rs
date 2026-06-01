@@ -198,7 +198,7 @@ impl<'a, 'b> Write for FormatOne<'a, 'b> {
         self.last.truncate(*index);
         self.index = None;
 
-        self.formatter.write_str(&self.last)?;
+        self.formatter.write_str(self.last)?;
         Write::write_str(self, s)
     }
 }

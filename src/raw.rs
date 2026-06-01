@@ -1010,11 +1010,9 @@ where
     unsafe fn into_boxed_error(
         mut this: ManuallyDrop<Align4Own<DynBody>>,
     ) -> Box<dyn error::Error + Send + Sync + 'static> {
-        let this = unsafe {
+        unsafe {
             ManuallyDrop::into_inner(ManuallyDrop::take(&mut this).cast::<Self>()).into_boxed()
-        };
-
-        this
+        }
     }
 
     /// Replace the state if type matches.
