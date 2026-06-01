@@ -5,7 +5,7 @@ use core::{
 
 use alloc::format;
 
-pub struct DisplayAsDebug<'a>(pub &'a dyn Display);
+struct DisplayAsDebug<'a>(pub &'a dyn Display);
 
 impl<'a> Debug for DisplayAsDebug<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -13,7 +13,7 @@ impl<'a> Debug for DisplayAsDebug<'a> {
     }
 }
 
-pub struct DebugAsDisplay<'a>(pub &'a dyn Debug);
+struct DebugAsDisplay<'a>(pub &'a dyn Debug);
 
 impl<'a> Display for DebugAsDisplay<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -21,7 +21,7 @@ impl<'a> Display for DebugAsDisplay<'a> {
     }
 }
 
-pub struct DebugSourceChain<'a>(pub &'a dyn error::Error);
+struct DebugSourceChain<'a>(pub &'a dyn error::Error);
 
 impl<'a> fmt::Debug for DebugSourceChain<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -40,6 +40,7 @@ impl<'a> fmt::Debug for DebugSourceChain<'a> {
 
 pub fn format_debug<S>(
     f: &mut fmt::Formatter<'_>,
+    container_name: &'static str,
     state: Option<&S>,
     context: Option<&(dyn Display + Send + Sync + 'static)>,
     payload: Option<&(dyn Display + Send + Sync + 'static)>,
@@ -50,7 +51,7 @@ where
     S: Debug + 'static,
 {
     let show_less = f.sign_minus();
-    let ds = &mut f.debug_struct("Error");
+    let ds = &mut f.debug_struct(container_name);
 
     if let Some(state) = state {
         ds.field("state", state);

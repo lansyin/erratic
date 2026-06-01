@@ -1,10 +1,7 @@
 //! State traits and the [`Stateless`] marker.
-use core::{convert::Infallible, error::Error as _, fmt::Debug};
+use core::{convert::Infallible, fmt::Debug};
 
-use crate::{
-    Error,
-    render::{DebugSourceChain, DisplayAsDebug},
-};
+use crate::{Error, backtrace::WithBacktrace, render};
 
 /// Associates an error state type with its stored representation.
 ///
@@ -102,20 +99,18 @@ where
     S: State,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let mut ds = f.debug_struct("Vacant");
-
         if let Some(err) = &self.0 {
-            if let Some(context) = err.context() {
-                ds.field("context", &DisplayAsDebug(context));
-            }
-            if let Some(payload) = err.payload() {
-                ds.field("payload", &DisplayAsDebug(payload));
-            }
-            if let Some(source) = err.erase_ref().source() {
-                ds.field("source", &DebugSourceChain(&source));
-            }
+            render::format_debug(
+                f,
+                "Vacant",
+                err.state(),
+                err.context(),
+                err.payload(),
+                err.source(),
+                WithBacktrace::search_debug(err.erase_ref()),
+            )
+        } else {
+            write!(f, "Vacant")
         }
-
-        ds.finish()
     }
 }
