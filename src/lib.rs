@@ -179,6 +179,7 @@ use core::{
     error,
     fmt::{self, Debug, Display},
     marker::PhantomData,
+    ops::Deref,
     result,
 };
 
@@ -508,6 +509,17 @@ where
             )),
             Err(e) => Err(Error(e)),
         }
+    }
+}
+
+impl<S> Deref for Error<S>
+where
+    S: State + ?Sized,
+{
+    type Target = dyn error::Error + Send + Sync + 'static;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
