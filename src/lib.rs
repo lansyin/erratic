@@ -936,7 +936,9 @@ pub trait BuilderExt: Sized {
 
     /// Attaches a static literal context.
     ///
-    /// For dynamic content, use [`with_payload`][Self::with_payload] instead.
+    /// For dynamic content, use [`with_payload`][Self::with_payload] instead. It's encouraged to
+    /// just use `.with_payload("..")`, since in most cases we are wrapping a source error and
+    /// the allocation cost is already paid.
     fn with_context<L>(self, _ty: L) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>>
     where
         L: Context,
