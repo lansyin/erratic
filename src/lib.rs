@@ -106,9 +106,9 @@
 //! environment variable is set, `Error<S>` automatically captures a backtrace if none is present in
 //! the error chain.
 //!
-//! The captured backtrace will be included in the error's output during formatting, unless the minus sign
-//! (i.e. `{:-}`) is specified to suppress it. This functionality aids debugging for complex nested error
-//! workflows.
+//! The captured backtrace will be included in the error's output during debug formatting, unless
+//! the minus sign (i.e. `{:-?}`) is specified to suppress it. This functionality aids debugging
+//! for complex nested error workflows.
 //!
 //! # Representation
 //!

@@ -1,10 +1,11 @@
 Error {
     state: FileNotFound,
-    context: "while copying file",
+    context: "while copying file: ",
     payload: "hello.txt",
-    source: [
-        "while invoking copy_context",
-        "while invoking open",
-        "no such device",
-    ],
+    source: Error {
+        payload: "while invoking copy_context",
+        source: Error {
+            context: "no such device",
+        },
+    },
 }

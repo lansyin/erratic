@@ -1,1 +1,2 @@
-Error { state: FileNotFound, context: "while opening file", payload: "hello.txt", source: ["no such device"] }
+FileNotFound: while opening file: hello.txt
+  -> no such device

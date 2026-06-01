@@ -1,4 +1,3 @@
 FileNotFound: while copying file: hello.txt
   -> while invoking copy_context
-  -> while invoking open
   -> no such device

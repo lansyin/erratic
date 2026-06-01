@@ -1,1 +1,3 @@
-Error { state: FileNotFound, context: "while copying file", payload: "hello.txt", source: ["while invoking copy_context", "while invoking open", "no such device"] }
+FileNotFound: while copying file: hello.txt
+  -> while invoking copy_context
+  -> no such device

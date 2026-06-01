@@ -5,26 +5,26 @@ use common::*;
 mod common;
 
 fn generate_simple() -> Error<TestState> {
-    Error::with_error(TestError("no such device"))
-        .with_state(TestState::FileNotFound)
-        .with_context(literal!("while opening file"))
-        .with_payload(TestMessage("hello.txt".to_owned()))
-        .build()
+    mkerr!(
+        error = TestError("no such device"),
+        state = TestState::FileNotFound,
+        context = "while opening file: ",
+        payload = TestMessage("hello.txt".to_owned())
+    )
 }
 
 fn generate_triple() -> Error<TestState> {
     let source_1 = mkerr!("no such device").stateless().erase();
-    let source_2 = Error::with_error(source_1)
-        .with_payload("while invoking open")
-        .erase_error();
-    let source_3 = Error::with_error(source_2)
-        .with_payload("while invoking copy_context")
-        .erase_error();
-    Error::with_error(source_3)
-        .with_state(TestState::FileNotFound)
-        .with_context(literal!("while copying file"))
-        .with_payload(TestMessage("hello.txt".to_owned()))
-        .build()
+    let source_2 = mkerr!(error = source_1).stateless().erase();
+    let source_3 = mkerr!(error = source_2, "while invoking copy_context")
+        .stateless()
+        .erase();
+    mkerr!(
+        error = source_3,
+        state = TestState::FileNotFound,
+        context = "while copying file: ",
+        payload = TestMessage("hello.txt".to_owned())
+    )
 }
 
 #[test]

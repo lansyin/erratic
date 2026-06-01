@@ -106,7 +106,7 @@ impl WithBacktrace {
 
     pub fn search_debug<'a>(
         #[allow(unused_variables)] source: &'a (dyn error::Error + 'static),
-    ) -> Option<&'a dyn Debug> {
+    ) -> Option<&'a dyn Backtrace> {
         cfg_select! {
             feature = "backtrace" => {
                 Self::search(source).map(|b| b as _)
@@ -117,7 +117,7 @@ impl WithBacktrace {
 
     pub fn search_display<'a>(
         #[allow(unused_variables)] source: &'a (dyn error::Error + 'static),
-    ) -> Option<&'a dyn Display> {
+    ) -> Option<&'a dyn Backtrace> {
         cfg_select! {
             feature = "backtrace" => {
                 Self::search(source).map(|b| b as _)
@@ -170,13 +170,13 @@ impl WithBacktrace {
 
 impl Debug for WithBacktrace {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[Backtrace]")
+        write!(f, "<Backtrace>")
     }
 }
 
 impl Display for WithBacktrace {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[Backtrace]")
+        write!(f, "<Backtrace>")
     }
 }
 
@@ -188,3 +188,8 @@ impl error::Error for WithBacktrace {
         Some(&*self.err)
     }
 }
+
+pub trait Backtrace: Debug + Display {}
+
+#[cfg(feature = "backtrace")]
+impl Backtrace for std::backtrace::Backtrace {}
