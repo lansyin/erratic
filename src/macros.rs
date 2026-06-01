@@ -103,11 +103,11 @@ macro_rules! literal {
 /// # let filename = "";
 /// # let something_impl_error_or_display = "";
 /// # let err = mkerr!("oops").stateless().erase();
-/// let _: _ = mkerr!("404 not found").stateless();
+/// let _: _     = mkerr!("404 not found").stateless();
 /// let _: Error = mkerr!("404 not found");
 /// let _: Error = mkerr!("{filename} not found");
 /// let _: Error = mkerr!("{} not found", filename);
-/// let _: _ = mkerr!(state = State::NotFound);
+/// let _: _            = mkerr!(state = State::NotFound);
 /// let _: Error<State> = mkerr!(state = State::NotFound);
 /// let _: Error = mkerr!(context = "file not found");
 /// let _: Error = mkerr!(context = "failed to open", payload = filename);
