@@ -20,15 +20,9 @@ impl Metadata {
 }
 
 cfg_select! {
-    target_pointer_width = "64" => {
-        #[repr(C, align(8))]
-        pub struct Align4PtrCompat<T> {
-            meta: u8,
-            store: [u8; 7],
-            after_store: PhantomData<T>,
-        }
-    },
     target_pointer_width = "32" => {
+        // Note: The repr/align attribute is required as it is used to compute the offset
+        // that satisfies the alignment of T.
         #[repr(C, align(4))]
         pub struct Align4PtrCompat<T> {
             meta: u8,
@@ -36,29 +30,35 @@ cfg_select! {
             after_store: PhantomData<T>,
         }
     },
+    target_pointer_width = "64" => {
+        // Note: The repr/align attribute is required as it is used to compute the offset
+        // that satisfies the alignment of T.
+        #[repr(C, align(8))]
+        pub struct Align4PtrCompat<T> {
+            meta: u8,
+            store: [u8; 7],
+            _marker: PhantomData<T>,
+        }
+    },
 }
 
 impl<T> Align4PtrCompat<T> {
-    pub const fn store_offset() -> Option<isize> {
+    pub const fn offset_in_store() -> Option<isize> {
+        const fn ty_of_field<T, F>(_: fn(T) -> F) -> usize {
+            mem::size_of::<F>()
+        }
+
         let target_size = mem::size_of::<T>();
         let target_align = mem::align_of::<T>();
         let store_offset_start = mem::offset_of!(Self, store);
-        let store_offset_end = mem::offset_of!(Self, after_store);
-        // Note: PhantomData<T> has align=1 for all T: https://doc.rust-lang.org/std/marker/struct.PhantomData.html#layout-1
-        let store_size = store_offset_end - store_offset_start;
-        let max_align_allowed = store_size.next_power_of_two() / 2;
-
-        if target_align > max_align_allowed {
-            return None;
-        }
+        let store_size = ty_of_field(|v: Self| v.store);
+        let store_offset_end = store_offset_start + store_size;
 
         let mut offset = store_offset_start;
         while offset <= store_offset_end {
             // Note: Rust guarantees that the alignment is not smaller than 1, even for ZSTs.
             // https://doc.rust-lang.org/reference/type-layout.html#size-and-alignment
-            if (target_align + offset).is_multiple_of(target_align)
-                && store_offset_end - offset >= target_size
-            {
+            if offset.is_multiple_of(target_align) && store_offset_end - offset >= target_size {
                 return Some((offset - store_offset_start) as isize);
             }
 
@@ -69,21 +69,20 @@ impl<T> Align4PtrCompat<T> {
     }
 
     pub fn new(meta: Metadata, value: T) -> result::Result<Self, T> {
-        let Some(store_offset) = Self::store_offset() else {
+        let Some(offset) = Self::offset_in_store() else {
             return Err(value);
         };
         let mut this = unsafe {
             Self {
                 meta: meta.0,
                 store: mem::zeroed(),
-                after_store: PhantomData,
+                _marker: PhantomData,
             }
         };
 
         unsafe {
-            // Safety: The offset is validated in STORE_OFFSET.
-            let value_mut =
-                &mut *(this.store.as_mut_ptr().offset(store_offset) as *mut MaybeUninit<T>);
+            // Safety: The offset is validated in `Self::offset_in_store`.
+            let value_mut = &mut *(this.store.as_mut_ptr().offset(offset) as *mut MaybeUninit<T>);
 
             value_mut.write(value);
         }
@@ -93,22 +92,23 @@ impl<T> Align4PtrCompat<T> {
 
     pub fn borrow_value(&self) -> &T {
         unsafe {
-            // Safety: store_offset was checked before creating an Align4PtrCompat.
-            let store_offset = Self::store_offset().unwrap_unchecked();
+            let offset = Self::offset_in_store()
+                .expect("offset_in_store was checked before creating an Align4PtrCompat");
 
             // Safety: The offset is validated prior to creating Align4PtrCompat.
             // The raw pointer, though invalidated by the newly created reference,
             // is not used afterward.
-            &*(self.store.as_ptr().offset(store_offset) as *const T)
+            &*(self.store.as_ptr().offset(offset) as *const T)
         }
     }
 
     pub fn into_value(self) -> T {
         unsafe {
-            // Safety: store_offset was checked before creating an Align4PtrCompat.
-            let store_offset = Self::store_offset().unwrap_unchecked();
+            let offset = Self::offset_in_store()
+                .expect("offset_in_store was checked before creating an Align4PtrCompat");
+
             let mut this = ManuallyDrop::new(self);
-            let value_mut = this.store.as_mut_ptr().offset(store_offset) as *mut T;
+            let value_mut = this.store.as_mut_ptr().offset(offset) as *mut T;
 
             value_mut.read()
         }
@@ -116,41 +116,43 @@ impl<T> Align4PtrCompat<T> {
 
     pub fn set_value(&mut self, value: T) {
         unsafe {
-            // Safety: store_offset was checked before creating an Align4PtrCompat.
-            let store_offset = Self::store_offset().unwrap_unchecked();
+            let offset = Self::offset_in_store()
+                .expect("offset_in_store was checked before creating an Align4PtrCompat");
 
             // Safety: The offset is validated prior to creating Align4PtrCompat.
             // The raw pointer, though invalidated by the newly created reference,
             // is not used afterward.
-            *(self.store.as_ptr().offset(store_offset) as *mut T) = value;
+            *(self.store.as_ptr().offset(offset) as *mut T) = value;
         }
     }
 }
 
 impl<T> Drop for Align4PtrCompat<T> {
     fn drop(&mut self) {
-        let store_offset = Self::store_offset()
-            .expect("store_offset must be checked before creating an Align4PtrCompat");
+        let offset = Self::offset_in_store()
+            .expect("offset_in_store was checked before creating an Align4PtrCompat");
 
         unsafe {
             // Safety: The offset is validated prior to creating Align4PtrCompat.
-            let value_mut =
-                &mut *(self.store.as_mut_ptr().offset(store_offset) as *mut ManuallyDrop<T>);
+            let value_mut = &mut *(self.store.as_mut_ptr().offset(offset) as *mut ManuallyDrop<T>);
 
             ManuallyDrop::drop(value_mut);
         }
     }
 }
 
-#[derive(Clone, Copy)]
-#[cfg_attr(target_pointer_width = "32", repr(C, align(4)))]
-#[cfg_attr(target_pointer_width = "64", repr(C, align(8)))]
-struct Align4Ptr(
-    cfg_select! {
-        target_pointer_width = "64" => [u8; 8],
-        target_pointer_width = "32" => [u8; 4],
+cfg_select! {
+    target_pointer_width = "32" => {
+        #[derive(Clone, Copy)]
+        #[repr(C, align(4))]
+        struct Align4Ptr([u8; 4]);
     },
-);
+    target_pointer_width = "64" => {
+        #[derive(Clone, Copy)]
+        #[repr(C, align(8))]
+        struct Align4Ptr([u8; 8]);
+    },
+}
 
 impl Align4Ptr {
     /// Encodes `meta` into the low 2 bits of the pointer address.
@@ -183,7 +185,7 @@ impl Align4Ptr {
 #[repr(C, align(4))]
 pub struct Align4<T: ?Sized>(pub T);
 
-/// Owned pointer with metadata bits stored in the low 2 bits of the address.
+/// Owned pointer with metadata stored in the low 2 bits of the first byte of the pointer.
 ///
 /// # Safety invariants
 ///
@@ -278,30 +280,29 @@ impl<T> Align4Own<T> {
 impl<T> Drop for Align4Own<T> {
     fn drop(&mut self) {
         unsafe {
-            let _ = Box::from_raw(Self::into_raw(Self {
-                ptr: self.ptr,
-                _marker: PhantomData,
-            }));
+            let _ = Box::from_raw(ptr::with_exposed_provenance_mut::<Align4<T>>(
+                self.ptr.into_parts().0,
+            ));
         }
     }
 }
 
-/// Shared reference with metadata bits stored in the low 2 bits of the address.
+/// Shared reference with metadata stored in the low 2 bits of the first byte of the pointer.
 ///
 /// # Safety invariants
 ///
 /// Same as [`Align4Own`]: the address must be 4-byte-aligned and point to a valid `T`.
 #[derive(Clone, Copy)]
-#[repr(C, align(4))]
+#[repr(C)]
 pub struct Align4Ref<'a, T> {
     ptr: Align4Ptr,
     _marker: PhantomData<&'a Align4<T>>,
 }
 
 impl<'a, T> Align4Ref<'a, T> {
-    pub fn new(static_ref: &'a Align4<T>, meta: Metadata) -> Align4Ref<'a, T> {
+    pub fn new(ref_: &'a Align4<T>, meta: Metadata) -> Align4Ref<'a, T> {
         Self {
-            ptr: Align4Ptr::from_parts((&raw const *static_ref).expose_provenance(), meta),
+            ptr: Align4Ptr::from_parts((&raw const *ref_).expose_provenance(), meta),
             _marker: PhantomData,
         }
     }
@@ -565,29 +566,29 @@ mod tests {
         } else {
             4
         };
-        assert!(Align4PtrCompat::<[u8; N]>::store_offset().is_none());
+        assert!(Align4PtrCompat::<[u8; N]>::offset_in_store().is_none());
     }
 
     /// `u16` — alignment 2, can be stored (store_offset is Some).
     #[test]
     fn align4_ptr_compat_u16_store_offset() {
-        assert!(Align4PtrCompat::<u16>::store_offset().is_some());
+        assert!(Align4PtrCompat::<u16>::offset_in_store().is_some());
     }
 
     /// `u32` — alignment 4, can be stored on 32 bit platforms only.
     #[test]
     fn align4_ptr_compat_u32_store_offset() {
         if cfg!(target_pointer_width = "64") {
-            assert!(Align4PtrCompat::<u32>::store_offset().is_some());
+            assert!(Align4PtrCompat::<u32>::offset_in_store().is_some());
         } else {
-            assert!(Align4PtrCompat::<u32>::store_offset().is_none());
+            assert!(Align4PtrCompat::<u32>::offset_in_store().is_none());
         }
     }
 
     /// `u64` — alignment 8, too large for the store buffer on all platforms.
     #[test]
     fn align4_ptr_compat_u64_is_oversized() {
-        assert!(Align4PtrCompat::<u64>::store_offset().is_none());
+        assert!(Align4PtrCompat::<u64>::offset_in_store().is_none());
     }
 
     /// Verify that `new()` succeeds and the metadata byte is preserved.
