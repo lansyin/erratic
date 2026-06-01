@@ -156,7 +156,7 @@ use core::{
     error,
     fmt::{self, Debug, Display},
     marker::PhantomData,
-    mem, result,
+    result,
 };
 
 use crate::{
@@ -288,9 +288,7 @@ where
 
     /// Returns a reference to an opaque [`Error`][error::Error].
     pub fn erase_ref(&self) -> &(impl error::Error + Send + Sync + 'static) {
-        // Safety: `ImplError<S>` is `#[repr(transparent)]` over `RawError<S::Repr>`,
-        // so `&RawError<S::Repr>` and `&ImplError<S>` have identical layout.
-        unsafe { mem::transmute::<&RawError<S::Repr>, &ImplError<S>>(&self.0) }
+        &self.0
     }
 
     /// Creates an `Error` from any [`Error`][std::error::Error].
@@ -336,6 +334,35 @@ where
             None,
             Nae::new(),
             payload,
+        ))
+    }
+
+    /// Creates an `Error` from a boxed error.
+    pub fn from_boxed(value: Box<dyn error::Error + Send + Sync + 'static>) -> Self {
+        struct BoxError(Box<dyn error::Error + Send + Sync + 'static>);
+
+        impl Debug for BoxError {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                Debug::fmt(&*self.0, f)
+            }
+        }
+
+        impl Display for BoxError {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                Display::fmt(&*self.0, f)
+            }
+        }
+
+        impl error::Error for BoxError {
+            fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+                self.0.source()
+            }
+        }
+
+        Self(RawError::new_boxed::<_, _, context::Blank>(
+            None,
+            BoxError(value),
+            payload::Empty::new(),
         ))
     }
 
@@ -458,6 +485,33 @@ where
             )),
             Err(e) => Err(Error(e)),
         }
+    }
+}
+
+impl<S> From<Error<S>> for Box<dyn error::Error + 'static>
+where
+    S: State + ?Sized,
+{
+    fn from(value: Error<S>) -> Self {
+        value.0.into_boxed_error()
+    }
+}
+
+impl<S> From<Error<S>> for Box<dyn error::Error + Send + 'static>
+where
+    S: State + ?Sized,
+{
+    fn from(value: Error<S>) -> Self {
+        value.0.into_boxed_error()
+    }
+}
+
+impl<S> From<Error<S>> for Box<dyn error::Error + Sync + 'static>
+where
+    S: State + ?Sized,
+{
+    fn from(value: Error<S>) -> Self {
+        value.0.into_boxed_error()
     }
 }
 
