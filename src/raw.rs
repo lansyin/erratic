@@ -1304,7 +1304,6 @@ mod tests {
     fn const_variant_context() {
         let err = RawError::new_const::<TestContext>();
         let ctx = err.context();
-        assert!(ctx.is_some());
         assert_eq!(ctx.unwrap().to_string(), "test context");
     }
 
@@ -1369,7 +1368,6 @@ mod tests {
             payload::Empty::new(),
         );
         let src = err.source();
-        assert!(src.is_some());
         assert_eq!(src.unwrap().to_string(), "oops");
     }
 
@@ -1381,8 +1379,7 @@ mod tests {
             payload::Empty::new(),
         );
         let downcasted = err.downcast_source_ref::<TestError>();
-        assert!(downcasted.is_some());
-        assert_eq!(downcasted.unwrap().0, "oops");
+        assert!(matches!(downcasted, Some(TestError("oops"))));
     }
 
     #[test]
@@ -1404,7 +1401,6 @@ mod tests {
             TestPayload(42),
         );
         let pl = err.payload();
-        assert!(pl.is_some());
         assert_eq!(pl.unwrap().to_string(), "payload(42)");
     }
 
@@ -1416,8 +1412,7 @@ mod tests {
             TestPayload(42),
         );
         let downcasted = err.downcast_payload_ref::<TestPayload>();
-        assert!(downcasted.is_some());
-        assert_eq!(downcasted.unwrap().0, 42);
+        assert!(matches!(downcasted, Some(TestPayload(42))));
     }
 
     #[test]
@@ -1428,7 +1423,6 @@ mod tests {
             payload::Empty::new(),
         );
         let ctx = err.context();
-        assert!(ctx.is_some());
         assert_eq!(ctx.unwrap().to_string(), "test context");
     }
 
@@ -1461,7 +1455,6 @@ mod tests {
             payload::Empty::new(),
         );
         let src = err.into_source();
-        assert!(src.is_some());
         assert_eq!(src.unwrap().to_string(), "oops");
     }
 
@@ -1486,10 +1479,8 @@ mod tests {
         );
         let (state, context, payload, source) = err.into_parts::<TestPayload, TestError>();
         assert!(matches!(state, Some("state")));
-        assert!(source.is_some());
-        assert_eq!(source.unwrap().0, "oops");
-        assert!(payload.is_some());
-        assert_eq!(payload.unwrap().0, 99);
+        assert!(matches!(source, Some(TestError("oops"))));
+        assert!(matches!(payload, Some(TestPayload(99))));
         assert!(matches!(context, Some(TestContext::LITERAL)))
     }
 
@@ -1594,12 +1585,12 @@ mod tests {
         {
             let err =
                 RawError::new_boxed::<_, _, Blank>(None::<Infallible>, Nae::new(), format!("oops"));
-            assert!(matches!(err.extract_state(), Err(err) if format!("{err:-}") == "oops"));
+            assert!(matches!(err.extract_state(), Err(err) if format!("{err}") == "oops"));
         }
         {
             let err = RawError::new_boxed::<_, _, Blank>(Some(42i32), Nae::new(), format!("oops"));
             assert!(
-                matches!(err.extract_state(), Ok((42i32, Some(err))) if format!("{err:-}") == "oops")
+                matches!(err.extract_state(), Ok((42i32, Some(err))) if format!("{err}") == "oops")
             );
         }
     }

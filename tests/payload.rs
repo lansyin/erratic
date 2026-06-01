@@ -5,16 +5,15 @@ use erratic::*;
 
 #[test]
 fn from_payload_creates_boxed() {
-    let err = mkerr!(payload = TestMessage("hello".into())).stateless();
+    let err = mkerr!(payload = TestMessage("hello")).stateless();
     let parts = err.into_parts::<TestMessage, TestError>();
     assert!(parts.0.is_none());
-    assert!(parts.1.is_some());
-    assert_eq!(parts.1.unwrap().0, "hello");
+    assert!(matches!(parts.1, Some(TestMessage("hello"))));
 }
 
 #[test]
 fn downcast_payload_ok() {
-    let err = mkerr!(payload = TestMessage("hello".into())).stateless();
+    let err = mkerr!(payload = TestMessage("hello")).stateless();
     assert!(err.has_payload_of::<TestMessage>());
     assert_eq!(
         err.downcast_payload_ref::<TestMessage>().unwrap().0,

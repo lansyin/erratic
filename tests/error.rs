@@ -8,24 +8,23 @@ use std::{mem, result};
 fn from_error_round_trip() {
     let err = mkerr!(error = TestError("oops")).stateless();
     let (context, payload, source) = err.into_parts::<TestMessage, TestError>();
-    assert!(source.is_some());
-    assert_eq!(source.unwrap().0, "oops");
+    assert!(matches!(source, Some(TestError("oops"))));
     assert!(payload.is_none());
     assert!(context.is_none());
 }
 
 #[test]
 fn builder_with_error_builds_correctly() {
-    let err: Error = Error::with_error(TestError("oops"))
-        .with_context(literal!("context"))
-        .with_payload(TestMessage("payload".into()))
-        .build();
+    let err = mkerr!(
+        error = TestError("oops"),
+        context = "context",
+        payload = TestMessage("payload"),
+    )
+    .stateless();
     let (context, payload, source) = err.into_parts::<TestMessage, TestError>();
     assert!(matches!(context, Some("context")));
-    assert!(source.is_some());
-    assert_eq!(source.as_ref().unwrap().0, "oops");
-    assert!(payload.is_some());
-    assert_eq!(payload.unwrap().0, "payload");
+    assert!(matches!(source, Some(TestError("oops"))));
+    assert!(matches!(payload, Some(TestMessage("payload"))));
 }
 
 #[test]
@@ -44,14 +43,14 @@ fn downcast_source_wrong_type() {
 #[test]
 fn erase_makes_opaque() {
     let err = mkerr!(error = TestError("oops")).stateless();
-    assert_eq!(format!("{:-}", err.erase()), "oops");
+    assert_eq!(format!("{}", err.erase()), "oops");
 }
 
 #[test]
 fn erase_ref_lifetime() {
     let err = mkerr!(error = TestError("oops")).stateless();
     let opaque: &(dyn std::error::Error + Send + Sync + 'static) = err.erase_ref();
-    assert_eq!(format!("{opaque:-}"), "oops");
+    assert_eq!(format!("{opaque}"), "oops");
 }
 
 #[test]
@@ -109,21 +108,17 @@ fn error_is_send_sync() {
 fn into_boxed_error() {
     let err = mkerr!(error = TestError("oops")).stateless();
     let boxed: Box<dyn std::error::Error + Send + Sync + 'static> = err.into();
-    assert_eq!(format!("{boxed:-}"), "oops");
+    assert_eq!(format!("{boxed}"), "oops");
 }
 
 #[test]
-fn wrap_self() -> Result<()> {
-    Ok::<(), Error>(()).with_context(literal!("while testing wrap_self"))?;
-    Ok::<(), Error>(())
-        .with_context(literal!("while testing wrap_self"))
-        .build_error()?;
-    Ok::<(), Error>(())
-        .with_context(literal!("while testing wrap_self"))
-        .build_error()
-        .with_context(literal!("while testing wrap_self with nested error"))?;
-
-    Ok(())
+fn wrap_self() {
+    let _: Error = mkerr!(context = "while testing wrap_self");
+    let _: Error = mkerr!(context = "while testing wrap_self");
+    let _: Error = mkerr!(
+        error = mkerr!(context = "while testing wrap_self").stateless(),
+        context = "while testing wrap_self with nested error",
+    );
 }
 
 #[test]

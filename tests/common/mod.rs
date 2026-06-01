@@ -16,18 +16,17 @@ impl Display for TestError {
 
 impl error::Error for TestError {}
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum TestState {
     FileNotFound,
-    #[default]
-    Other,
+    PermissionDenied,
 }
 
 #[derive(Debug, PartialEq)]
-pub struct TestMessage(pub String);
+pub struct TestMessage(pub &'static str);
 
 impl Display for TestMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0, f)
+        Display::fmt(self.0, f)
     }
 }

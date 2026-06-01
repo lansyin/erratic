@@ -263,8 +263,8 @@ mod tests {
             .build();
 
         assert_eq!(
-            format!("{err_from_mkerr:-#}"),
-            format!("{err_from_builder:-#}")
+            format!("{err_from_mkerr:#}"),
+            format!("{err_from_builder:#}")
         );
     }
 
@@ -283,8 +283,8 @@ mod tests {
             .build();
 
         assert_eq!(
-            format!("{err_from_mkerr:-#}"),
-            format!("{err_from_builder:-#}")
+            format!("{err_from_mkerr:#}"),
+            format!("{err_from_builder:#}")
         );
     }
 
@@ -304,8 +304,8 @@ mod tests {
             .build();
 
         assert_eq!(
-            format!("{err_from_mkerr:-#}"),
-            format!("{err_from_builder:-#}")
+            format!("{err_from_mkerr:#}"),
+            format!("{err_from_builder:#}")
         );
     }
 
