@@ -27,7 +27,7 @@
 //! # struct Reader;
 //! # impl Reader {
 //! #     fn read(&self, _: &[u8]) -> Result<u64> { unimplemented!() }
-//! #     fn name(&self) -> String { unimplemented!() }
+//! #     fn id(&self) -> String { unimplemented!() }
 //! # }
 //! use erratic::*;
 //!
@@ -36,10 +36,12 @@
 //!         return mkres!("buf must not be empty"); // No alloc so long as no format args.
 //!     }
 //!     let r = r.upgrade()
-//!         .with_context(literal!("reader expired"))?; // No alloc.
+//!         .with_context(literal!("stream expired"))?; // No alloc.
+//!     //= .with_payload("stream expired")?;
 //!     let n = r.read(buf)
-//!         .with_context(literal!("failed to read from"))
-//!         .with_payload(r.name())?; // Alloc once for error, name, and context.
+//!         .with_context(literal!("failed to read from stream"))
+//!         .with_payload(r.id())?; // Alloc once for error, id, and context.
+//!     //= .with_payload(format!("failed to write to stream: {}", w.id()))?;
 //!     Ok(n)
 //! }
 //! ```
@@ -55,7 +57,7 @@
 //! # struct Writer;
 //! # impl Writer {
 //! #     fn write(&mut self, _: &[u8]) -> erratic::Result<()> { unimplemented!() }
-//! #     fn name(&self) -> String { unimplemented!() }
+//! #     fn id(&self) -> String { unimplemented!() }
 //! #     fn ready_for_write(&self, _: usize) -> erratic::Result<()> { unimplemented!() }
 //! # }
 //! use erratic::*;
@@ -68,8 +70,8 @@
 //!         .ok()
 //!         .with_state(State::RetryLater)?; // No alloc.
 //!     w.write(data)
-//!         .with_context(literal!("failed to write to"))
-//!         .with_payload(w.name())?;
+//!         .with_context(literal!("failed to write to stream"))
+//!         .with_payload(w.id())?;
 //!     Ok(())
 //! }
 //! ```
@@ -81,12 +83,11 @@
 //!
 //! ```
 //! # use std::{thread, result};
-//! # struct Writer;
+//! # use erratic::*;
 //! # #[derive(Debug)]
 //! # enum State { RetryLater }
+//! # struct Writer;
 //! # fn try_write(_: &mut Writer, data: &[u8; 64]) -> result::Result<(), Error<State>> { unimplemented!() }
-//! use erratic::*;
-//!
 //! fn write(w: &mut Writer, data: &[u8; 64]) -> Result<()> {
 //!     while let Err((state, _)) = try_write(w, data).extract_state()? {
 //!         match state {

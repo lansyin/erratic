@@ -35,10 +35,12 @@ fn read_weak(r: &mut Weak<Reader>, buf: &mut [u8]) -> Result<u64> {
         return mkres!("buf must not be empty"); // No alloc so long as no format args.
     }
     let r = r.upgrade()
-        .with_context(literal!("reader expired"))?; // No alloc.
+        .with_context(literal!("stream expired"))?; // No alloc.
+    //= .with_payload("stream expired")?;
     let n = r.read(buf)
-        .with_context(literal!("failed to read from"))
-        .with_payload(r.name())?; // Alloc once for error, name, and context.
+        .with_context(literal!("failed to read from stream"))
+        .with_payload(r.id())?; // Alloc once for error, id, and context.
+    //= .with_payload(format!("failed to write to stream: {}", w.id()))?;
     Ok(n)
 }
 ```
@@ -60,8 +62,8 @@ fn try_write(w: &mut Writer, data: &[u8; 64]) -> Result<(), Error<State>> {
         .ok()
         .with_state(State::RetryLater)?; // No alloc.
     w.write(data)
-        .with_context(literal!("failed to write to"))
-        .with_payload(w.name())?;
+        .with_context(literal!("failed to write to stream"))
+        .with_payload(w.id())?;
     Ok(())
 }
 ```
@@ -72,8 +74,6 @@ layouts. A stateful error can be cheaply converted into a stateless one (via `ex
 making `Stateless` unsized.
 
 ```rust
-use erratic::*;
-
 fn write(w: &mut Writer, data: &[u8; 64]) -> Result<()> {
     while let Err((state, _)) = try_write(w, data).extract_state()? {
         match state {
