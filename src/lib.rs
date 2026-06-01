@@ -41,7 +41,7 @@
 //!     let n = r.read(buf)
 //!         .with_context(literal!("failed to read from stream"))
 //!         .with_payload(r.id())?; // Alloc once for error, id, and context.
-//!     //= .with_payload(format!("failed to write to stream: {}", w.id()))?;
+//!     //= .with_payload_fn(|| format!("failed to read from stream: {}", w.id()))?;
 //!     Ok(n)
 //! }
 //! ```
