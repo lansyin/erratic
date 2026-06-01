@@ -39,7 +39,7 @@
 //!         .with_context(literal!("stream expired"))?; // No alloc.
 //!     //= .with_payload("stream expired")?;
 //!     let n = r.read(buf)
-//!         .with_context(literal!("failed to read from stream"))
+//!         .with_context(literal!("failed to read from stream: "))
 //!         .with_payload(r.id())?; // Alloc once for error, id, and context.
 //!     //= .with_payload_fn(|| format!("failed to read from stream: {}", w.id()))?;
 //!     Ok(n)
@@ -70,7 +70,7 @@
 //!         .ok()
 //!         .with_state(State::RetryLater)?; // No alloc.
 //!     w.write(data)
-//!         .with_context(literal!("failed to write to stream"))
+//!         .with_context(literal!("failed to write to stream: "))
 //!         .with_payload(w.id())?;
 //!     Ok(())
 //! }
