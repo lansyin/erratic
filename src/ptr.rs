@@ -29,7 +29,7 @@ cfg_select! {
         pub struct Align4PtrCompat<T> {
             meta: u8,
             store: [u8; 3],
-            after_store: PhantomData<T>,
+            _marker: PhantomData<T>,
         }
     },
     target_pointer_width = "64" => {
