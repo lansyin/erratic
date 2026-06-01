@@ -5,8 +5,6 @@ use core::{
 
 use alloc::format;
 
-use crate::rtti;
-
 pub struct DisplayAsDebug<'a>(pub &'a dyn Display);
 
 impl<'a> Debug for DisplayAsDebug<'a> {
@@ -54,9 +52,7 @@ where
     let show_less = f.sign_minus();
     let ds = &mut f.debug_struct("Error");
 
-    if !rtti::is_same_ty::<S, ()>()
-        && let Some(state) = state
-    {
+    if let Some(state) = state {
         ds.field("state", state);
     }
 
