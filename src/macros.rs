@@ -103,13 +103,15 @@ macro_rules! literal {
 /// # let filename = "";
 /// # let something_impl_error_or_display = "";
 /// # let err = mkerr!("oops").stateless().erase();
-/// let _err = mkerr!("404 not found").stateless();
-/// let _err = mkerr!("{filename} not found").stateless();
-/// let _err = mkerr!("{} not found", filename).stateless();
-/// let _err = mkerr!(state = State::NotFound);
-/// let _err = mkerr!(context = "file not found").stateless();
-/// let _err = mkerr!(context = "failed to open", payload = filename).stateless();
-/// let _err = mkerr!(
+/// let _: _ = mkerr!("404 not found").stateless();
+/// let _: Error = mkerr!("404 not found");
+/// let _: Error = mkerr!("{filename} not found");
+/// let _: Error = mkerr!("{} not found", filename);
+/// let _: _ = mkerr!(state = State::NotFound);
+/// let _: Error<State> = mkerr!(state = State::NotFound);
+/// let _: Error = mkerr!(context = "file not found");
+/// let _: Error = mkerr!(context = "failed to open", payload = filename);
+/// let _: Error<State> = mkerr!(
 ///     state = State::NotFound,
 ///     context = "while opening",
 ///     payload = filename,
@@ -117,7 +119,7 @@ macro_rules! literal {
 /// );
 /// # let err = mkerr!("oops").stateless().erase();
 /// # let get_user_manual_url = || "";
-/// let _err = mkerr!(
+/// let _: Error<State> = mkerr!(
 ///     state = State::NotFound,
 ///     error = err,
 ///     "{filename} not found, check guides at {}",
