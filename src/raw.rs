@@ -230,7 +230,7 @@ impl<S> RawError<S> {
         //
         // The `Align4Own` pointer is cast to `DynBody<Infallible, (), (), ()>` for uniform storage.
         // This is valid because all monomorphizations of `DynBody<S, E, P, L::Repr>` share
-        // the same vtable pointer, and the concrete `S`, `E`, `P`, `C` are erased.
+        // the same vtable pointer, and the concrete `S`, `E`, `P`, `L` are erased.
         // The cast only changes the type parameter defaults — it does not violate the layout
         // because `()` is a ZST.
         // Due to `Align4Own`assumes a correct layout, and that's not true after the cast,
@@ -634,7 +634,7 @@ pub struct ConstBody {
 
 /// Heap-allocated error body with type-erased source, payload, and context.
 ///
-/// The concrete types `E`, `P`, `C` are only known at construction time and at
+/// The concrete types `E`, `P`, `L` are only known at construction time and at
 /// the monomorphized vtable function sites. The `RawError` stores the body as
 /// `DynBody<S, (), (), ()>`. The `S` can also be erased when the state is
 /// extracted.
@@ -642,25 +642,25 @@ pub struct ConstBody {
 /// # Safety
 ///
 /// The `vtable` pointer must point to a `DynBodyVTable` that was monomorphized
-/// for the same `S`, `E`, `P`, `C` as the stored data.
+/// for the same `S`, `E`, `P`, `L` as the stored data.
 #[repr(C)]
-struct DynBody<S = Infallible, E = (), P = (), C = ()>
+struct DynBody<S = Infallible, E = (), P = (), L = ()>
 where
     S: 'static,
     E: 'static,
     P: 'static,
-    C: 'static,
+    L: 'static,
 {
     vtable: Align4Ref<'static, DynBodyVTable>, // Note: The vtable must be the first field as the other fields may be erased.
     state: MaybeUninit<S>,
     source: E,
     payload: P,
-    context: C,
+    context: L,
 }
 
 /// Virtual function table for type-erased operations on [`DynBody`].
 ///
-/// Each function pointer is monomorphized for the concrete `S`, `E`, `P`, `C`.
+/// Each function pointer is monomorphized for the concrete `S`, `E`, `P`, `L`.
 ///
 /// # Safety
 ///
@@ -735,12 +735,12 @@ impl DynBodyVTable {
     }
 }
 
-impl<S, E, P, C> DynBody<S, E, P, C> {
+impl<S, E, P, L> DynBody<S, E, P, L> {
     const NO_STATE: Metadata = Metadata::_0;
     const HAS_STATE: Metadata = Metadata::_1;
 
     /// Returns a static shared reference to the vtable.
-    fn vtable(this: Ref<'_, DynBody<S, E, P, C>>) -> &'static DynBodyVTable {
+    fn vtable(this: Ref<'_, DynBody<S, E, P, L>>) -> &'static DynBodyVTable {
         unsafe {
             this.project(|body| &raw const (*body).vtable)
                 .deref()
@@ -750,17 +750,17 @@ impl<S, E, P, C> DynBody<S, E, P, C> {
     }
 }
 
-impl<S, E, P, C> DynBody<S, E, P, C>
+impl<S, E, P, L> DynBody<S, E, P, L>
 where
     S: Debug + Send + Sync + 'static,
     E: error::Error + Send + Sync + 'static,
     P: Display + Send + Sync + 'static,
-    C: Display + Send + Sync + 'static,
+    L: Display + Send + Sync + 'static,
 {
     fn vtable_from_state(state: Option<S>) -> (Align4Ref<'static, DynBodyVTable>, MaybeUninit<S>) {
         (
             Align4Ref::new(
-                &const { Align4(DynBodyVTable::new::<S, E, P, C>()) },
+                &const { Align4(DynBodyVTable::new::<S, E, P, L>()) },
                 match state {
                     Some(_) => Self::HAS_STATE,
                     None => Self::NO_STATE,
@@ -822,7 +822,7 @@ where
 
     /// Consumes `self` and decomposes into its raw components:
     /// `(state, source, payload, context)`.
-    fn destruct(self) -> (Option<S>, E, P, C) {
+    fn destruct(self) -> (Option<S>, E, P, L) {
         let has_state = self.has_state();
         let mut this = MaybeUninit::new(self);
         let this = this.as_mut_ptr();
@@ -836,18 +836,18 @@ where
     }
 }
 
-impl<S, E, P, C> DynBody<S, E, P, C>
+impl<S, E, P, L> DynBody<S, E, P, L>
 where
     S: Debug + Send + Sync + 'static,
     E: error::Error + Send + Sync + 'static,
     P: Display + Send + Sync + 'static,
-    C: Display + Send + Sync + 'static,
+    L: Display + Send + Sync + 'static,
 {
     /// Drops the boxed body.
     ///
     /// # Safety
     ///
-    /// - `this` must be a valid `Align4Own` pointing to a heap-allocated `DynBody<S, E, P, C>`.
+    /// - `this` must be a valid `Align4Own` pointing to a heap-allocated `DynBody<S, E, P, L>`.
     unsafe fn drop(mut this: ManuallyDrop<Align4Own<DynBody>>) {
         let _ = unsafe { ManuallyDrop::take(&mut this).cast::<Self>().into_boxed() };
     }
@@ -856,7 +856,7 @@ where
     ///
     /// # Safety
     ///
-    /// - `this` must be a valid `Align4Own` pointing to a heap-allocated `DynBody<S, E, P, C>`.
+    /// - `this` must be a valid `Align4Own` pointing to a heap-allocated `DynBody<S, E, P, L>`.
     /// - `state_dst` must be a valid, aligned, mutable pointer to `Option<S>`.
     unsafe fn into_state(
         mut this: ManuallyDrop<Align4Own<DynBody>>,
@@ -899,7 +899,7 @@ where
     ///
     /// # Safety
     ///
-    /// - `this` must be a valid `Align4Own` pointing to `DynBody<S, E, P, C>`.
+    /// - `this` must be a valid `Align4Own` pointing to `DynBody<S, E, P, L>`.
     /// - `source_dst`, `payload_dst`,`context_dst`, `state_dst` must be valid, aligned, mutable
     ///   pointers to `Option<E>`, `Option<P>`, `Option<&'static str>` and `Option<S>` respectively.
     #[allow(clippy::too_many_arguments)]
@@ -934,9 +934,9 @@ where
             let dst = unsafe { payload_dst.cast::<Option<P>>().as_mut() };
             dst.replace(payload);
         }
-        if !rtti::is_same_ty::<C, context::Unit>() && rtti::is_same_ty::<C, &'static str>() {
+        if !rtti::is_same_ty::<L, context::Unit>() && rtti::is_same_ty::<L, &'static str>() {
             // Safety: The caller guarantees `context_dst` points to a valid `Option<&'static str>`.
-            let dst = unsafe { context_dst.cast::<Option<C>>().as_mut() };
+            let dst = unsafe { context_dst.cast::<Option<L>>().as_mut() };
             dst.replace(context);
         }
         if TypeId::of::<S>() == state_ty {
@@ -949,7 +949,7 @@ where
     ///
     /// # Safety
     ///
-    /// - `this` must be a valid `Align4Own` pointing to `DynBody<S, E, P, C>`.
+    /// - `this` must be a valid `Align4Own` pointing to `DynBody<S, E, P, L>`.
     /// - `state_dst` must be a valid, aligned, mutable pointer to `Option<StateTy>`.
     /// - `error_dst` must be a valid, aligned, mutable pointer to `Option<ManuallyDrop<Align4Own<DynBody>>>`
     unsafe fn extract_state(
@@ -965,7 +965,7 @@ where
             *dst = this.borrow_mut().deref_mut().replace_state(None);
         }
 
-        let has_context = !rtti::is_same_ty::<C, context::Unit>();
+        let has_context = !rtti::is_same_ty::<L, context::Unit>();
         let has_payload = !rtti::is_same_ty::<P, payload::Empty>();
         let has_source = !{
             // TODO: This will discard the backtrace. It's ideal to keep
@@ -1007,14 +1007,14 @@ where
         // # Safety
         //
         // The `Ailgn4` wrapper is `repr(C)` and has only one field, so the pointer cast is valid.
-        unsafe { Box::from_raw(this_raw as *mut DynBody<S, E, P, C>) }
+        unsafe { Box::from_raw(this_raw as *mut DynBody<S, E, P, L>) }
     }
 
     /// Replace the state if type matches.
     ///
     /// # Safety
     ///
-    /// - `this` must be a valid `Mut` pointing to `DynBody<S, E, P, C>`.
+    /// - `this` must be a valid `Mut` pointing to `DynBody<S, E, P, L>`.
     /// - `state_src` must be a valid, aligned, mutable pointer to `Option<StateTy>`.
     unsafe fn try_set_state(
         this: Mut<'_, DynBody>,
@@ -1039,7 +1039,7 @@ where
     ///
     /// # Safety
     ///
-    /// - `this` must point to a valid `DynBody<S, E, P, C>`.
+    /// - `this` must point to a valid `DynBody<S, E, P, L>`.
     unsafe fn source(this: Ref<'_, DynBody>) -> Option<&(dyn error::Error + 'static)> {
         let this = unsafe { this.cast::<Self>().deref() };
 
@@ -1060,7 +1060,7 @@ where
     ///
     /// # Safety
     ///
-    /// - `this` must point to a valid `DynBody<S, E, P, C>`.
+    /// - `this` must point to a valid `DynBody<S, E, P, L>`.
     /// - `dst` must be a valid, aligned, mutable pointer to `Option<&StateTy>`.
     unsafe fn state(this: Ref<'_, DynBody>, state_ty: TypeId, state_dst: NonNull<()>) {
         let this = unsafe { this.cast::<Self>().deref() };
@@ -1078,7 +1078,7 @@ where
     ///
     /// # Safety
     ///
-    /// - `this` must point to a valid `DynBody<S, E, P, C>`.
+    /// - `this` must point to a valid `DynBody<S, E, P, L>`.
     unsafe fn payload(this: Ref<'_, DynBody>) -> Option<&(dyn Display + Send + Sync + 'static)> {
         let this = unsafe { this.cast::<Self>().deref() };
 
@@ -1093,11 +1093,11 @@ where
     ///
     /// # Safety
     ///
-    /// - `this` must point to a valid `DynBody<S, E, P, C>`.
+    /// - `this` must point to a valid `DynBody<S, E, P, L>`.
     unsafe fn context(this: Ref<'_, DynBody>) -> Option<&(dyn Display + Send + Sync + 'static)> {
         let this = unsafe { this.cast::<Self>().deref() };
 
-        if rtti::is_same_ty::<C, context::Unit>() {
+        if rtti::is_same_ty::<L, context::Unit>() {
             None
         } else {
             Some(&this.context as &(dyn Display + Send + Sync + 'static))
@@ -1139,7 +1139,7 @@ where
     }
 }
 
-impl<S, E, P, C> Drop for DynBody<S, E, P, C> {
+impl<S, E, P, L> Drop for DynBody<S, E, P, L> {
     fn drop(&mut self) {
         unsafe {
             match Metadata((&raw const (self.vtable) as *const u8).read() & Metadata::MASK) {
@@ -1153,18 +1153,18 @@ impl<S, E, P, C> Drop for DynBody<S, E, P, C> {
     }
 }
 
-impl<S, E, P, C> fmt::Debug for DynBody<S, E, P, C>
+impl<S, E, P, L> fmt::Debug for DynBody<S, E, P, L>
 where
     S: Debug + Send + Sync + 'static,
     E: error::Error + Send + Sync + 'static,
     P: Display + Send + Sync + 'static,
-    C: Display + Send + Sync + 'static,
+    L: Display + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         render::format_debug(
             f,
             self.try_get_state(),
-            (!rtti::is_same_ty::<C, context::Unit>()).then_some(&self.context),
+            (!rtti::is_same_ty::<L, context::Unit>()).then_some(&self.context),
             (!rtti::is_same_ty::<P, payload::Empty>()).then_some(&self.payload),
             self.source(),
             WithBacktrace::search_debug(self),
@@ -1172,18 +1172,18 @@ where
     }
 }
 
-impl<S, E, P, C> fmt::Display for DynBody<S, E, P, C>
+impl<S, E, P, L> fmt::Display for DynBody<S, E, P, L>
 where
     S: Debug + Send + Sync + 'static,
     E: error::Error + Send + Sync + 'static,
     P: Display + Send + Sync + 'static,
-    C: Display + Send + Sync + 'static,
+    L: Display + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         render::format_display(
             f,
             self.try_get_state(),
-            (!rtti::is_same_ty::<C, context::Unit>()).then_some(&self.context),
+            (!rtti::is_same_ty::<L, context::Unit>()).then_some(&self.context),
             (!rtti::is_same_ty::<P, payload::Empty>()).then_some(&self.payload),
             self.source(),
             WithBacktrace::search_display(self),
@@ -1191,12 +1191,12 @@ where
     }
 }
 
-impl<S, E, P, C> error::Error for DynBody<S, E, P, C>
+impl<S, E, P, L> error::Error for DynBody<S, E, P, L>
 where
     S: Debug + Send + Sync + 'static,
     E: error::Error + Send + Sync + 'static,
     P: Display + Send + Sync + 'static,
-    C: Display + Send + Sync + 'static,
+    L: Display + Send + Sync + 'static,
 {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         if rtti::is_same_ty::<E, Nae>() {
