@@ -112,6 +112,30 @@
 //!
 //! # Representation
 //!
+//! When additional information (state, context, or payload) is present alongside the source
+//! error, the output is [`<state>: <context><payload>`][mimic_erratic_display]. Otherwise, when
+//! the error carries only a source, the output is `<source>`.
+//!
+//! [mimic_erratic_display]: https://play.rust-lang.org/?gist=e17db5237911367388fc401e445aa2cf
+//!
+//! Format specifiers:
+//!
+//! - `{}`:       Displays only the top-level error.
+//! - `{:#}`:     Displays the full error chain.
+//! - `{:?}`:     Displays the full error chain with backtrace (if captured).
+//! - `{:#?}`:    Displays all information in a struct-like format.
+//!
+//! Error chain:
+//!
+//! ```text
+//! <error>
+//!   -> <source_0>
+//!   -> <source_1>
+//!   -> ..
+//! ```
+//!
+//! # Layout
+//!
 //! Type-wise, `Error<S>` is an internally tagged union, and it requires pointers to constant or
 //! heap-allocated data to be aligned to 4 bytes, freeing up the lower 2 bits to encode
 //! the discriminant. This design allows heap allocation to be avoided when unnecessary.
@@ -119,16 +143,15 @@
 //! ```plaintext
 //! (32-bit platform, little-endian)
 //! (Context Only)
-//! [XXXXXX00|XXXXXXXX|XXXXXXXX|XXXXXXXX]
+//! [______00|________|________|________]
 //!                                     \
 //!                                      `rodata-> [Context]
-//! (State Only)
-//! [00000010|     ~    State     ~     ]
-//!
-//! (Otherwise)
-//! [XXXXXX01|XXXXXXXX|XXXXXXXX|XXXXXXXX]
+//! (Allocation Required)
+//! [______01|________|________|________]
 //!                                     \
 //!                                      `heap-> [VTable|State|Error|Payload|Context]
+//! (Small State Only)
+//! [00000010|     ~    State     ~     ]
 //! ```
 //!
 #![no_std]
