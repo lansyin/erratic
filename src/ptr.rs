@@ -1,5 +1,7 @@
 use alloc::boxed::Box;
 use core::{
+    error::{self, Error},
+    fmt::{self, Debug, Display},
     marker::PhantomData,
     mem::{self, ManuallyDrop, MaybeUninit},
     ptr::{self, NonNull},
@@ -185,6 +187,33 @@ impl Align4Ptr {
 #[repr(C, align(4))]
 pub struct Align4<T: ?Sized>(pub T);
 
+impl<T> Debug for Align4<T>
+where
+    T: Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Debug::fmt(&self.0, f)
+    }
+}
+
+impl<T> Display for Align4<T>
+where
+    T: Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl<T> error::Error for Align4<T>
+where
+    T: Error,
+{
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.0.source()
+    }
+}
+
 /// Owned pointer with metadata stored in the low 2 bits of the first byte of the pointer.
 ///
 /// # Safety invariants
@@ -234,14 +263,14 @@ impl<T> Align4Own<T> {
     /// `Align4<U>` should have a layout compatible with `Align4<T>`.
     /// If you are temporarily working with a type that has a different layout,
     /// you must cast it back to the original type before `drop` is called.
-    pub unsafe fn cast<U>(self) -> Align4Own<U> {
+    pub unsafe fn cast<U>(self) -> ManuallyDrop<Align4Own<U>> {
         // Note: Forget the previous one to avoid double-free.
         let this = ManuallyDrop::new(self);
 
-        Align4Own {
+        ManuallyDrop::new(Align4Own {
             ptr: this.ptr,
             _marker: PhantomData,
-        }
+        })
     }
 
     /// Returns a shared reference to the pointee.
@@ -504,8 +533,9 @@ mod tests {
         let owned = Align4Own::from_boxed(value, Metadata::_2);
         // Cast to the same-layout type `[u8; 4]`
         let casted = unsafe { owned.cast::<[u8; 4]>() };
-        let restored = casted.into_boxed();
-        assert_eq!(restored.0, [0x01, 0xEF, 0xCD, 0xAB]); // little-endian
+        assert_eq!(casted.borrow().copied(), [0x01, 0xEF, 0xCD, 0xAB]);
+
+        ManuallyDrop::into_inner(unsafe { (ManuallyDrop::into_inner(casted)).cast::<u32>() });
     }
 
     /// Verifies that `Ref::deref` returns a valid reference.

@@ -237,19 +237,17 @@ impl<S> RawError<S> {
         // we need to put it in a `ManuallyDrop` and drop it via vtable instead.
         Self {
             boxed_body: unsafe {
-                ManuallyDrop::new(
-                    Align4Own::from_boxed(
-                        Box::new(Align4(DynBody::<S, E, P, L::Repr> {
-                            vtable,
-                            state,
-                            source,
-                            payload,
-                            context: L::new_context(),
-                        })),
-                        RawError::<S>::KIND_BOXED,
-                    )
-                    .cast::<DynBody>(),
+                Align4Own::from_boxed(
+                    Box::new(Align4(DynBody::<S, E, P, L::Repr> {
+                        vtable,
+                        state,
+                        source,
+                        payload,
+                        context: L::new_context(),
+                    })),
+                    RawError::<S>::KIND_BOXED,
                 )
+                .cast::<DynBody>()
             },
         }
     }
@@ -849,7 +847,11 @@ where
     ///
     /// - `this` must be a valid `Align4Own` pointing to a heap-allocated `DynBody<S, E, P, L>`.
     unsafe fn drop(mut this: ManuallyDrop<Align4Own<DynBody>>) {
-        let _ = unsafe { ManuallyDrop::take(&mut this).cast::<Self>().into_boxed() };
+        unsafe {
+            let this = ManuallyDrop::take(&mut this).cast::<Self>();
+
+            let _ = ManuallyDrop::into_inner(this).into_boxed();
+        }
     }
 
     /// Extracts `state` from the boxed body and drops the allocation.
@@ -863,8 +865,9 @@ where
         state_ty: TypeId,
         state_dst: NonNull<()>,
     ) {
-        let Align4(mut this) =
-            *unsafe { ManuallyDrop::take(&mut this).cast::<Self>().into_boxed() };
+        let Align4(mut this) = *unsafe {
+            ManuallyDrop::into_inner(ManuallyDrop::take(&mut this).cast::<Self>()).into_boxed()
+        };
 
         if TypeId::of::<S>() == state_ty {
             // Safety: The caller guarantees `state_dst` points to a valid `Option<S>`.
@@ -881,7 +884,9 @@ where
     unsafe fn into_source(
         mut this: ManuallyDrop<Align4Own<DynBody>>,
     ) -> Option<Box<dyn error::Error + Send + Sync + 'static>> {
-        let Align4(this) = *unsafe { ManuallyDrop::take(&mut this).cast::<Self>().into_boxed() };
+        let Align4(this) = *unsafe {
+            ManuallyDrop::into_inner(ManuallyDrop::take(&mut this).cast::<Self>()).into_boxed()
+        };
         if rtti::is_same_ty::<E, Nae>() {
             return None;
         };
@@ -913,7 +918,9 @@ where
         state_ty: TypeId,
         state_dst: NonNull<()>,
     ) {
-        let Align4(this) = *unsafe { ManuallyDrop::take(&mut this).cast::<Self>().into_boxed() };
+        let Align4(this) = *unsafe {
+            ManuallyDrop::into_inner(ManuallyDrop::take(&mut this).cast::<Self>()).into_boxed()
+        };
         let (state, source, payload, context) = this.destruct();
 
         if !rtti::is_same_ty::<E, Nae>() {
@@ -958,7 +965,8 @@ where
         state_dst: NonNull<()>,
         error_dst: NonNull<()>,
     ) {
-        let mut this = unsafe { ManuallyDrop::take(&mut this).cast::<Self>() };
+        let mut this =
+            unsafe { ManuallyDrop::into_inner(ManuallyDrop::take(&mut this).cast::<Self>()) };
 
         if TypeId::of::<S>() == state_ty {
             let dst = unsafe { state_dst.cast::<Option<S>>().as_mut() };
@@ -980,15 +988,15 @@ where
                 mem::drop(this.into_boxed());
             }
             _ => {
+                // Safety:
+                // Erase the remaining fields to ZSTs is dangerous as the destructor assumes a correct layout.
+                // So we wrap it in `ManuallyDrop` to prevent the destructor from being automatically called.
                 let error_dst = unsafe {
                     error_dst
                         .cast::<Option<ManuallyDrop<Align4Own<DynBody>>>>()
                         .as_mut()
                 };
-                // Safety:
-                // Erase the remaining fields to ZSTs is dangerous as the destructor assumes a correct layout.
-                // So we wrap it in `ManuallyDrop` to prevent the destructor from being automatically called.
-                error_dst.replace(ManuallyDrop::new(unsafe { this.cast::<DynBody>() }));
+                error_dst.replace(unsafe { this.cast::<DynBody>() });
             }
         };
     }
@@ -1001,13 +1009,11 @@ where
     unsafe fn into_boxed_error(
         mut this: ManuallyDrop<Align4Own<DynBody>>,
     ) -> Box<dyn error::Error + Send + Sync + 'static> {
-        let this = unsafe { ManuallyDrop::take(&mut this).cast::<Self>().into_boxed() };
-        let this_raw = Box::into_raw(this);
+        let this = unsafe {
+            ManuallyDrop::into_inner(ManuallyDrop::take(&mut this).cast::<Self>()).into_boxed()
+        };
 
-        // # Safety
-        //
-        // The `Ailgn4` wrapper is `repr(C)` and has only one field, so the pointer cast is valid.
-        unsafe { Box::from_raw(this_raw as *mut DynBody<S, E, P, L>) }
+        this
     }
 
     /// Replace the state if type matches.
