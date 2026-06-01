@@ -11,7 +11,10 @@ use core::{
 extern crate std;
 
 #[cfg(feature = "backtrace")]
-use core::cell::Cell;
+use core::{
+    cell::Cell,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use crate::nae::Nae;
 
@@ -25,8 +28,10 @@ pub struct WithBacktrace {
 #[cfg(feature = "backtrace")]
 std::thread_local! {
     static SEARCHING: Cell<bool> = Cell::new(false);
-    static DISABLED: Cell<bool> = Cell::new(false);
 }
+
+#[cfg(feature = "backtrace")]
+static DISABLED: AtomicBool = AtomicBool::new(false);
 
 impl WithBacktrace {
     pub fn try_attach<E>(
@@ -40,7 +45,7 @@ impl WithBacktrace {
     {
         cfg_select! {
             feature = "backtrace" => {
-                if DISABLED.get() {
+                if DISABLED.load(Ordering::Relaxed) {
                     return Err(err);
                 }
                 match Self::search(&err) {
@@ -56,7 +61,7 @@ impl WithBacktrace {
                                 backtrace,
                             }),
                             _ => {
-                                DISABLED.set(true);
+                                DISABLED.store(true, Ordering::Relaxed);
                                 Err(err)
                             },
                         }
@@ -121,12 +126,12 @@ impl WithBacktrace {
         }
     }
 
-    #[cfg(feature = "backtrace")]
     /// Take the error from this backtrace and put it in the dst pointer.
     ///
     /// # Safety
     ///
     /// The dst pointer must be valid and point to a valid Option<Ty>.
+    #[cfg(feature = "backtrace")]
     unsafe fn take_source_<E>(self, ty: TypeId, dst: NonNull<()>) -> Option<Self>
     where
         E: error::Error + 'static,
