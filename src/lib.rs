@@ -56,8 +56,8 @@
 //! # struct Writer;
 //! # impl Writer {
 //! #     fn write(&mut self, _: &[u8]) -> erratic::Result<()> { unimplemented!() }
+//! #     fn reserve_chunk(&self, _: usize) -> erratic::Result<()> { unimplemented!() }
 //! #     fn id(&self) -> String { unimplemented!() }
-//! #     fn ready_for_write(&self, _: usize) -> erratic::Result<()> { unimplemented!() }
 //! # }
 //! use erratic::*;
 //!
@@ -65,7 +65,7 @@
 //! enum State { RetryLater }
 //!
 //! fn try_write(w: &mut Writer, data: &[u8; 64]) -> Result<(), Error<State>> {
-//!     w.ready_for_write(64)
+//!     w.reserve_chunk(64)
 //!         .ok()
 //!         .with_state(State::RetryLater)?; // No alloc.
 //!     w.write(data)
