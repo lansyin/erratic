@@ -590,7 +590,6 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         render::format_debug(
             f,
-            "Error",
             self.state(),
             self.context(),
             self.payload(),
@@ -1168,7 +1167,6 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         render::format_debug(
             f,
-            "Error",
             self.try_get_state(),
             (!rtti::is_same_ty::<L, context::Unit>()).then_some(&self.context),
             (!rtti::is_same_ty::<P, payload::Empty>()).then_some(&self.payload),

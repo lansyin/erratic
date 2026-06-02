@@ -43,9 +43,45 @@ fn format_state_context_payload(
     Ok(true)
 }
 
-pub fn format_debug<S>(
+pub fn format_debug_struct<S>(
     f: &mut fmt::Formatter<'_>,
     container_name: &'static str,
+    state: Option<&S>,
+    context: Option<&(dyn Display + Send + Sync + 'static)>,
+    payload: Option<&(dyn Display + Send + Sync + 'static)>,
+    source: Option<&(dyn error::Error + 'static)>,
+    backtrace: Option<&dyn Backtrace>,
+) -> fmt::Result
+where
+    S: Debug + 'static,
+{
+    let ds = &mut f.debug_struct(container_name);
+
+    if let Some(state) = state {
+        ds.field("state", state);
+    }
+
+    if let Some(context) = context {
+        ds.field("context", &DisplayAsDebug(context));
+    }
+
+    if let Some(payload) = payload {
+        ds.field("payload", &DisplayAsDebug(payload));
+    }
+
+    if let Some(source) = source {
+        ds.field("source", source);
+    }
+
+    if let Some(backtrace) = backtrace {
+        ds.field("backtrace", &backtrace);
+    }
+
+    ds.finish()
+}
+
+pub fn format_debug<S>(
+    f: &mut fmt::Formatter<'_>,
     state: Option<&S>,
     context: Option<&(dyn Display + Send + Sync + 'static)>,
     payload: Option<&(dyn Display + Send + Sync + 'static)>,
@@ -58,29 +94,15 @@ where
     let show_less = f.sign_minus();
 
     if f.alternate() {
-        let ds = &mut f.debug_struct(container_name);
-
-        if let Some(state) = state {
-            ds.field("state", state);
-        }
-
-        if let Some(context) = context {
-            ds.field("context", &DisplayAsDebug(context));
-        }
-
-        if let Some(payload) = payload {
-            ds.field("payload", &DisplayAsDebug(payload));
-        }
-
-        if let Some(source) = source {
-            ds.field("source", source);
-        }
-
-        if !show_less && let Some(backtrace) = backtrace {
-            ds.field("backtrace", &backtrace);
-        }
-
-        ds.finish()
+        format_debug_struct(
+            f,
+            "Error",
+            state,
+            context,
+            payload,
+            source,
+            show_less.then_some(backtrace).flatten(),
+        )
     } else {
         let mut source = source;
         let has_additional_info =

@@ -100,7 +100,7 @@ where
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         if let Some(err) = &self.0 {
-            render::format_debug(
+            render::format_debug_struct(
                 f,
                 "Vacant",
                 err.state(),
