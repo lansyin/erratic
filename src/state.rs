@@ -1,7 +1,7 @@
 //! State traits and the [`Stateless`] marker.
-use core::{convert::Infallible, fmt::Debug};
+use core::{convert::Infallible, fmt::Debug, marker::PhantomData, result};
 
-use crate::{Error, backtrace::WithBacktrace, render};
+use crate::{Error, raw::RawVacant};
 
 /// Associates an error state type with its stored representation.
 ///
@@ -61,36 +61,48 @@ impl State for Stateless {
 
 /// An [`Error<S>`] with its state temporarily extracted. It maintains a compatible
 /// storage layout to support reattachment.
-pub struct Vacant<S>(Option<Error<S>>)
+pub struct Vacant<S>
 where
-    S: State;
+    S: State,
+{
+    inner: Option<RawVacant>,
+    _marker: PhantomData<S>,
+}
 
 impl<S> Vacant<S>
 where
     S: State,
 {
-    pub(crate) fn new(err: Option<Error<S>>) -> Self {
-        Self(err)
+    pub(crate) fn new(vacant: Option<RawVacant>) -> Self {
+        Self {
+            inner: vacant,
+            _marker: PhantomData,
+        }
     }
 
     /// Restores the original error by reattaching the extracted state.
     pub fn with_state(self, state: S) -> Error<S> {
-        let Some(mut err) = self.0 else {
+        let Some(vacant) = self.inner else {
             return Error::from_state(state);
         };
-        err.0
-            .try_set_state(State::into_repr(state))
+
+        let err = vacant
+            .try_with_state(S::into_repr(state))
             .expect("Vacant must be created with correct state storage type");
 
-        err
+        Error(err)
     }
 
     /// Converts into a stateless error. Returns `None` if no error details remain.
-    pub fn try_into_stateless(self) -> Option<Error> {
-        self.0.map(|s| {
-            s.try_into_stateless()
-                .expect("Vacant must not be created with an empty Error")
-        })
+    pub fn try_into_stateless(self) -> result::Result<Error, Self> {
+        let Some(vacant) = self.inner else {
+            return Err(Self::new(None));
+        };
+
+        match vacant.try_into_stateless() {
+            Ok(err) => Ok(Error(err)),
+            Err(err) => Err(Self::new(Some(err))),
+        }
     }
 }
 
@@ -99,18 +111,9 @@ where
     S: State,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        if let Some(err) = &self.0 {
-            render::format_debug_struct(
-                f,
-                "Vacant",
-                err.state(),
-                err.context().map(|v| v as _),
-                err.payload().map(|v| v as _),
-                err.source(),
-                WithBacktrace::search_debug(err.erase_ref()),
-            )
-        } else {
-            write!(f, "Vacant")
-        }
+        let Some(vacant) = &self.inner else {
+            return write!(f, "Vacant");
+        };
+        Debug::fmt(vacant, f)
     }
 }

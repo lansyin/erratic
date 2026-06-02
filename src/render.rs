@@ -90,7 +90,7 @@ pub fn format_chain<S>(
 where
     S: Debug + 'static,
 {
-    const SOURCE_PREFIX: &'static str = "\n  -> ";
+    const SOURCE_PREFIX: &str = "\n  -> ";
 
     let mut source = source;
     let has_additional_info =

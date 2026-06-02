@@ -89,5 +89,5 @@ fn vacant_try_into_stateless_from_inline_returns_none() {
 
     let (_state, vacant) = err.extract_state().unwrap();
     let stateless = vacant.try_into_stateless();
-    assert!(stateless.is_none());
+    assert!(stateless.is_err());
 }

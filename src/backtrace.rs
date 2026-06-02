@@ -48,7 +48,7 @@ impl WithBacktrace {
                 if DISABLED.load(Ordering::Relaxed) {
                     return Err(err);
                 }
-                match Self::search(&err) {
+                match Self::search(|| err.source()) {
                     Some(_) => Err(err),
                     None => {
                         use std::backtrace::{Backtrace, BacktraceStatus};
@@ -74,7 +74,7 @@ impl WithBacktrace {
 
     #[cfg(feature = "backtrace")]
     pub fn search<'a>(
-        source: &'a (dyn error::Error + 'static),
+        f: impl FnOnce() -> Option<&'a (dyn error::Error + 'static)>,
     ) -> Option<&'a std::backtrace::Backtrace> {
         struct DeferSetSearchingBacktrace(bool);
 
@@ -87,7 +87,7 @@ impl WithBacktrace {
         SEARCHING.set(true);
         let _reset_guard = DeferSetSearchingBacktrace(false);
 
-        let mut source = Some(source);
+        let mut source = f();
         while let Some(err) = source {
             if let Some(this) = err.downcast_ref::<WithBacktrace>() {
                 return Some(&this.backtrace);
@@ -105,22 +105,22 @@ impl WithBacktrace {
     }
 
     pub fn search_debug<'a>(
-        #[allow(unused_variables)] source: &'a (dyn error::Error + 'static),
+        #[allow(unused_variables)] f: impl FnOnce() -> Option<&'a (dyn error::Error + 'static)>,
     ) -> Option<&'a dyn Backtrace> {
         cfg_select! {
             feature = "backtrace" => {
-                Self::search(source).map(|b| b as _)
+                Self::search(f).map(|b| b as _)
             }
             _ => None,
         }
     }
 
     pub fn search_display<'a>(
-        #[allow(unused_variables)] source: &'a (dyn error::Error + 'static),
+        #[allow(unused_variables)] f: impl FnOnce() -> Option<&'a (dyn error::Error + 'static)>,
     ) -> Option<&'a dyn Backtrace> {
         cfg_select! {
             feature = "backtrace" => {
-                Self::search(source).map(|b| b as _)
+                Self::search(f).map(|b| b as _)
             }
             _ => None,
         }

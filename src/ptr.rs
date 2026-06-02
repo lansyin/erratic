@@ -116,6 +116,7 @@ impl<T> Align4PtrCompat<T> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn set_value(&mut self, value: T) {
         unsafe {
             let offset = Self::offset_in_store()

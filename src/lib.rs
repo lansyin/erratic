@@ -402,7 +402,14 @@ where
     /// Converts to a stateless error. Returns `None` when no extra details remain after dropping the state.
     pub fn try_into_stateless(self) -> result::Result<Error, Self> {
         match self.0.extract_state() {
-            Ok((_, Some(err))) | Err(err) => Ok(Error(err)),
+            Err(err) => Ok(Error(err)),
+            Ok((state, Some(vac))) => match vac.try_into_stateless() {
+                Ok(err) => Ok(Error(err)),
+                Err(vac) => Err(Error(
+                    vac.try_with_state(state)
+                        .expect("try_with_state will not fail with correct state"),
+                )),
+            },
             Ok((state, None)) => Err(Error(RawError::new_inline_or_boxed(state))),
         }
     }
@@ -528,10 +535,7 @@ where
     /// Try to extract the state.  
     pub fn extract_state(self) -> result::Result<(S, Vacant<S>), Error> {
         match self.0.extract_state() {
-            Ok((s, o)) => Ok((
-                S::from_repr(s),
-                Vacant::new(o.map(|e| Error::<S>(e.with_phantom_state::<S::Repr>()))),
-            )),
+            Ok((s, o)) => Ok((S::from_repr(s), Vacant::new(o))),
             Err(e) => Err(Error(e)),
         }
     }
