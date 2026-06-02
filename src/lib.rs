@@ -471,6 +471,27 @@ where
     pub fn chain(&self) -> impl Iterator<Item = &(dyn error::Error + 'static)> {
         self.0.chain()
     }
+
+    /// Converts to an error of another state.
+    pub fn into_error_of<S2>(self) -> Error<S2>
+    where
+        S2: State + ?Sized,
+    {
+        // Case #1: S = S2
+        let Err(err) = match_else!(rtti::concretize::<_, Error<S2>>(self), Ok(err) => {
+            return err;
+        });
+        // Case #2: self has no state.
+        let Err(err) = match_else!(err.try_into_stateless(), Ok(err) => {
+            return err.with_phantom_state();
+        });
+        // Case #3: self has a different state.
+        Error(RawError::new_boxed::<_, _, context::Blank>(
+            None,
+            err.erase(),
+            payload::Empty::new(),
+        ))
+    }
 }
 
 impl<S> Error<S>
