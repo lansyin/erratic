@@ -164,3 +164,37 @@ fn dedup_repeated_message_in_chain() {
         assert_eq!(format!("{:#}", outer), "outer\n  -> mid\n  -> inner");
     }
 }
+
+#[test]
+fn eliminate_alloc() {
+    {
+        let inner = TestError("inner");
+        let mid = mkerr!(error = inner, state = TestState::FileNotFound);
+        let outer = mkerr!(error = mid) as Error<TestState>;
+        assert_eq!(outer.chain().count(), 1);
+    }
+    {
+        let inner = TestError("inner");
+        let mid = mkerr!(error = inner).stateless();
+        let outer = mkerr!(error = mid) as Error<TestState>;
+        assert_eq!(outer.chain().count(), 1);
+    }
+    {
+        let inner = TestError("inner");
+        let mid = mkerr!(error = inner, state = TestState::FileNotFound).erase();
+        let outer = mkerr!(error = mid) as Error<TestState>;
+        assert_eq!(outer.chain().count(), 1);
+    }
+    {
+        let inner = TestError("inner");
+        let mid = mkerr!(error = inner).stateless().erase();
+        let outer = mkerr!(error = mid) as Error<TestState>;
+        assert_eq!(outer.chain().count(), 1);
+    }
+    {
+        let inner = TestError("inner");
+        let mid = mkerr!(error = inner).stateless().erase();
+        let outer = Error::with_error(mid).build_error();
+        assert_eq!(outer.chain().count(), 1);
+    }
+}
