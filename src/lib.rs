@@ -99,14 +99,12 @@
 //! ```
 //!
 //! # Backtrace
-//! When the `backtrace` feature is enabled and backtrace capture is configured
-//! (via [`RUST_BACKTRACE`/`RUST_LIB_BACKTRACE`][backtrace-conf]), `Error<S>` automatically captures a
-//! backtrace if there isn't already one in the source chain.
+//! When the `backtrace` feature is enabled and backtrace capture is configured via
+//! [environment variables][backtrace-conf], `Error<S>` automatically captures a backtrace if there isn't
+//! already one in the source chain. The backtrace wil be appended after the error chain during debug
+//! formatting, unless the minus sign, e.g. `{:-?}`, is specified to suppress it.
 //!
 //! [backtrace-conf]: https://doc.rust-lang.org/std/backtrace/index.html#environment-variables
-//!
-//! The captured backtrace is appended after the error chain during debug formatting, unless
-//! the minus sign (e.g. `{:-?}`) is specified to suppress it.
 //!
 //! # Representation
 //!
