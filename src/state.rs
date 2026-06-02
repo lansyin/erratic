@@ -104,8 +104,8 @@ where
                 f,
                 "Vacant",
                 err.state(),
-                err.context(),
-                err.payload(),
+                err.context().map(|v| v as _),
+                err.payload().map(|v| v as _),
                 err.source(),
                 WithBacktrace::search_debug(err.erase_ref()),
             )

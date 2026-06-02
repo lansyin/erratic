@@ -130,3 +130,37 @@ fn extract_state() -> Result<()> {
         _ => unreachable!(),
     }
 }
+
+#[test]
+fn dedup_repeated_message_in_chain() {
+    {
+        let inner = TestError("inner");
+        let outer: Error = Error::from_error(inner);
+        assert_eq!(format!("{}", outer), "inner");
+        assert_eq!(format!("{}", outer.source().unwrap()), "inner");
+        assert_eq!(format!("{:#}", outer), "inner");
+    }
+
+    {
+        let inner = TestError("inner");
+        let outer = mkerr!(error = inner, "outer").stateless();
+        assert_eq!(format!("{:#}", outer), "outer\n  -> inner");
+    }
+
+    {
+        let inner = TestError("inner");
+        let mid = mkerr!(error = inner).stateless();
+        let outer = mkerr!(error = mid, "outer").stateless();
+        assert_eq!(format!("{}", outer), "outer");
+        assert_eq!(format!("{}", outer.source().unwrap()), "inner");
+        assert_eq!(format!("{}", outer.chain().last().unwrap()), "inner");
+        assert_eq!(format!("{:#}", outer), "outer\n  -> inner");
+    }
+
+    {
+        let inner = TestError("inner");
+        let mid = mkerr!(error = inner, "mid").stateless();
+        let outer = mkerr!(error = mid, "outer").stateless();
+        assert_eq!(format!("{:#}", outer), "outer\n  -> mid\n  -> inner");
+    }
+}

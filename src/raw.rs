@@ -591,8 +591,8 @@ where
         render::format_debug(
             f,
             self.state(),
-            self.context(),
-            self.payload(),
+            self.context().map(|v| v as _),
+            self.payload().map(|v| v as _),
             self.source(),
             WithBacktrace::search_debug(self),
         )

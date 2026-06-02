@@ -47,8 +47,8 @@ pub fn format_debug_struct<S>(
     f: &mut fmt::Formatter<'_>,
     container_name: &'static str,
     state: Option<&S>,
-    context: Option<&(dyn Display + Send + Sync + 'static)>,
-    payload: Option<&(dyn Display + Send + Sync + 'static)>,
+    context: Option<&dyn Display>,
+    payload: Option<&dyn Display>,
     source: Option<&(dyn error::Error + 'static)>,
     backtrace: Option<&dyn Backtrace>,
 ) -> fmt::Result
@@ -80,11 +80,45 @@ where
     ds.finish()
 }
 
+pub fn format_chain<S>(
+    f: &mut fmt::Formatter<'_>,
+    state: Option<&S>,
+    context: Option<&dyn Display>,
+    payload: Option<&dyn Display>,
+    source: Option<&(dyn error::Error + 'static)>,
+) -> fmt::Result
+where
+    S: Debug + 'static,
+{
+    const SOURCE_PREFIX: &'static str = "\n  -> ";
+
+    let mut source = source;
+    let has_additional_info =
+        format_state_context_payload(f, state, context.as_ref(), payload.as_ref())?;
+    let mut dedup = DedupLast::new();
+
+    if !has_additional_info {
+        let Some(err) = source else {
+            unreachable!();
+        };
+        dedup.format_one(&mut Blackhole, |w| write!(w, "{SOURCE_PREFIX}{err}"))?;
+        write!(f, "{err}")?;
+        source = err.source();
+    }
+
+    while let Some(err) = source {
+        dedup.format_one(f, |w| write!(w, "{SOURCE_PREFIX}{err}"))?;
+        source = err.source();
+    }
+
+    Ok(())
+}
+
 pub fn format_debug<S>(
     f: &mut fmt::Formatter<'_>,
     state: Option<&S>,
-    context: Option<&(dyn Display + Send + Sync + 'static)>,
-    payload: Option<&(dyn Display + Send + Sync + 'static)>,
+    context: Option<&dyn Display>,
+    payload: Option<&dyn Display>,
     source: Option<&(dyn error::Error + 'static)>,
     backtrace: Option<&dyn Backtrace>,
 ) -> fmt::Result
@@ -104,28 +138,10 @@ where
             show_less.then_some(backtrace).flatten(),
         )
     } else {
-        let mut source = source;
-        let has_additional_info =
-            format_state_context_payload(f, state, context.as_ref(), payload.as_ref())?;
-        let mut dedup = DedupLast::new();
-
-        if !has_additional_info {
-            let Some(err) = source else {
-                unreachable!();
-            };
-            write!(dedup.format_one(f), "{err}")?;
-            source = err.source();
-        }
-
-        while let Some(err) = source {
-            write!(f, "\n  -> ")?;
-            write!(dedup.format_one(f), "{err}")?;
-            source = err.source();
-        }
+        format_chain(f, state, context, payload, source)?;
 
         if !show_less && let Some(backtrace) = backtrace {
-            write!(f, "\nBacktrace:\n")?;
-            write!(f, "{backtrace}")?;
+            write!(f, "\nBacktrace:\n{backtrace}")?;
         }
 
         Ok(())
@@ -144,24 +160,7 @@ where
     S: Debug + 'static,
 {
     if f.alternate() {
-        let mut source = source;
-        let has_additional_info =
-            format_state_context_payload(f, state, context.as_ref(), payload.as_ref())?;
-        let mut dedup = DedupLast::new();
-
-        if !has_additional_info {
-            let Some(err) = source else {
-                unreachable!();
-            };
-            write!(dedup.format_one(f), "{err}")?;
-            source = err.source();
-        }
-
-        while let Some(err) = source {
-            write!(f, "\n  -> ")?;
-            write!(dedup.format_one(f), "{err}")?;
-            source = err.source();
-        }
+        format_chain(f, state, context, payload, source)?;
     } else {
         let has_additional_info =
             format_state_context_payload(f, state, context.as_ref(), payload.as_ref())?;
@@ -188,39 +187,80 @@ impl DedupLast {
         }
     }
 
-    fn format_one<'a, 'b>(&'a mut self, f: &'a mut fmt::Formatter<'b>) -> FormatOne<'a, 'b> {
-        FormatOne {
-            formatter: f,
+    fn format_one<'a, W>(
+        &'a mut self,
+        w: &'a mut W,
+        f: impl FnOnce(&mut FormatOne<'a, W>) -> fmt::Result,
+    ) -> fmt::Result
+    where
+        W: Write,
+    {
+        let mut w = FormatOne {
+            writer: w,
             last: &mut self.last,
             index: Some(0),
-        }
+        };
+
+        f(&mut w)?;
+
+        w.finish()
     }
 }
 
-struct FormatOne<'a, 'b> {
-    formatter: &'a mut fmt::Formatter<'b>,
+struct FormatOne<'a, W>
+where
+    W: Write,
+{
+    writer: &'a mut W,
     last: &'a mut String,
     index: Option<usize>,
 }
 
-impl<'a, 'b> Write for FormatOne<'a, 'b> {
+impl<'a, W> Write for FormatOne<'a, W>
+where
+    W: Write,
+{
     fn write_str(&mut self, s: &str) -> fmt::Result {
         let Some(index) = self.index.as_mut() else {
             self.last.push_str(s);
-            return self.formatter.write_str(s);
+            return Ok(());
         };
 
-        if let Some((_, last)) = self.last.split_at_checked(*index)
-            && last.starts_with(s)
-        {
+        if self.last[(*index)..].starts_with(s) {
             *index += s.len();
             return Ok(());
         }
 
         self.last.truncate(*index);
         self.index = None;
+        self.last.push_str(s);
+        Ok(())
+    }
+}
 
-        self.formatter.write_str(self.last)?;
-        Write::write_str(self, s)
+impl<'a, W> FormatOne<'a, W>
+where
+    W: Write,
+{
+    fn finish(self) -> fmt::Result {
+        match self.index {
+            Some(index) => {
+                if index < self.last.len() {
+                    self.writer.write_str(&self.last[..index])?;
+                }
+            }
+            None => {
+                self.writer.write_str(self.last)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+struct Blackhole;
+
+impl Write for Blackhole {
+    fn write_str(&mut self, _: &str) -> fmt::Result {
+        Ok(())
     }
 }
