@@ -18,9 +18,8 @@
 //! # Attaching Context & Payload
 //!
 //! When constructing an error, you can optionally attach a static context and/or a dynamic payload.
-//! If attached, the memory is merged into a single allocation when the upstream error is erased.
-//! If omitted, no extra memory is allocated for them. If only a context is provided, no heap allocation
-//! occurs at all.
+//! If attached, the memory is merged into a single allocation when the source error is erased.
+//! If only a context is provided, no heap allocation occurs at all.
 //!
 //! ```
 //! # use std::sync::Weak;
@@ -37,11 +36,11 @@
 //!     }
 //!     let r = r.upgrade()
 //!         .with_context(literal!("stream expired"))?; // No alloc.
-//!     //= .with_payload("stream expired")?;
+//!     //  .with_payload("stream expired")?;
 //!     let n = r.read(buf)
 //!         .with_context(literal!("failed to read from stream: "))
 //!         .with_payload(r.id())?; // Alloc once for error, id, and context.
-//!     //= .with_payload_fn(|| format!("failed to read from stream: {}", w.id()))?;
+//!     //  .with_payload_fn(|| format!("failed to read from stream: {}", w.id()))?;
 //!     Ok(n)
 //! }
 //! ```
@@ -78,8 +77,7 @@
 //!
 //! The state is optional and can be extracted at runtime, which enables errors to share a single type with different
 //! layouts. A stateful error can be cheaply converted into a stateless one (via `extract_state`) and vice versa
-//! (via `with_phantom_state`). Using the `?` operator between stateful and stateless errors is supported, achieved by
-//! making `Stateless` unsized.
+//! (via `with_phantom_state`). Using the `?` operator between stateful and stateless errors is also supported.
 //!
 //! ```
 //! # use std::{thread, result};
@@ -101,37 +99,44 @@
 //! ```
 //!
 //! # Backtrace
+//! When the `backtrace` feature is enabled and backtrace capture is configured
+//! (via [`RUST_BACKTRACE`/`RUST_LIB_BACKTRACE`][backtrace-conf]), `Error<S>` automatically captures a
+//! backtrace if there isn't already one in the source chain.
 //!
-//! When the `backtrace` feature is enabled and either the `RUST_BACKTRACE` or `RUST_LIB_BACKTRACE`
-//! environment variable is set, `Error<S>` automatically captures a backtrace if none is present in
-//! the error chain.
+//! [backtrace-conf]: https://doc.rust-lang.org/std/backtrace/index.html#environment-variables
 //!
-//! The captured backtrace will be included in the error's output during debug formatting, unless
-//! the minus sign (i.e. `{:-?}`) is specified to suppress it. This functionality aids debugging
-//! for complex nested error workflows.
+//! The captured backtrace is appended after the error chain during debug formatting, unless
+//! the minus sign (e.g. `{:-?}`) is specified to suppress it.
 //!
 //! # Representation
 //!
-//! When additional information (state, context, or payload) is present alongside the source
-//! error, the output is [`<state>: <context><payload>`][mimic_erratic_display]. Otherwise, when
-//! the error carries only a source, the output is `<source>`.
+//! If the error contains only a source, the error message is inherited from the source. Otherwise, the
+//! error message is constructed from other attached components.
 //!
-//! [mimic_erratic_display]: https://play.rust-lang.org/?gist=e17db5237911367388fc401e445aa2cf
+//! ```text
+//! <error> ::= <source>
+//!           | <state>": "<context><payload>
+//!           | <state>": "<context>
+//!           | <state>": "<payload>
+//!           | <context><payload>
+//!           | <context>
+//!           | <payload>
+//!           | <state>
+//! ```
 //!
-//! Format specifiers:
+//! By default, only the top-level error is shown during formatting. To display the full error chain,
+//! format with alternate or debug specifiers.
 //!
 //! - `{}`:       Displays only the top-level error.
 //! - `{:#}`:     Displays the full error chain.
 //! - `{:?}`:     Displays the full error chain with backtrace (if captured).
 //! - `{:#?}`:    Displays all information in a struct-like format.
 //!
-//! Error chain:
+//! The error chain is defined as follows:
 //!
 //! ```text
-//! <error>
-//!   -> <source_0>
-//!   -> <source_1>
-//!   -> ..
+//! <chain> ::= <error>
+//!           | <error>"\n  -> "<chain>
 //! ```
 //!
 //! # Layout
@@ -143,11 +148,11 @@
 //! ```plaintext
 //! (32-bit platform, little-endian)
 //! (Context Only)
-//! [______00|________|________|________]
+//! [......00|........|........|........]
 //!                                     \
 //!                                      `rodata-> [Context]
 //! (Allocation Required)
-//! [______01|________|________|________]
+//! [......01|........|........|........]
 //!                                     \
 //!                                      `heap-> [VTable|State|Error|Payload|Context]
 //! (Small State Only)
