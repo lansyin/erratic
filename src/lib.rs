@@ -400,10 +400,10 @@ where
     }
 
     /// Converts to a stateless error. Returns `None` when no extra details remain after dropping the state.
-    pub fn try_into_stateless(self) -> Option<Error> {
+    pub fn try_into_stateless(self) -> result::Result<Error, Self> {
         match self.0.extract_state() {
-            Ok((_, Some(err))) | Err(err) => Some(Error(err)),
-            _ => None,
+            Ok((_, Some(err))) | Err(err) => Ok(Error(err)),
+            Ok((state, None)) => Err(Error(RawError::new_inline_or_boxed(state))),
         }
     }
 
