@@ -85,9 +85,10 @@ fn write(w: &mut Writer, data: &[u8; 64]) -> Result<()> {
 ```
 
 ## Backtrace
+
 When the `backtrace` feature is enabled and backtrace capture is configured via
 [environment variables][backtrace-conf], `Error<S>` automatically captures a backtrace if there isn't
-already one in the source chain. The backtrace wil be appended after the error chain during debug
+already one in the source chain. The backtrace will be appended after the error chain during debug
 formatting, unless the minus sign, e.g. `{:-?}`, is specified to suppress it.
 
 [backtrace-conf]: https://doc.rust-lang.org/std/backtrace/index.html#environment-variables
