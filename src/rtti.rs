@@ -1,6 +1,6 @@
 use core::{
     any::{Any, TypeId},
-    mem::ManuallyDrop,
+    mem::{self, ManuallyDrop},
     result,
 };
 
@@ -16,17 +16,54 @@ where
         // # Safety
         //
         // It is sound only when `TypeId::of::<T>() == TypeId::of::<U>()`, which guarantees
-        // that `T` and `U` have the same layout. The [`unwrap_unchecked`] is justified by
-        // the preceding `TypeId` check.
+        // that `T` and `U` have the same layout.
         unsafe {
             Ok(ManuallyDrop::take(
                 (&mut ManuallyDrop::new(value) as &mut dyn Any)
                     .downcast_mut::<ManuallyDrop<U>>()
-                    .unwrap_unchecked(),
+                    .expect("downcast must succeed as its type-id has been checked"),
             ))
         }
     } else {
         Err(value)
+    }
+}
+
+/// Attempts to concretize `ref_` into type `&U` if `T == U` at the type-id level.
+///
+/// Returns `Ok(ref_ as &U)` on match, or `Err(ref_)` otherwise.
+pub fn concretize_ref<T, U>(ref_: &T) -> result::Result<&U, &T>
+where
+    T: 'static,
+    U: 'static,
+{
+    if TypeId::of::<T>() == TypeId::of::<U>() {
+        // # Safety
+        //
+        // It is sound only when `TypeId::of::<T>() == TypeId::of::<U>()`, which guarantees
+        // that `&T` and `&U` have the same layout.
+        unsafe { Ok(&*(ref_ as *const T as *const U)) }
+    } else {
+        Err(ref_)
+    }
+}
+
+/// Attempts to concretize `ref_mut` into type `&mut U` if `T == U` at the type-id level.
+///
+/// Returns `Ok(ref_mut as &mut U)` on match, or `Err(ref_mut)` otherwise.
+pub fn concretize_mut<T, U>(ref_mut: &mut T) -> result::Result<&mut U, &mut T>
+where
+    T: 'static,
+    U: 'static,
+{
+    if TypeId::of::<T>() == TypeId::of::<U>() {
+        // # Safety
+        //
+        // It is sound only when `TypeId::of::<T>() == TypeId::of::<U>()`, which guarantees
+        // that `&mut T` and `&mut U` have the same layout.
+        unsafe { Ok(&mut *(ref_mut as *mut T as *mut U)) }
+    } else {
+        Err(ref_mut)
     }
 }
 
