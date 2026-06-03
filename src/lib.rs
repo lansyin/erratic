@@ -278,7 +278,7 @@ impl Error {
         }
     }
 
-    /// Extracts the source error and payload by type.
+    /// Extracts the context, payload, and source error.
     ///
     /// Returns `None` when the corresponding requested type does not match.
     pub fn into_parts<P, E>(self) -> (Option<&'static str>, Option<P>, Option<E>)
@@ -398,7 +398,7 @@ where
         self.0.state().is_some()
     }
 
-    /// Converts to a stateless error. Returns `None` when no extra details remain after dropping the state.
+    /// Converts to a stateless error. Returns `Err` when no extra details remain after dropping the state.
     pub fn try_into_stateless(self) -> result::Result<Error, Self> {
         match self.0.extract_state() {
             Err(err) => Ok(Error(err)),
