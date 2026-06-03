@@ -166,6 +166,20 @@ impl WithBacktrace {
         }
         Some(self.err)
     }
+
+    pub fn source(&self) -> Option<&(dyn error::Error + Send + Sync + 'static)> {
+        if self.err.is::<Nae>() {
+            return None;
+        }
+        Some(&*self.err)
+    }
+
+    pub fn source_mut(&mut self) -> Option<&mut (dyn error::Error + Send + Sync + 'static)> {
+        if self.err.is::<Nae>() {
+            return None;
+        }
+        Some(&mut *self.err)
+    }
 }
 
 impl Debug for WithBacktrace {

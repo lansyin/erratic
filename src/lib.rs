@@ -433,7 +433,7 @@ where
 
     /// Returns a reference to the source error, if any.
     pub fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        self.0.source()
+        self.0.source().map(|v| v as _)
     }
 
     /// Attempts to downcast the wrapped source error to `E` by shared reference.
@@ -442,6 +442,14 @@ where
         E: error::Error + 'static,
     {
         self.0.downcast_source_ref::<E>()
+    }
+
+    /// Attempts to downcast the wrapped source error to `E` by mutable reference.
+    pub fn downcast_source_mut<E>(&mut self) -> Option<&mut E>
+    where
+        E: error::Error + 'static,
+    {
+        self.0.downcast_source_mut::<E>()
     }
 
     /// Returns `true` if the attached payload is of type `P`.

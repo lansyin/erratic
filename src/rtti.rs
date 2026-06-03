@@ -1,6 +1,6 @@
 use core::{
     any::{Any, TypeId},
-    mem::{self, ManuallyDrop},
+    mem::ManuallyDrop,
     result,
 };
 

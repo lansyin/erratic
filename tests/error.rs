@@ -116,6 +116,24 @@ fn downcast_source_wrong_type() {
 }
 
 #[test]
+fn downcast_source_mut_ok() {
+    let mut err = mkerr!(error = TestError("oops")).stateless();
+    let source = err.downcast_source_mut::<TestError>().unwrap();
+    assert_eq!(source.0, "oops");
+    source.0 = "modified";
+    assert_eq!(
+        err.downcast_source_ref::<TestError>().unwrap().0,
+        "modified"
+    );
+}
+
+#[test]
+fn downcast_source_mut_wrong_type() {
+    let mut err = mkerr!(error = TestError("oops")).stateless();
+    assert!(err.downcast_source_mut::<Nae>().is_none());
+}
+
+#[test]
 fn erase_makes_opaque() {
     let err = mkerr!(error = TestError("oops")).stateless();
     assert_eq!(format!("{}", err.erase()), "oops");

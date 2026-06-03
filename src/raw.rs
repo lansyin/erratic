@@ -286,7 +286,7 @@ impl<S> RawError<S> {
     }
 
     /// Returns a reference to the wrapped source error, if present.
-    pub fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+    pub fn source(&self) -> Option<&(dyn error::Error + Send + Sync + 'static)> {
         match self.select_ref() {
             SelectRef::Const(_body) => None,
             SelectRef::Inline(_body) => None,
@@ -294,6 +294,19 @@ impl<S> RawError<S> {
                 let vtable = DynBody::vtable(body.borrow());
                 // Safety: The body pointer is confirmed valid.
                 (vtable.source)(body.borrow())
+            },
+        }
+    }
+
+    /// Returns a mutable reference to the wrapped source error, if present.
+    pub fn source_mut(&mut self) -> Option<&mut (dyn error::Error + Send + Sync + 'static)> {
+        match self.select_mut() {
+            SelectMut::Const(_body) => None,
+            SelectMut::Inline(_body) => None,
+            SelectMut::Boxed(body) => unsafe {
+                let vtable = DynBody::vtable(body.borrow());
+                // Safety: The body pointer is confirmed valid.
+                (vtable.source_mut)(body.borrow_mut())
             },
         }
     }
@@ -306,6 +319,16 @@ impl<S> RawError<S> {
         E: error::Error + 'static,
     {
         self.source()?.downcast_ref::<E>()
+    }
+
+    /// Attempts to downcast the stored source error to `E`.
+    ///
+    /// Returns `None` if the source is not of type `E` or does not exist.
+    pub fn downcast_source_mut<E>(&mut self) -> Option<&mut E>
+    where
+        E: error::Error + 'static,
+    {
+        self.source_mut()?.downcast_mut::<E>()
     }
 
     /// Attempts to downcast the stored payload to `P`.
@@ -589,8 +612,8 @@ where
             self.state(),
             self.context().map(|v| v as _),
             self.payload().map(|v| v as _),
-            self.source(),
-            WithBacktrace::search_debug(|| self.source()),
+            self.source().map(|v| v as _),
+            WithBacktrace::search_debug(|| self.source().map(|v| v as _)),
         )
     }
 }
@@ -605,8 +628,8 @@ where
             self.state(),
             self.context().map(|v| v as _),
             self.payload().map(|v| v as _),
-            self.source(),
-            WithBacktrace::search_display(|| self.source()),
+            self.source().map(|v| v as _),
+            WithBacktrace::search_display(|| self.source().map(|v| v as _)),
         )
     }
 }
@@ -694,7 +717,10 @@ struct DynBodyVTable {
     /// See [DynBody::try_set_state].
     try_set_state: unsafe fn(Mut<DynBody>, TypeId, NonNull<()>) -> bool,
     /// See [DynBody::source].
-    source: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn error::Error + 'static)>,
+    source: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn error::Error + Send + Sync + 'static)>,
+    /// See [DynBody::source_mut].
+    source_mut:
+        unsafe fn(Mut<'_, DynBody>) -> Option<&mut (dyn error::Error + Send + Sync + 'static)>,
     /// See [DynBody::state].
     state: unsafe fn(Ref<'_, DynBody>, TypeId, NonNull<()>),
     /// See [DynBody::payload].
@@ -724,6 +750,7 @@ impl DynBodyVTable {
             into_boxed_error: DynBody::<S, E, P, L>::into_boxed_error,
             try_set_state: DynBody::<S, E, P, L>::try_set_state,
             source: DynBody::<S, E, P, L>::source,
+            source_mut: DynBody::<S, E, P, L>::source_mut,
             state: DynBody::<S, E, P, L>::state,
             payload: DynBody::<S, E, P, L>::payload,
             context: DynBody::<S, E, P, L>::context,
@@ -1025,20 +1052,48 @@ where
     /// # Safety
     ///
     /// - `this` must point to a valid `DynBody<S, E, P, L>`.
-    unsafe fn source(this: Ref<'_, DynBody>) -> Option<&(dyn error::Error + 'static)> {
+    unsafe fn source(
+        this: Ref<'_, DynBody>,
+    ) -> Option<&(dyn error::Error + Send + Sync + 'static)> {
         let this = unsafe { this.cast::<Self>().deref() };
 
         if rtti::is_same_ty::<E, Nae>() {
             return None;
         }
 
-        match (
-            rtti::is_same_ty::<E, WithBacktrace>(),
-            WithBacktrace::searching(),
-        ) {
-            (true, false) => this.source.source(),
-            (true, true) | (false, _) => Some(&this.source as _),
+        let source = rtti::concretize_ref::<_, WithBacktrace>(&this.source).ok();
+
+        match (source, WithBacktrace::searching()) {
+            (Some(source), false) => source.source(),
+            (Some(_), true) | (None, _) => Some(&this.source as _),
         }
+    }
+
+    /// Returns a mutable reference to the source error.
+    ///
+    /// # Safety
+    ///
+    /// - `this` must point to a valid `DynBody<S, E, P, L>`.
+    unsafe fn source_mut(
+        this: Mut<'_, DynBody>,
+    ) -> Option<&mut (dyn error::Error + Send + Sync + 'static)> {
+        let this = unsafe { this.cast::<Self>().deref_mut() };
+
+        if rtti::is_same_ty::<E, Nae>() {
+            return None;
+        }
+
+        // Note: Check the type first. As of Rust 2024 doing the same thing in the `Err` case of
+        // `concretize_mut` will run into NLL problem case #3:
+        // https://smallcultfollowing.com/babysteps/blog/2016/04/27/non-lexical-lifetimes-introduction/
+        if !rtti::is_same_ty::<E, WithBacktrace>() || WithBacktrace::searching() {
+            return Some(&mut this.source as _);
+        }
+
+        // Note: This unwrap will never panic as we checked the type first.
+        rtti::concretize_mut::<_, WithBacktrace>(&mut this.source)
+            .unwrap()
+            .source_mut()
     }
 
     /// Returns a reference to the state.
@@ -1250,7 +1305,9 @@ impl Debug for RawVacant {
             let context = (vt.context)(body_ref);
             let payload = (vt.payload)(body_ref);
             let source = (vt.source)(body_ref);
-            let backtrace = WithBacktrace::search_debug(|| (vt.source)(body_ref));
+            let backtrace = WithBacktrace::search_debug(|| {
+                (vt.source)(body_ref).map(|v| v as &(dyn error::Error + 'static))
+            });
 
             render::format_debug_struct::<Infallible>(
                 f,
@@ -1258,7 +1315,7 @@ impl Debug for RawVacant {
                 None,
                 context.map(|v| v as _),
                 payload.map(|v| v as _),
-                source,
+                source.map(|v| v as _),
                 backtrace,
             )
         }
