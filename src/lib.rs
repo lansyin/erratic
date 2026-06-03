@@ -179,7 +179,6 @@ pub mod state;
 
 use alloc::boxed::Box;
 use core::{
-    convert::Infallible,
     error,
     fmt::{self, Debug, Display},
     marker::PhantomData,
@@ -664,12 +663,12 @@ where
     S: State,
 {
     fn from(err: Error<S>) -> Self {
-        if err.state().is_none() {
-            return err.extract_state().unwrap_err();
-        }
+        let Ok((state, vacant)) = match_else!(err.extract_state(), Err(err) => {
+            return err;
+        });
         Error(RawError::new_boxed::<_, _, context::Blank>(
             None,
-            err.erase(),
+            vacant.with_state(state).erase(),
             payload::Empty::new(),
         ))
     }
@@ -723,7 +722,7 @@ where
     L: Context + ?Sized,
 {
     fn from(value: Builder<E, S, F, L>) -> Self {
-        let has_state = !rtti::is_same_ty::<S::Repr, Infallible>();
+        let has_state = !rtti::is_same_ty::<S, Stateless>();
         let has_context = !rtti::is_same_ty::<L, context::Blank>();
         let has_error = !rtti::is_same_ty::<E, Nae>();
         let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
@@ -822,11 +821,12 @@ where
     L: Context + ?Sized,
 {
     fn from(value: Builder<Error<S1>, S, F, L>) -> Self {
+        let has_state = !rtti::is_same_ty::<S, Stateless>();
         let has_context = !rtti::is_same_ty::<L, context::Blank>();
         let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
 
-        match (has_context, has_payload) {
-            (false, false) => value.err.into_error_of(),
+        match (has_state, has_context, has_payload) {
+            (false, false, false) => value.err.into_error_of(),
             _ => Error(RawError::new_boxed::<_, _, L>(
                 value.state,
                 value.err.erase(),
@@ -845,17 +845,11 @@ where
     L: Context + ?Sized,
 {
     fn from(value: Builder<Error<S1>, S, F, L>) -> Self {
-        let has_context = !rtti::is_same_ty::<L, context::Blank>();
-        let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
-
-        match (has_context, has_payload) {
-            (false, false) => value.err.into_error_of(),
-            _ => Error(RawError::new_boxed::<_, _, L>(
-                None,
-                value.err.erase(),
-                value.payload_fn.call(),
-            )),
-        }
+        Error(RawError::new_boxed::<_, _, L>(
+            None,
+            RawError::new_boxed::<_, _, L>(value.state, value.err.erase(), value.payload_fn.call()),
+            payload::Empty::new(),
+        ))
     }
 }
 

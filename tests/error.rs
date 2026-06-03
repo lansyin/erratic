@@ -28,6 +28,81 @@ fn builder_with_error_builds_correctly() {
 }
 
 #[test]
+fn builder_case1_error_only_shortcut() {
+    let err: Error = Error::with_error(TestError("oops")).into();
+    let (context, payload, source) = err.into_parts::<TestMessage, TestError>();
+    assert!(context.is_none());
+    assert!(payload.is_none());
+    assert!(matches!(source, Some(TestError("oops"))));
+}
+
+#[test]
+fn builder_case1_state_only_shortcut() {
+    let err: Error<TestState> = Error::with_state(TestState::FileNotFound).into();
+    assert_eq!(err.into_state(), Some(TestState::FileNotFound));
+}
+
+#[test]
+fn builder_case1_context_only_shortcut() {
+    let err: Error = Error::with_context(literal!("context only")).into();
+    let (context, payload, source) = err.into_parts::<TestMessage, TestError>();
+    assert!(matches!(context, Some("context only")));
+    assert!(payload.is_none());
+    assert!(source.is_none());
+}
+
+#[test]
+fn builder_case2_state_only_to_stateless_shortcut() {
+    let err: Error = Error::with_state(TestState::FileNotFound).into();
+    assert_eq!(format!("{}", err), "FileNotFound");
+    assert_eq!(err.chain().count(), 1);
+    assert_eq!(err.into_source().unwrap().to_string(), "FileNotFound");
+}
+
+#[test]
+fn builder_case3_error_only_to_state_shortcut() {
+    let err: Error<TestState> = Error::with_error(TestError("oops")).into();
+    let (state, context, payload, source) = err.into_parts::<TestMessage, TestError>();
+    assert!(state.is_none());
+    assert!(context.is_none());
+    assert!(payload.is_none());
+    assert!(matches!(source, Some(TestError("oops"))));
+}
+
+#[test]
+fn builder_case3_context_only_to_state_shortcut() {
+    let err: Error<TestState> = Error::with_context(literal!("context only")).into();
+    let (state, context, payload, source) = err.into_parts::<TestMessage, TestError>();
+    assert!(state.is_none());
+    assert!(matches!(context, Some("context only")));
+    assert!(payload.is_none());
+    assert!(source.is_none());
+}
+
+#[test]
+fn builder_case4_erratic_state_to_state_shortcut() {
+    let inner: Error<TestState> =
+        mkerr!(error = TestError("inner"), state = TestState::FileNotFound,);
+    let outer: Error<TestState> = Error::with_error(inner).into();
+    let (state, context, payload, source) = outer.into_parts::<TestMessage, TestError>();
+    assert_eq!(state, Some(TestState::FileNotFound));
+    assert!(context.is_none());
+    assert!(payload.is_none());
+    assert!(matches!(source, Some(TestError("inner"))));
+}
+
+#[test]
+fn builder_case6_erratic_stateless_to_state_shortcut() {
+    let inner = mkerr!(error = TestError("inner")).stateless();
+    let outer: Error<TestState> = Error::with_error(inner).into();
+    let (state, context, payload, source) = outer.into_parts::<TestMessage, TestError>();
+    assert!(state.is_none());
+    assert!(context.is_none());
+    assert!(payload.is_none());
+    assert!(matches!(source, Some(TestError("inner"))));
+}
+
+#[test]
 fn downcast_source_ok() {
     let err = mkerr!(error = TestError("oops")).stateless();
     assert!(err.has_source_of::<TestError>());
