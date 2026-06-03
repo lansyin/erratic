@@ -18,7 +18,7 @@
 //! # Attaching Context & Payload
 //!
 //! When constructing an error, you can optionally attach a static context and/or a dynamic payload.
-//! If attached, the memory is merged into a single allocation when the source error is erased.
+//! If attached, the memory is merged into a single allocation when the source error is materialized.
 //! If only a context is provided, no heap allocation occurs at all.
 //!
 //! ```
@@ -75,9 +75,9 @@
 //! }
 //! ```
 //!
-//! The state is optional and can be extracted at runtime, which enables errors to share a single type with different
-//! layouts. A stateful error can be cheaply converted into a stateless one (via `extract_state`) and vice versa
-//! (via `with_phantom_state`). Using the `?` operator between stateful and stateless errors is also supported.
+//! The state is optional. When no runtime state is actually stored, errors can be cheaply converted
+//! between different state types. A stateful error can be cheaply converted into a stateless one and
+//! vice versa. The `?` operator between stateful and stateless errors is also supported.
 //!
 //! ```
 //! # use std::{thread, result};
@@ -531,7 +531,7 @@ where
         self.0.into_state().map(S::from_repr)
     }
 
-    /// Try to extract the state.  
+    /// Attempts to extract the state.  
     pub fn extract_state(self) -> result::Result<(S, Vacant<S>), Error> {
         match self.0.extract_state() {
             Ok((s, o)) => Ok((S::from_repr(s), Vacant::new(o))),
@@ -876,7 +876,7 @@ where
     }
 }
 
-/// Extension trait for extracting the state to a separate layer.
+/// Extension trait for working with the state.
 pub trait StateExt {
     type T;
     type S: State;
