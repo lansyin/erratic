@@ -23,7 +23,7 @@ fn write(filename: &str) -> Result<()> {
 ## Attaching Context & Payload
 
 When constructing an error, you can optionally attach a static context and/or a dynamic payload.
-If attached, the memory is merged into a single allocation when the source error is erased.
+If attached, the memory is merged into a single allocation when the source error is materialized.
 If only a context is provided, no heap allocation occurs at all.
 
 ```rust
@@ -67,9 +67,9 @@ fn try_write(w: &mut Writer, data: &[u8; 64]) -> Result<(), Error<State>> {
 }
 ```
 
-The state is optional and can be extracted at runtime, which enables errors to share a single type with different
-layouts. A stateful error can be cheaply converted into a stateless one (via `extract_state`) and vice versa
-(via `with_phantom_state`). Using the `?` operator between stateful and stateless errors is also supported.
+The state is optional. When no runtime state is actually stored, errors can be cheaply converted
+between different state types. A stateful error can be cheaply converted into a stateless one and
+vice versa. The `?` operator between stateful and stateless errors is also supported.
 
 ```rust
 fn write(w: &mut Writer, data: &[u8; 64]) -> Result<()> {
