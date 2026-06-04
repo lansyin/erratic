@@ -558,6 +558,11 @@ impl<S> RawError<S> {
             },
         }
     }
+
+    #[cfg(feature = "backtrace")]
+    pub fn backtrace(&self) -> Option<&std::backtrace::Backtrace> {
+        WithBacktrace::search(|| self.source().map(|v| v as _))
+    }
 }
 
 impl<S> Drop for RawError<S> {

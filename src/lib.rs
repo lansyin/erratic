@@ -163,6 +163,9 @@
 
 extern crate alloc;
 
+#[cfg(feature = "backtrace")]
+extern crate std;
+
 mod backtrace;
 mod ptr;
 mod raw;
@@ -497,6 +500,12 @@ where
             err.erase(),
             payload::Empty::new(),
         ))
+    }
+
+    /// Returns the backtrace, if any.
+    #[cfg(feature = "backtrace")]
+    pub fn backtrace(&self) -> Option<&std::backtrace::Backtrace> {
+        self.0.backtrace()
     }
 }
 
