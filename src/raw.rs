@@ -1644,7 +1644,11 @@ mod tests {
     fn state_extraction() {
         {
             let err = RawError::new_inline_or_boxed(42u16);
-            assert_matches!(err.extract_state(), Ok((42, None)));
+            if cfg!(feature = "backtrace") {
+                assert_matches!(err.extract_state(), Ok((42, Some(_))));
+            } else {
+                assert_matches!(err.extract_state(), Ok((42, None)));
+            }
         }
         {
             let err = RawError::new_inline_or_boxed(42u128);
