@@ -77,7 +77,7 @@
 //!
 //! The state is optional. When no runtime state is actually stored, errors can be cheaply converted
 //! between different state types. A stateful error can be cheaply converted into a stateless one and
-//! vice versa. The `?` operator between stateful and stateless errors is also supported.
+//! vice versa.
 //!
 //! ```
 //! # use std::{thread, result};
@@ -661,22 +661,6 @@ where
         Error(RawError::new_boxed::<_, _, context::Blank>(
             None,
             err,
-            payload::Empty::new(),
-        ))
-    }
-}
-
-impl<S> From<Error<S>> for Error
-where
-    S: State,
-{
-    fn from(err: Error<S>) -> Self {
-        let Ok((state, vacant)) = match_else!(err.extract_state(), Err(err) => {
-            return err;
-        });
-        Error(RawError::new_boxed::<_, _, context::Blank>(
-            None,
-            vacant.with_state(state).erase(),
             payload::Empty::new(),
         ))
     }
