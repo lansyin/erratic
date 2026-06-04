@@ -93,7 +93,7 @@ where
         Error(err)
     }
 
-    /// Converts into a stateless error. Returns `None` if no error details remain.
+    /// Converts into a stateless error. Returns `Err` if no error details remain.
     pub fn try_into_stateless(self) -> result::Result<Error, Self> {
         let Some(vacant) = self.inner else {
             return Err(Self::new(None));
