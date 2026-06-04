@@ -1,6 +1,7 @@
 name: ci
 
 on:
+  workflow_call:
   push:
     branches:
       - main
@@ -70,6 +71,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
       - run: cargo test --verbose
+      - run: cargo test --features=backtrace --verbose
 
   miri:
     name: "cargo miri"
@@ -86,3 +88,4 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
           components: miri
       - run: cargo miri test --verbose
+      - run: cargo miri test --features=backtrace --verbose

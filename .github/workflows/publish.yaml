@@ -6,7 +6,10 @@ on:
       - erratic-[0-9]+.*
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yaml
   publish:
+    needs: ci
     name: cargo publish
     environment: publish
     env:
