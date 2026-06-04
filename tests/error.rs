@@ -39,7 +39,7 @@ fn builder_case1_error_only_shortcut() {
 #[test]
 fn builder_case1_state_only_shortcut() {
     let err: Error<TestState> = Error::with_state(TestState::FileNotFound).into();
-    assert_eq!(err.into_state(), Some(TestState::FileNotFound));
+    assert_eq!(err.extract_state().unwrap().0, TestState::FileNotFound);
 }
 
 #[test]

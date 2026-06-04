@@ -66,7 +66,7 @@ fn extract_state_from_inline_and_reconstruct() {
 
     let err = vacant.with_state(TestState::PermissionDenied);
     assert!(matches!(err.state(), Some(TestState::PermissionDenied)));
-    assert_eq!(err.into_state(), Some(TestState::PermissionDenied));
+    assert_eq!(err.extract_state().unwrap().0, TestState::PermissionDenied);
 }
 
 #[test]

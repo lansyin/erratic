@@ -398,28 +398,6 @@ impl<S> RawError<S> {
         }
     }
 
-    /// Consumes `self` and returns the stored state.
-    pub fn into_state(self) -> Option<S> {
-        match self.select_own() {
-            SelectOwn::Const(_body) => None,
-            SelectOwn::Inline(body) => Some(body.into_value()),
-            SelectOwn::Boxed(body) => {
-                unsafe {
-                    let vtable = DynBody::vtable(body.borrow());
-                    let mut state = None::<S>;
-
-                    // Safety: The body and state pointers are confirmed valid.
-                    (vtable.into_state)(
-                        body,
-                        TypeId::of::<S>(),
-                        NonNull::from_mut(&mut state).cast(),
-                    );
-                    state
-                }
-            }
-        }
-    }
-
     /// Consumes `self` and returns the boxed source error, if any.
     pub fn into_source(self) -> Option<Box<dyn error::Error + Send + Sync + 'static>> {
         match self.select_own() {
@@ -687,8 +665,6 @@ where
 struct DynBodyVTable {
     /// See [DynBody::drop].
     drop: unsafe fn(ManuallyDrop<Align4Own<DynBody>>),
-    /// See [DynBody::into_state].
-    into_state: unsafe fn(ManuallyDrop<Align4Own<DynBody>>, TypeId, NonNull<()>),
     /// See [DynBody::into_source].
     into_source: unsafe fn(
         ManuallyDrop<Align4Own<DynBody>>,
@@ -743,7 +719,6 @@ impl DynBodyVTable {
     {
         DynBodyVTable {
             drop: DynBody::<S, E, P, L>::drop,
-            into_state: DynBody::<S, E, P, L>::into_state,
             into_source: DynBody::<S, E, P, L>::into_source,
             into_parts: DynBody::<S, E, P, L>::into_parts,
             extract_state: DynBody::<S, E, P, L>::extract_state,
@@ -878,28 +853,6 @@ where
             let this = ManuallyDrop::take(&mut this).cast::<Self>();
 
             let _ = ManuallyDrop::into_inner(this).into_boxed();
-        }
-    }
-
-    /// Extracts `state` from the boxed body and drops the allocation.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must be a valid `Align4Own` pointing to a heap-allocated `DynBody<S, E, P, L>`.
-    /// - `state_dst` must be a valid, aligned, mutable pointer to `Option<S>`.
-    unsafe fn into_state(
-        mut this: ManuallyDrop<Align4Own<DynBody>>,
-        state_ty: TypeId,
-        state_dst: NonNull<()>,
-    ) {
-        let Align4(mut this) = *unsafe {
-            ManuallyDrop::into_inner(ManuallyDrop::take(&mut this).cast::<Self>()).into_boxed()
-        };
-
-        if TypeId::of::<S>() == state_ty {
-            // Safety: The caller guarantees `state_dst` points to a valid `Option<S>`.
-            let dst = unsafe { state_dst.cast::<Option<S>>().as_mut() };
-            *dst = this.replace_state(None);
         }
     }
 
@@ -1429,13 +1382,6 @@ mod tests {
     fn const_variant_payload_is_none() {
         let err = RawError::new_const::<TestContext>();
         assert!(err.payload().is_none());
-    }
-
-    #[test]
-    fn const_variant_into_state() {
-        let err = RawError::new_const::<TestContext>();
-        let state = err.into_state();
-        assert!(matches!(state, None));
     }
 
     // --- Inline variant ---

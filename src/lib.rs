@@ -534,11 +534,6 @@ where
         (state.map(S::from_repr), context, payload, error)
     }
 
-    /// Consumes `self` and returns the attached state.
-    pub fn into_state(self) -> Option<S> {
-        self.0.into_state().map(S::from_repr)
-    }
-
     /// Attempts to extract the state.  
     pub fn extract_state(self) -> result::Result<(S, Vacant<S>), Error> {
         match self.0.extract_state() {
