@@ -492,7 +492,7 @@ impl<S> RawError<S> {
         match self.select_mut() {
             SelectMut::Const(_body) => Err(state),
             SelectMut::Inline(body) => {
-                body.set_value(state);
+                body.replace_value(state);
                 Ok(())
             }
             SelectMut::Boxed(body) => {

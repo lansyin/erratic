@@ -116,8 +116,7 @@ impl<T> Align4PtrCompat<T> {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn set_value(&mut self, value: T) {
+    pub fn replace_value(&mut self, value: T) -> T {
         unsafe {
             let offset = Self::offset_in_store()
                 .expect("offset_in_store was checked before creating an Align4PtrCompat");
@@ -125,7 +124,7 @@ impl<T> Align4PtrCompat<T> {
             // Safety: The offset is validated prior to creating Align4PtrCompat.
             // The raw pointer, though invalidated by the newly created reference,
             // is not used afterward.
-            *(self.store.as_ptr().offset(offset) as *mut T) = value;
+            ptr::replace(self.store.as_ptr().offset(offset) as *mut T, value)
         }
     }
 }
