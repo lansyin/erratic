@@ -75,9 +75,9 @@
 //! }
 //! ```
 //!
-//! The state is optional. When no runtime state is actually stored, errors can be cheaply converted
-//! between different state types. A stateful error can be cheaply converted into a stateless one and
-//! vice versa.
+//! The state is optional. When no runtime state is actually stored, errors can be cheaply converted between
+//! different state types. This means infrastructure errors cross any number of layers with a single allocation,
+//! domain errors avoid the heap entirely, and both share the same `Error<S>` type, so they compose orthogonally.
 //!
 //! ```
 //! # use std::{thread, result};
@@ -97,6 +97,19 @@
 //!     Ok(())
 //! }
 //! ```
+//!
+//! The `?` operator covers the most common cases, notably including conversion from `Error` to `Error<S>`:
+//!
+//! - `impl Error`  -> `Error`
+//! - `impl Error`  -> `Error<S>`
+//! - `Error`       -> `Error<S>`
+//!
+//! Stateful errors are meant to be handled explicitly. Several utility methods are provided:
+//!
+//!   - `erase_error()?`:    Propagate the error.
+//!   - `extract_state()?`:  Take the state out, or propagate the error.
+//!   - `map_state()?`:      Transform the state with a closure.
+//!   - `lift_state()?`:     Transform via `From<S>`.
 //!
 //! # Backtrace
 //!
