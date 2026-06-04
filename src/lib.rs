@@ -315,7 +315,7 @@ where
         &self.0
     }
 
-    /// Creates an `Error` from any [`Error`][std::error::Error].
+    /// Creates an `Error` from any [`Error`][core::error::Error].
     pub fn from_error<E>(err: E) -> Self
     where
         E: error::Error + Send + Sync + 'static,
@@ -705,7 +705,7 @@ where
 /// An intermediate builder for constructing an [`Error`].
 ///
 /// `Builder` accumulates the error source, state, payload, and context,
-/// then materializes them into an `Error<S>` via [`build`](Builder::build) or [`Into`].
+/// then materializes them into an `Error<S>` via [`Into`].
 #[derive(Debug)]
 pub struct Builder<E, S, F, L>
 where

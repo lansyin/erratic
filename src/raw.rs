@@ -978,7 +978,7 @@ where
 
     /// Replace the state if type matches. `state_src` becomes `None` iff it succeeds and returns true.
     ///
-    /// # Panic
+    /// # Panics
     ///
     /// If the state_src is `None`, it panics.
     ///

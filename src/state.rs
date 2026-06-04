@@ -7,7 +7,7 @@ use crate::{Error, raw::RawVacant};
 ///
 /// Most types implement `State::Repr = Self` via blanket impl.
 pub trait State: Debug + Send + Sync + 'static {
-    /// The type used to store the state inside [`Error`](crate::Error).
+    /// The type used to store the state inside [`Error`].
     type Repr: Debug + Send + Sync + 'static;
 
     /// Converts `self` into its stored representation.
