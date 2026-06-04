@@ -708,19 +708,6 @@ where
     context: PhantomData<L>,
 }
 
-impl<E, S, F, L> Builder<E, S, F, L>
-where
-    F: PayloadFn,
-    E: error::Error + Send + Sync + 'static,
-    S: State + ?Sized,
-    L: Context + ?Sized,
-{
-    /// Materializes the builder into an [`Error<S>`].
-    pub fn build(self) -> Error<S> {
-        self.into()
-    }
-}
-
 // Builder Case #1: generic error; state -> state
 impl<E, S, F, L> From<Builder<E, S, F, L>> for Error<S>
 where

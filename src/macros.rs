@@ -260,7 +260,7 @@ mod tests {
             .with_state(42)
             .with_context(literal!("test"))
             .with_payload("error message")
-            .build();
+            .build_error();
 
         assert_eq!(
             format!("{err_from_mkerr:#}"),
@@ -280,7 +280,7 @@ mod tests {
             .with_state(42)
             .with_context(literal!("test"))
             .with_payload("error message")
-            .build();
+            .build_error();
 
         assert_eq!(
             format!("{err_from_mkerr:#}"),
@@ -301,7 +301,7 @@ mod tests {
             .with_state(42)
             .with_context(literal!("test"))
             .with_payload(format!("hello {world}"))
-            .build();
+            .build_error();
 
         assert_eq!(
             format!("{err_from_mkerr:#}"),
