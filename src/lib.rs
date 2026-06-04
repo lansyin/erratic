@@ -294,14 +294,6 @@ impl Error {
     pub fn stateless(self) -> Self {
         self
     }
-
-    /// Converts to a state-tagged error without storing any runtime state.
-    pub fn with_phantom_state<S>(self) -> Error<S>
-    where
-        S: State + ?Sized,
-    {
-        Error(self.0.with_phantom_state::<S::Repr>())
-    }
 }
 
 impl<S> Error<S>
@@ -486,8 +478,8 @@ where
         self.0.chain()
     }
 
-    /// Converts to an error of another state.
-    pub fn into_error_of<S2>(self) -> Error<S2>
+    /// Converts to an error of another state without providing the state value.
+    pub fn with_phantom_state<S2>(self) -> Error<S2>
     where
         S2: State + ?Sized,
     {
@@ -497,7 +489,7 @@ where
         });
         // Case #2: self has no state.
         let Err(err) = match_else!(err.try_into_stateless(), Ok(err) => {
-            return err.with_phantom_state();
+            return Error(err.0.with_phantom_state());
         });
         // Case #3: self has a different state.
         Error(RawError::new_boxed::<_, _, context::Blank>(
@@ -815,7 +807,9 @@ where
         match (has_context, has_error, has_payload) {
             (false, false, false) => unreachable!(),
             (false, true, false) => value.err.into(),
-            (true, false, false) => Error(RawError::new_const::<L>()).with_phantom_state(),
+            (true, false, false) => {
+                Error::<Stateless>(RawError::new_const::<L>()).with_phantom_state()
+            }
             _ => Error(RawError::new_boxed::<_, _, L>(
                 None,
                 value.err,
@@ -839,7 +833,7 @@ where
         let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
 
         match (has_state, has_context, has_payload) {
-            (false, false, false) => value.err.into_error_of(),
+            (false, false, false) => value.err.with_phantom_state(),
             _ => Error(RawError::new_boxed::<_, _, L>(
                 value.state,
                 value.err.erase(),
@@ -879,7 +873,7 @@ where
         let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
 
         match (has_context, has_payload) {
-            (false, false) => value.err.into_error_of(),
+            (false, false) => value.err.with_phantom_state(),
             _ => Error(RawError::new_boxed::<_, _, L>(
                 None,
                 value.err.erase(),
