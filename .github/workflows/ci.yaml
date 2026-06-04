@@ -15,6 +15,7 @@ env:
   RUSTUP_MAX_RETRIES: 10
   # Emit short backtraces.
   RUST_BACKTRACE: short
+  MIRIFLAGS: -Zmiri-disable-isolation
 
 jobs:
   check:
