@@ -2,13 +2,13 @@ mod common;
 
 use common::{TestError, TestMessage, TestState};
 use erratic::{nae::Nae, *};
-use std::{mem, result};
+use std::{assert_matches, mem, result};
 
 #[test]
 fn from_error_round_trip() {
     let err = mkerr!(error = TestError("oops")).stateless();
     let (context, payload, source) = err.into_parts::<TestMessage, TestError>();
-    assert!(matches!(source, Some(TestError("oops"))));
+    assert_matches!(source, Some(TestError("oops")));
     assert!(payload.is_none());
     assert!(context.is_none());
 }
@@ -22,9 +22,9 @@ fn builder_with_error_builds_correctly() {
     )
     .stateless();
     let (context, payload, source) = err.into_parts::<TestMessage, TestError>();
-    assert!(matches!(context, Some("context")));
-    assert!(matches!(source, Some(TestError("oops"))));
-    assert!(matches!(payload, Some(TestMessage("payload"))));
+    assert_matches!(context, Some("context"));
+    assert_matches!(source, Some(TestError("oops")));
+    assert_matches!(payload, Some(TestMessage("payload")));
 }
 
 #[test]
@@ -33,7 +33,7 @@ fn builder_case1_error_only_shortcut() {
     let (context, payload, source) = err.into_parts::<TestMessage, TestError>();
     assert!(context.is_none());
     assert!(payload.is_none());
-    assert!(matches!(source, Some(TestError("oops"))));
+    assert_matches!(source, Some(TestError("oops")));
 }
 
 #[test]
@@ -46,7 +46,7 @@ fn builder_case1_state_only_shortcut() {
 fn builder_case1_context_only_shortcut() {
     let err: Error = Error::with_context(literal!("context only")).into();
     let (context, payload, source) = err.into_parts::<TestMessage, TestError>();
-    assert!(matches!(context, Some("context only")));
+    assert_matches!(context, Some("context only"));
     assert!(payload.is_none());
     assert!(source.is_none());
 }
@@ -66,7 +66,7 @@ fn builder_case3_error_only_to_state_shortcut() {
     assert!(state.is_none());
     assert!(context.is_none());
     assert!(payload.is_none());
-    assert!(matches!(source, Some(TestError("oops"))));
+    assert_matches!(source, Some(TestError("oops")));
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn builder_case3_context_only_to_state_shortcut() {
     let err: Error<TestState> = Error::with_context(literal!("context only")).into();
     let (state, context, payload, source) = err.into_parts::<TestMessage, TestError>();
     assert!(state.is_none());
-    assert!(matches!(context, Some("context only")));
+    assert_matches!(context, Some("context only"));
     assert!(payload.is_none());
     assert!(source.is_none());
 }
@@ -88,7 +88,7 @@ fn builder_case4_erratic_state_to_state_shortcut() {
     assert_eq!(state, Some(TestState::FileNotFound));
     assert!(context.is_none());
     assert!(payload.is_none());
-    assert!(matches!(source, Some(TestError("inner"))));
+    assert_matches!(source, Some(TestError("inner")));
 }
 
 #[test]
@@ -99,7 +99,7 @@ fn builder_case6_erratic_stateless_to_state_shortcut() {
     assert!(state.is_none());
     assert!(context.is_none());
     assert!(payload.is_none());
-    assert!(matches!(source, Some(TestError("inner"))));
+    assert_matches!(source, Some(TestError("inner")));
 }
 
 #[test]

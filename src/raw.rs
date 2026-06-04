@@ -1297,6 +1297,7 @@ mod tests {
         string::{String, ToString},
     };
     use core::{
+        assert_matches,
         convert::Infallible,
         error,
         fmt::{self, Display},
@@ -1394,13 +1395,13 @@ mod tests {
     #[test]
     fn inline_variant_state() {
         let err = RawError::try_new_inline(42u16).unwrap();
-        assert!(matches!(err.state(), Some(42)));
+        assert_matches!(err.state(), Some(42));
     }
 
     #[test]
     fn inline_variant_into_state() {
         let err = RawError::try_new_inline(42u16).unwrap();
-        assert!(matches!(err.state(), Some(42)));
+        assert_matches!(err.state(), Some(42));
     }
 
     #[test]
@@ -1442,7 +1443,7 @@ mod tests {
             payload::Empty::new(),
         );
         let downcasted = err.downcast_source_ref::<TestError>();
-        assert!(matches!(downcasted, Some(TestError("oops"))));
+        assert_matches!(downcasted, Some(TestError("oops")));
     }
 
     #[test]
@@ -1475,7 +1476,7 @@ mod tests {
             TestPayload(42),
         );
         let downcasted = err.downcast_payload_ref::<TestPayload>();
-        assert!(matches!(downcasted, Some(TestPayload(42))));
+        assert_matches!(downcasted, Some(TestPayload(42)));
     }
 
     #[test]
@@ -1495,7 +1496,7 @@ mod tests {
         let err =
             RawError::new_boxed::<_, _, Blank>(Some(42u32), Nae::new(), payload::Empty::new());
         assert!(err.source().is_none());
-        assert!(matches!(err.state(), Some(42)));
+        assert_matches!(err.state(), Some(42));
     }
 
     #[test]
@@ -1541,9 +1542,9 @@ mod tests {
             TestPayload(99),
         );
         let (state, context, payload, source) = err.into_parts::<TestPayload, TestError>();
-        assert!(matches!(state, Some("state")));
-        assert!(matches!(source, Some(TestError("oops"))));
-        assert!(matches!(payload, Some(TestPayload(99))));
+        assert_matches!(state, Some("state"));
+        assert_matches!(source, Some(TestError("oops")));
+        assert_matches!(payload, Some(TestPayload(99)));
         assert!(matches!(context, Some(TestContext::LITERAL)))
     }
 
@@ -1574,7 +1575,7 @@ mod tests {
         let (state, _, payload, source) = err.into_parts::<TestPayload, TestError>();
         assert!(source.is_none());
         assert!(payload.is_none());
-        assert!(matches!(state, Some(42)));
+        assert_matches!(state, Some(42));
     }
 
     // --- Drop safety (checked via sanitizer / basic leak check) ---
@@ -1639,16 +1640,16 @@ mod tests {
     fn state_extraction() {
         {
             let err = RawError::new_inline_or_boxed(42u16);
-            assert!(matches!(err.extract_state(), Ok((42, None))));
+            assert_matches!(err.extract_state(), Ok((42, None)));
         }
         {
             let err = RawError::new_inline_or_boxed(42u128);
-            assert!(matches!(err.extract_state(), Ok((42, Some(_)))));
+            assert_matches!(err.extract_state(), Ok((42, Some(_))));
         }
         {
             let err =
                 RawError::new_boxed::<_, _, Blank>(None::<Infallible>, Nae::new(), format!("oops"));
-            assert!(matches!(err.extract_state(), Err(err) if format!("{err}") == "oops"));
+            assert_matches!(err.extract_state(), Err(err) if format!("{err}") == "oops");
         }
         {
             let err = RawError::new_boxed::<_, _, Blank>(Some(42i32), Nae::new(), format!("oops"));
