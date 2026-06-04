@@ -140,9 +140,11 @@
 //!
 //! # Layout
 //!
-//! Type-wise, `Error<S>` is an internally tagged union, and it requires pointers to constant or
-//! heap-allocated data to be aligned to 4 bytes, freeing up the lower 2 bits to encode
-//! the discriminant. This design allows heap allocation to be avoided when unnecessary.
+//! Type-wise, `Error<S>` is an internally tagged union, and it requires pointers to be aligned to 4 bytes,
+//! freeing up the lower 2 bits to encode its discriminant. Pointer tagging in this crate fully follows
+//! [strict provenance][strict_provenance], and is verified by Miri.
+//!
+//! [strict_provenance]: https://doc.rust-lang.org/std/ptr/index.html#strict-provenance
 //!
 //! ```plaintext
 //! (32-bit platform, little-endian)

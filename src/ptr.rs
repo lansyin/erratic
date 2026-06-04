@@ -3,7 +3,7 @@ use core::{
     error::{self, Error},
     fmt::{self, Debug, Display},
     marker::PhantomData,
-    mem::{self, ManuallyDrop, MaybeUninit},
+    mem::{self, ManuallyDrop, MaybeUninit, swap},
     ptr::{self, NonNull},
     result,
 };
@@ -19,6 +19,17 @@ impl Metadata {
     pub const _1: Metadata = Metadata(0b00000001);
     pub const _2: Metadata = Metadata(0b00000010);
     pub const _3: Metadata = Metadata(0b00000011);
+
+    fn encode_in_le_bytes(self, addr_bytes: &mut [u8]) {
+        assert!((addr_bytes[0] & Self::MASK) == 0);
+        addr_bytes[0] |= self.0;
+    }
+
+    fn decode_from_le_bytes(addr_bytes: &mut [u8]) -> Self {
+        let meta = addr_bytes[0] & Self::MASK;
+        addr_bytes[0] &= !Self::MASK;
+        Self(meta)
+    }
 }
 
 cfg_select! {
@@ -143,44 +154,60 @@ impl<T> Drop for Align4PtrCompat<T> {
     }
 }
 
-cfg_select! {
-    target_pointer_width = "32" => {
-        #[derive(Clone, Copy)]
-        #[repr(C, align(4))]
-        struct Align4Ptr([u8; 4]);
-    },
-    target_pointer_width = "64" => {
-        #[derive(Clone, Copy)]
-        #[repr(C, align(8))]
-        struct Align4Ptr([u8; 8]);
-    },
-}
+/// A non-null transformed address with metadata encoded in the low 2 bits of the first byte.
+#[derive(Clone, Copy)]
+struct Align4Ptr(NonNull<()>);
 
 impl Align4Ptr {
+    fn swap_leading_and_trailing_byte_on_big_endian(addr_bytes: &mut [u8]) {
+        let index_last = addr_bytes.len() - 1;
+        let (leading_bytes, last_byte) = addr_bytes.split_at_mut(index_last);
+        cfg_select! {
+            target_endian = "big" => swap(&mut leading_bytes[0], &mut last_byte[0]),
+            target_endian = "little" => _ = || { swap(&mut leading_bytes[0], &mut last_byte[0]) }, // No-op for little endian
+        }
+    }
+
     /// Encodes `meta` into the low 2 bits of the pointer address.
     ///
     /// # Panics
     ///
     /// Panics if the low 2 bits of `addr` are not zero.
-    fn from_parts(addr: usize, meta: Metadata) -> Self {
-        let mut bytes = addr.to_le_bytes();
+    fn from_parts(ptr: NonNull<()>, meta: Metadata) -> Self {
+        let ptr = ptr.as_ptr();
+        let addr = ptr.map_addr(|addr| {
+            let mut addr_bytes = addr.to_le_bytes();
 
-        assert_eq!(bytes[0] & Metadata::MASK, 0);
-        bytes[0] |= meta.0;
+            meta.encode_in_le_bytes(&mut addr_bytes);
+            Self::swap_leading_and_trailing_byte_on_big_endian(&mut addr_bytes);
 
-        Self(bytes)
+            usize::from_le_bytes(addr_bytes)
+        });
+
+        unsafe {
+            // Safety: swapping bytes keeps the addr non-zero.
+            Self(NonNull::new_unchecked(addr))
+        }
     }
 
     /// Extracts the original address and metadata from the encoded pointer.
-    fn into_parts(self) -> (usize, Metadata) {
-        let mut bytes = self.0;
+    fn into_parts(self) -> (NonNull<()>, Metadata) {
+        let addr = self.0.as_ptr();
 
-        let meta = Metadata(bytes[0] & Metadata::MASK);
-        bytes[0] &= !Metadata::MASK;
+        let mut meta = Metadata::_0;
+        let ptr = addr.map_addr(|addr| {
+            let mut addr_bytes = addr.to_le_bytes();
 
-        let addr = usize::from_le_bytes(bytes);
+            Self::swap_leading_and_trailing_byte_on_big_endian(&mut addr_bytes);
+            meta = Metadata::decode_from_le_bytes(&mut addr_bytes);
 
-        (addr, meta)
+            usize::from_le_bytes(addr_bytes)
+        });
+
+        unsafe {
+            // Safety: `Align4Ptr` guarantees the pointer is non-null.
+            (NonNull::new_unchecked(ptr), meta)
+        }
     }
 }
 
@@ -229,29 +256,24 @@ pub struct Align4Own<T> {
 
 impl<T> Align4Own<T> {
     pub fn from_boxed(ptr: Box<Align4<T>>, meta: Metadata) -> Self {
-        let addr = Box::into_raw(ptr).expose_provenance();
+        let ptr = Box::into_raw(ptr);
         Self {
-            ptr: Align4Ptr::from_parts(addr, meta),
+            ptr: unsafe {
+                // Safety: the pointer is fetched from a `Box`.
+                Align4Ptr::from_parts(NonNull::new_unchecked(ptr as *mut ()), meta)
+            },
             _marker: PhantomData,
         }
     }
 
-    /// # Safety
-    ///
-    /// The caller must ensure that the provenance of the stored address is still valid.
-    /// See [`ptr::with_exposed_provenance_mut`].
+    /// Consumes `self` and returns the raw pointer.
     pub fn into_raw(self) -> *mut Align4<T> {
+        // Note: Forget the previous one to avoid double-free.
         let this = ManuallyDrop::new(self);
-        ptr::with_exposed_provenance_mut(this.ptr.into_parts().0)
+        this.ptr.into_parts().0.as_ptr() as *mut Align4<T>
     }
 
     /// Consumes `self` and returns the boxed value.
-    ///
-    /// # Safety
-    ///
-    /// The stored address must have been obtained from [`Box::into_raw`] for a valid
-    /// heap allocation with the correct layout for `Align4<T>`, and must not have been
-    /// freed or aliased.
     pub fn into_boxed(self) -> Box<Align4<T>> {
         unsafe { Box::from_raw(self.into_raw()) }
     }
@@ -260,7 +282,7 @@ impl<T> Align4Own<T> {
     ///
     /// # Safety
     ///
-    /// `Align4<U>` should have a layout compatible with `Align4<T>`.
+    /// `U` should have a layout compatible with `T`.
     /// If you are temporarily working with a type that has a different layout,
     /// you must cast it back to the original type before `drop` is called.
     pub unsafe fn cast<U>(self) -> ManuallyDrop<Align4Own<U>> {
@@ -274,17 +296,13 @@ impl<T> Align4Own<T> {
     }
 
     /// Returns a shared reference to the pointee.
-    ///
-    /// # Safety
-    ///
-    /// The stored address must point to a valid, initialized `T`.
-    /// The caller must ensure provenance is valid; see [`ptr::with_exposed_provenance_mut`].
     pub fn borrow(&self) -> Ref<'_, T> {
         let (addr, _) = self.ptr.into_parts();
-        let ptr: *mut Align4<T> = ptr::with_exposed_provenance_mut(addr);
-        let ptr = ptr.cast::<T>();
+        let ptr = addr.cast::<Align4<T>>().as_ptr();
+        // Safety: Without unsafe (cast), `Align4Own` keeps the pointer valid.
+        let ptr = unsafe { NonNull::new_unchecked(&raw mut (*ptr).0) };
         Ref {
-            ptr: unsafe { NonNull::new_unchecked(ptr) },
+            ptr,
             _marker: PhantomData,
         }
     }
@@ -297,10 +315,11 @@ impl<T> Align4Own<T> {
     /// The caller must ensure no other mutable aliases exist.
     pub fn borrow_mut(&mut self) -> Mut<'_, T> {
         let (addr, _) = self.ptr.into_parts();
-        let ptr: *mut Align4<T> = ptr::with_exposed_provenance_mut(addr);
-        let ptr = ptr.cast::<T>();
+        let ptr = addr.cast::<Align4<T>>().as_ptr();
+        // Safety: Without unsafe (cast), `Align4Own` keeps the pointer valid.
+        let ptr = unsafe { NonNull::new_unchecked(&raw mut (*ptr).0) };
         Mut {
-            ptr: unsafe { NonNull::new_unchecked(ptr) },
+            ptr,
             _marker: PhantomData,
         }
     }
@@ -309,12 +328,13 @@ impl<T> Align4Own<T> {
 impl<T> Drop for Align4Own<T> {
     fn drop(&mut self) {
         unsafe {
-            let _ = Box::from_raw(ptr::with_exposed_provenance_mut::<Align4<T>>(
-                self.ptr.into_parts().0,
-            ));
+            let _ = Box::from_raw(self.ptr.into_parts().0.as_ptr() as *mut Align4<T>);
         }
     }
 }
+
+unsafe impl<T> Send for Align4Own<T> where T: Send {}
+unsafe impl<T> Sync for Align4Own<T> where T: Sync {}
 
 /// Shared reference with metadata stored in the low 2 bits of the first byte of the pointer.
 ///
@@ -331,7 +351,10 @@ pub struct Align4Ref<'a, T> {
 impl<'a, T> Align4Ref<'a, T> {
     pub fn new(ref_: &'a Align4<T>, meta: Metadata) -> Align4Ref<'a, T> {
         Self {
-            ptr: Align4Ptr::from_parts((&raw const *ref_).expose_provenance(), meta),
+            ptr: unsafe {
+                // Safety: the pointer is fetched from a reference.
+                Align4Ptr::from_parts(NonNull::new_unchecked((&raw const *ref_) as *mut ()), meta)
+            },
             _marker: PhantomData,
         }
     }
@@ -343,23 +366,27 @@ impl<'a, T> Align4Ref<'a, T> {
     /// The stored address must point to a valid, initialized `T`.
     pub fn borrow(&self) -> Ref<'a, T> {
         let (addr, _) = self.ptr.into_parts();
-        let ptr: *const Align4<T> = ptr::with_exposed_provenance(addr);
-        let ptr = ptr.cast::<T>();
+        let ptr = addr.cast::<Align4<T>>().as_ptr();
+        // Safety: Without unsafe (cast), `Align4Own` keeps the pointer valid.
+        let ptr = unsafe { NonNull::new_unchecked(&raw mut (*ptr).0) };
         Ref {
-            ptr: unsafe { NonNull::new_unchecked(ptr.cast_mut()) },
+            ptr,
             _marker: PhantomData,
         }
     }
 
     pub fn borrow_raw(&self) -> Ref<'a, Align4<T>> {
         let (addr, _) = self.ptr.into_parts();
-        let ptr: *const Align4<T> = ptr::with_exposed_provenance(addr);
+        let ptr = addr.cast::<Align4<T>>();
         Ref {
-            ptr: unsafe { NonNull::new_unchecked(ptr.cast_mut()) },
+            ptr,
             _marker: PhantomData,
         }
     }
 }
+
+unsafe impl<'a, T> Send for Align4Ref<'a, T> where T: Send {}
+unsafe impl<'a, T> Sync for Align4Ref<'a, T> where T: Sync {}
 
 /// Typed shared reference wrapping a [`NonNull`] pointer.
 ///
@@ -500,7 +527,8 @@ mod tests {
     /// Verifies that `Align4Ptr::from_parts` / `into_parts` round-trips address and metadata.
     #[test]
     fn align4_ptr_round_trip() {
-        let addr = 0xDEAD_BEE0usize; // low 2 bits are 00
+        let value = Align4(0u32); // 4-byte-aligned, low 2 bits are 00
+        let addr = NonNull::new(&raw const value as *mut ()).unwrap();
         for meta in [Metadata::_0, Metadata::_1, Metadata::_2, Metadata::_3] {
             let ptr = Align4Ptr::from_parts(addr, meta);
             let (restored_addr, restored_meta) = ptr.into_parts();
@@ -509,12 +537,14 @@ mod tests {
         }
     }
 
-    /// Verifies that Align4Ptr rejects non-aligned addresses at construction.
+    /// Verifies that Align4Ptr panics when the address has non-zero low bits.
     #[test]
     #[should_panic]
     fn align4_ptr_panics_on_unaligned() {
-        let addr = 0xDEAD_BEEFusize; // low 2 bits are 11
-        Align4Ptr::from_parts(addr, Metadata::_0);
+        let bytes: [u8; 2] = [0, 0];
+        // `bytes[1]` is 1-byte-aligned, so its low 2 bits are 01.
+        let unaligned = NonNull::new(&raw const bytes[1] as *mut ()).unwrap();
+        Align4Ptr::from_parts(unaligned, Metadata::_0);
     }
 
     /// Verifies that `Align4Own` round-trips a boxed value.
