@@ -546,6 +546,32 @@ where
             Err(e) => Err(Error(e)),
         }
     }
+
+    pub fn map_state<F, S2>(self, f: F) -> Error<S2>
+    where
+        F: FnOnce(S) -> S2,
+        S2: State,
+    {
+        let Ok((state, vacant)) = match_else!(self.extract_state(), Err(err) => {
+            return err.with_phantom_state();
+        });
+        let state = f(state);
+        match vacant.try_into_stateless() {
+            Ok(err) => Error(RawError::new_boxed::<_, _, context::Blank>(
+                Some(S2::into_repr(state)),
+                err.erase(),
+                payload::Empty::new(),
+            )),
+            Err(_) => Error(RawError::new_inline_or_boxed(S2::into_repr(state))),
+        }
+    }
+
+    pub fn lift_state<S2>(self) -> Error<S2>
+    where
+        S2: From<S> + State,
+    {
+        self.map_state(S2::from)
+    }
 }
 
 impl<S> Deref for Error<S>
@@ -880,6 +906,11 @@ pub trait StateExt {
     ) -> result::Result<Self::Result<Self::T, (Self::S, Vacant<Self::S>)>, Error>
     where
         Self::S: Sized;
+
+    fn map_state<F, S>(self, f: F) -> Self::Result<Self::T, Error<S>>
+    where
+        F: FnOnce(Self::S) -> S,
+        S: State;
 }
 
 impl<S1> StateExt for Error<S1>
@@ -897,6 +928,14 @@ where
         Self::S: Sized,
     {
         self.extract_state()
+    }
+
+    fn map_state<F, S>(self, f: F) -> Self::Result<Self::T, Error<S>>
+    where
+        F: FnOnce(Self::S) -> S,
+        S: State,
+    {
+        self.map_state(f)
     }
 }
 
@@ -919,6 +958,14 @@ where
             Err(err) => err.build_error().extract_state().map(|err| Err(err)),
         }
     }
+
+    fn map_state<F, S2>(self, f: F) -> Self::Result<Self::T, Error<S2>>
+    where
+        F: FnOnce(Self::S) -> S2,
+        S2: State,
+    {
+        self.map_err(|err| err.map_state(f))
+    }
 }
 
 impl<E1, S, F, L> StateExt for Builder<E1, S, F, L>
@@ -940,6 +987,14 @@ where
     {
         self.build_error().extract_state()
     }
+
+    fn map_state<M, S2>(self, f: M) -> Self::Result<Self::T, Error<S2>>
+    where
+        M: FnOnce(Self::S) -> S2,
+        S2: State,
+    {
+        self.build_error().map_state(f)
+    }
 }
 
 impl<S1, S, F, L> StateExt for Builder<Error<S1>, S, F, L>
@@ -960,6 +1015,14 @@ where
         Self::S: Sized,
     {
         self.build_error().extract_state()
+    }
+
+    fn map_state<M, S2>(self, f: M) -> Self::Result<Self::T, Error<S2>>
+    where
+        M: FnOnce(Self::S) -> S2,
+        S2: State,
+    {
+        self.build_error().map_state(f)
     }
 }
 
@@ -985,6 +1048,14 @@ where
             Err(err) => err.build_error().extract_state().map(|err| Err(err)),
         }
     }
+
+    fn map_state<M, S2>(self, f: M) -> Self::Result<Self::T, Error<S2>>
+    where
+        M: FnOnce(Self::S) -> S2,
+        S2: State,
+    {
+        self.map_err(|err| err.map_state(f))
+    }
 }
 
 impl<T1, S1, S, F, L> StateExt for result::Result<T1, Builder<Error<S1>, S, F, L>>
@@ -1008,6 +1079,14 @@ where
             Ok(v) => Ok(Ok(v)),
             Err(err) => err.build_error().extract_state().map(|err| Err(err)),
         }
+    }
+
+    fn map_state<M, S2>(self, f: M) -> Self::Result<Self::T, Error<S2>>
+    where
+        M: FnOnce(Self::S) -> S2,
+        S2: State,
+    {
+        self.map_err(|err| err.map_state(f))
     }
 }
 
