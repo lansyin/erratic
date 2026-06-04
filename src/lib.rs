@@ -903,6 +903,15 @@ pub trait StateExt {
     where
         F: FnOnce(Self::S) -> S,
         S: State;
+
+    fn lift_state<S>(self) -> Self::Result<Self::T, Error<S>>
+    where
+        S: State,
+        S: From<Self::S>,
+        Self: Sized,
+    {
+        self.map_state(S::from)
+    }
 }
 
 impl<S1> StateExt for Error<S1>
