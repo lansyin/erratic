@@ -135,7 +135,7 @@ where
             context,
             payload,
             source,
-            show_less.then_some(backtrace).flatten(),
+            (!show_less).then_some(backtrace).flatten(),
         )
     } else {
         format_chain(f, state, context, payload, source)?;

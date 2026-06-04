@@ -1263,9 +1263,13 @@ impl Debug for RawVacant {
             let context = (vt.context)(body_ref);
             let payload = (vt.payload)(body_ref);
             let source = (vt.source)(body_ref);
-            let backtrace = WithBacktrace::search_debug(|| {
-                (vt.source)(body_ref).map(|v| v as &(dyn error::Error + 'static))
-            });
+            let backtrace = (!f.sign_minus())
+                .then(|| {
+                    WithBacktrace::search_debug(|| {
+                        (vt.source)(body_ref).map(|v| v as &(dyn error::Error + 'static))
+                    })
+                })
+                .flatten();
 
             render::format_debug_struct::<Infallible>(
                 f,
