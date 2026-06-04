@@ -575,6 +575,36 @@ where
     }
 }
 
+impl<E, S> From<E> for Error<S>
+where
+    E: error::Error + Send + Sync + 'static,
+    S: State + ?Sized,
+{
+    fn from(err: E) -> Self {
+        let Err(err) = match_else!(rtti::concretize::<E, ImplError<S>>(err),
+            Ok(err_unit) => return Error(err_unit.0),
+        );
+        let Err(err) = match_else!(rtti::concretize::<E, ImplError<Stateless>>(err),
+            Ok(err_unit) => return Error(err_unit.0.with_phantom_state()),
+        );
+
+        Error(RawError::new_boxed::<_, _, context::Blank>(
+            None,
+            err,
+            payload::Empty::new(),
+        ))
+    }
+}
+
+impl<S> From<Error> for Error<S>
+where
+    S: State,
+{
+    fn from(value: Error) -> Self {
+        value.with_phantom_state()
+    }
+}
+
 impl<S> From<Error<S>> for Box<dyn error::Error + 'static>
 where
     S: State + ?Sized,
@@ -658,36 +688,6 @@ where
 {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         self.0.source().map(|s| s as _)
-    }
-}
-
-impl<E, S> From<E> for Error<S>
-where
-    E: error::Error + Send + Sync + 'static,
-    S: State + ?Sized,
-{
-    fn from(err: E) -> Self {
-        let Err(err) = match_else!(rtti::concretize::<E, ImplError<S>>(err),
-            Ok(err_unit) => return Error(err_unit.0),
-        );
-        let Err(err) = match_else!(rtti::concretize::<E, ImplError<Stateless>>(err),
-            Ok(err_unit) => return Error(err_unit.0.with_phantom_state()),
-        );
-
-        Error(RawError::new_boxed::<_, _, context::Blank>(
-            None,
-            err,
-            payload::Empty::new(),
-        ))
-    }
-}
-
-impl<S> From<Error> for Error<S>
-where
-    S: State,
-{
-    fn from(value: Error) -> Self {
-        value.with_phantom_state()
     }
 }
 
