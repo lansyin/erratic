@@ -758,39 +758,8 @@ where
 }
 
 // Builder Case #2: generic error; state -> stateless
-impl<E, S, F, L> From<Builder<E, S, F, L>> for Error
-where
-    F: PayloadFn,
-    E: error::Error + Send + Sync + 'static,
-    S: State,
-    L: Context + ?Sized,
-{
-    fn from(value: Builder<E, S, F, L>) -> Self {
-        let has_context = !rtti::is_same_ty::<L, context::Blank>();
-        let has_error = !rtti::is_same_ty::<E, Nae>();
-        let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
-
-        match (has_context, has_error, has_payload) {
-            (false, false, false) => Error(RawError::new_boxed::<_, _, L>(
-                None,
-                ImplError::<S>(RawError::new_inline_or_boxed(match value.state {
-                    Some(state) => state,
-                    None => unreachable!(), // Note: It's unreachable because `S` is constrained as `Sized` here.
-                })),
-                payload::Empty::new(),
-            )),
-            _ => Error(RawError::new_boxed::<_, _, context::Blank>(
-                None,
-                ImplError::<S>(RawError::new_boxed::<_, _, L>(
-                    value.state,
-                    value.err,
-                    value.payload_fn.call(),
-                )),
-                payload::Empty::new(),
-            )),
-        }
-    }
-}
+// Removed as it has no meaningful use case.
+// Signature: impl<E, S, F, L> From<Builder<E, S, F, L>> for Error
 
 // Builder Case #3: generic error; stateless -> state
 impl<E, S, F, L> From<Builder<E, Stateless, F, L>> for Error<S>
@@ -845,21 +814,8 @@ where
 }
 
 // Builder Case #5: erratic error; state -> stateless
-impl<S1, S, F, L> From<Builder<Error<S1>, S, F, L>> for Error
-where
-    S1: State + ?Sized,
-    F: PayloadFn,
-    S: State,
-    L: Context + ?Sized,
-{
-    fn from(value: Builder<Error<S1>, S, F, L>) -> Self {
-        Error(RawError::new_boxed::<_, _, L>(
-            None,
-            RawError::new_boxed::<_, _, L>(value.state, value.err.erase(), value.payload_fn.call()),
-            payload::Empty::new(),
-        ))
-    }
-}
+// Removed as it has no meaningful use case.
+// Signature: impl<S1, S, F, L> From<Builder<Error<S1>, S, F, L>> for Error
 
 // Builder Case #6: erratic error; stateless -> state
 impl<S1, S, F, L> From<Builder<Error<S1>, Stateless, F, L>> for Error<S>
