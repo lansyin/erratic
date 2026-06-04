@@ -543,6 +543,9 @@ where
             return err.with_phantom_state();
         });
         let state = f(state);
+        let Err(vacant) = match_else!(rtti::concretize::<_, Vacant<S2>>(vacant), Ok(vacant) => {
+            return vacant.with_state(state);
+        });
         match vacant.try_into_stateless() {
             Ok(err) => Error(RawError::new_boxed::<_, _, context::Blank>(
                 Some(S2::into_repr(state)),
