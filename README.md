@@ -67,9 +67,9 @@ fn try_write(w: &mut Writer, data: &[u8; 64]) -> Result<(), Error<State>> {
 }
 ```
 
-The state is optional. When no runtime state is actually stored, errors can be cheaply converted between
-different state types. This means infrastructure errors cross any number of layers with a single allocation,
-domain errors avoid the heap entirely, and both share the same `Error<S>` type, so they compose orthogonally.
+When no runtime state is actually stored, errors can be cheaply converted between different state types.
+This means infrastructure errors cross any number of layers with a single allocation, domain errors avoid
+the heap entirely, and both share the same `Error<S>` type. All compose orthogonally.
 
 ```rust
 fn write(w: &mut Writer, data: &[u8; 64]) -> Result<()> {
