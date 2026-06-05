@@ -20,14 +20,13 @@ impl Metadata {
     pub const _2: Metadata = Metadata(0b00000010);
     pub const _3: Metadata = Metadata(0b00000011);
 
-    fn encode_in_le_bytes(self, addr_bytes: &mut [u8]) {
-        assert!((addr_bytes[0] & Self::MASK) == 0);
-        addr_bytes[0] |= self.0;
+    fn encode_in_byte(self, addr_bytes: &mut u8) {
+        *addr_bytes |= self.0;
     }
 
-    fn decode_from_le_bytes(addr_bytes: &mut [u8]) -> Self {
-        let meta = addr_bytes[0] & Self::MASK;
-        addr_bytes[0] &= !Self::MASK;
+    fn decode_from_byte(addr_bytes: &mut u8) -> Self {
+        let meta = *addr_bytes & Self::MASK;
+        *addr_bytes &= !Self::MASK;
         Self(meta)
     }
 }
@@ -184,7 +183,9 @@ impl Align4Ptr {
         let addr = ptr.map_addr(|addr| {
             let mut addr_bytes = addr.to_le_bytes();
 
-            meta.encode_in_le_bytes(&mut addr_bytes);
+            assert_eq!(addr_bytes[0] & Metadata::MASK, 0);
+
+            meta.encode_in_byte(&mut addr_bytes[0]);
             Self::swap_leading_and_trailing_byte_on_big_endian(&mut addr_bytes);
 
             usize::from_le_bytes(addr_bytes)
@@ -205,7 +206,7 @@ impl Align4Ptr {
             let mut addr_bytes = addr.to_le_bytes();
 
             Self::swap_leading_and_trailing_byte_on_big_endian(&mut addr_bytes);
-            meta = Metadata::decode_from_le_bytes(&mut addr_bytes);
+            meta = Metadata::decode_from_byte(&mut addr_bytes[0]);
 
             usize::from_le_bytes(addr_bytes)
         });
@@ -548,9 +549,10 @@ mod tests {
     #[should_panic]
     fn align4_ptr_panics_on_unaligned() {
         let bytes: [u8; 2] = [0, 0];
-        // `bytes[1]` is 1-byte-aligned, so its low 2 bits are 01.
-        let unaligned = NonNull::new(&raw const bytes[1] as *mut ()).unwrap();
-        Align4Ptr::from_parts(unaligned, Metadata::_0);
+        for i in 0..2 {
+            let unaligned = NonNull::new(&raw const bytes[i] as *mut ()).unwrap();
+            Align4Ptr::from_parts(unaligned, Metadata::_0);
+        }
     }
 
     /// Verifies that `Align4Own` round-trips a boxed value.
