@@ -32,31 +32,38 @@ impl Metadata {
     }
 }
 
+// An inline pointer-sized storage that having a metadata at the first byte.
+// Note: The repr/align attribute is required as it is used to compute the offset
+// that satisfies the alignment of T.
 cfg_select! {
+    target_pointer_width = "16" => {
+        #[repr(C, align(2))]
+        pub struct Align4PtrCompat<T> {
+            meta: u8,
+            store: MaybeUninit<[u8; 1]>,
+            _marker: PhantomData<T>,
+        }
+    },
     target_pointer_width = "32" => {
-        // Note: The repr/align attribute is required as it is used to compute the offset
-        // that satisfies the alignment of T.
         #[repr(C, align(4))]
         pub struct Align4PtrCompat<T> {
             meta: u8,
-            store: [u8; 3],
+            store: MaybeUninit<[u8; 3]>,
             _marker: PhantomData<T>,
         }
     },
     target_pointer_width = "64" => {
-        // Note: The repr/align attribute is required as it is used to compute the offset
-        // that satisfies the alignment of T.
         #[repr(C, align(8))]
         pub struct Align4PtrCompat<T> {
             meta: u8,
-            store: [u8; 7],
+            store: MaybeUninit<[u8; 7]>,
             _marker: PhantomData<T>,
         }
     },
 }
 
 impl<T> Align4PtrCompat<T> {
-    pub const fn offset_in_store() -> Option<isize> {
+    const fn offset_in_store() -> Option<isize> {
         const fn ty_of_field<T, F>(_: fn(T) -> F) -> usize {
             mem::size_of::<F>()
         }
@@ -95,9 +102,7 @@ impl<T> Align4PtrCompat<T> {
 
         unsafe {
             // Safety: The offset is validated in `Self::offset_in_store`.
-            let value_mut = &mut *(this.store.as_mut_ptr().offset(offset) as *mut MaybeUninit<T>);
-
-            value_mut.write(value);
+            ((&raw mut this.store).cast::<u8>().offset(offset) as *mut T).write(value);
         }
 
         Ok(this)
@@ -111,7 +116,7 @@ impl<T> Align4PtrCompat<T> {
             // Safety: The offset is validated prior to creating Align4PtrCompat.
             // The raw pointer, though invalidated by the newly created reference,
             // is not used afterward.
-            &*(self.store.as_ptr().offset(offset) as *const T)
+            &*((&raw const self.store).cast::<u8>().offset(offset) as *const T)
         }
     }
 
@@ -121,7 +126,7 @@ impl<T> Align4PtrCompat<T> {
                 .expect("offset_in_store was checked before creating an Align4PtrCompat");
 
             let mut this = ManuallyDrop::new(self);
-            let value_mut = this.store.as_mut_ptr().offset(offset) as *mut T;
+            let value_mut = (&raw mut this.store).cast::<u8>().offset(offset) as *mut T;
 
             value_mut.read()
         }
@@ -135,7 +140,10 @@ impl<T> Align4PtrCompat<T> {
             // Safety: The offset is validated prior to creating Align4PtrCompat.
             // The raw pointer, though invalidated by the newly created reference,
             // is not used afterward.
-            ptr::replace(self.store.as_ptr().offset(offset) as *mut T, value)
+            ptr::replace(
+                (&raw mut self.store).cast::<u8>().offset(offset) as *mut T,
+                value,
+            )
         }
     }
 }
@@ -147,9 +155,7 @@ impl<T> Drop for Align4PtrCompat<T> {
 
         unsafe {
             // Safety: The offset is validated prior to creating Align4PtrCompat.
-            let value_mut = &mut *(self.store.as_mut_ptr().offset(offset) as *mut ManuallyDrop<T>);
-
-            ManuallyDrop::drop(value_mut);
+            ptr::drop_in_place((&raw mut self.store).cast::<u8>().offset(offset) as *mut T);
         }
     }
 }
@@ -607,10 +613,10 @@ mod tests {
     /// and can be read back safely (no alignment issues for byte-slices).
     #[test]
     fn align4_ptr_compat_max_u8_array() {
-        const N: usize = if cfg!(target_pointer_width = "64") {
-            7
-        } else {
-            3
+        const N: usize = cfg_select! {
+            target_pointer_width = "64" => 7,
+            target_pointer_width = "32" => 3,
+            target_pointer_width = "16" => 1,
         };
         let Ok(v) = Align4PtrCompat::<[u8; N]>::new(Metadata::_0, [0xAB; N]) else {
             panic!("max u8 array should fit");
@@ -621,10 +627,10 @@ mod tests {
     /// One byte past the limit — `[u8; store_size + 1]` (align 1) is too large.
     #[test]
     fn align4_ptr_compat_u8_array_one_too_many() {
-        const N: usize = if cfg!(target_pointer_width = "64") {
-            8
-        } else {
-            4
+        const N: usize = cfg_select! {
+            target_pointer_width = "64" => 8,
+            target_pointer_width = "32" => 4,
+            target_pointer_width = "16" => 2,
         };
         assert!(Align4PtrCompat::<[u8; N]>::offset_in_store().is_none());
     }
@@ -632,10 +638,10 @@ mod tests {
     /// `u16` — alignment 2, can be stored (store_offset is Some).
     #[test]
     fn align4_ptr_compat_u16_store_offset() {
-        assert!(Align4PtrCompat::<u16>::offset_in_store().is_some());
+        assert!(Align4PtrCompat::<u8>::offset_in_store().is_some());
     }
 
-    /// `u32` — alignment 4, can be stored on 32 bit platforms only.
+    /// `u32` — alignment 4, can be stored on 64 bit platforms only.
     #[test]
     fn align4_ptr_compat_u32_store_offset() {
         if cfg!(target_pointer_width = "64") {
