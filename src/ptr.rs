@@ -597,11 +597,7 @@ mod tests {
     /// and can be read back safely (no alignment issues for byte-slices).
     #[test]
     fn align4_ptr_compat_max_u8_array() {
-        const N: usize = cfg_select! {
-            target_pointer_width = "64" => 7,
-            target_pointer_width = "32" => 3,
-            target_pointer_width = "16" => 1,
-        };
+        const N: usize = (usize::BITS / 8 - 1) as _;
         let Ok(v) = Align4PtrCompat::<[u8; N]>::new(Metadata::_0, [0xAB; N]) else {
             panic!("max u8 array should fit");
         };
@@ -611,17 +607,13 @@ mod tests {
     /// One byte past the limit — `[u8; store_size + 1]` (align 1) is too large.
     #[test]
     fn align4_ptr_compat_u8_array_one_too_many() {
-        const N: usize = cfg_select! {
-            target_pointer_width = "64" => 8,
-            target_pointer_width = "32" => 4,
-            target_pointer_width = "16" => 2,
-        };
+        const N: usize = (usize::BITS / 8) as _;
         assert!(Align4PtrCompat::<[u8; N]>::OFFSET_IN_STORE.is_none());
     }
 
-    /// `u16` — alignment 2, can be stored (store_offset is Some).
+    /// `u8` — alignment 1, can be stored (store_offset is Some).
     #[test]
-    fn align4_ptr_compat_u16_store_offset() {
+    fn align4_ptr_compat_u8_store_offset() {
         assert!(Align4PtrCompat::<u8>::OFFSET_IN_STORE.is_some());
     }
 
@@ -654,11 +646,7 @@ mod tests {
     /// Creating a type that is too large returns Err with the value.
     #[test]
     fn align4_ptr_compat_new_returns_err_for_oversized() {
-        const N: usize = if cfg!(target_pointer_width = "64") {
-            8
-        } else {
-            4
-        };
+        const N: usize = (usize::BITS / 8) as _;
         let value = [0x42u8; N];
         let result = Align4PtrCompat::<[u8; N]>::new(Metadata::_0, value);
         assert!(result.is_err());
