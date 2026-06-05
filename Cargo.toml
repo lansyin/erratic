@@ -17,3 +17,6 @@ repository = "https://github.com/lansyin/erratic"
 [features]
 default = []
 backtrace = []
+
+[package.metadata.docs.rs]
+features = ["backtrace"]

@@ -518,6 +518,7 @@ where
     }
 
     /// Returns the backtrace, if any.
+    #[cfg_attr(docsrs, doc(cfg(feature = "backtrace")))]
     #[cfg(feature = "backtrace")]
     pub fn backtrace(&self) -> Option<&std::backtrace::Backtrace> {
         self.0.backtrace()
