@@ -175,6 +175,7 @@
 //!
 #![no_std]
 #![allow(clippy::type_complexity)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 extern crate alloc;
 
