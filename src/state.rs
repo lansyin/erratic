@@ -123,7 +123,7 @@ where
                 context,
             ));
         };
-        Error(vacant.inherit_self(Some(S2::into_repr(state)), context))
+        Error(vacant.derive(Some(S2::into_repr(state)), context))
     }
 
     /// Derives a stateless error from this vacant.
@@ -134,7 +134,7 @@ where
         let Some(vacant) = self.inner else {
             return Error(RawError::new(None, Nae::new(), context));
         };
-        Error(vacant.inherit_self(None, context))
+        Error(vacant.derive(None, context))
     }
 }
 

@@ -1220,7 +1220,7 @@ impl RawVacant {
         }
     }
 
-    pub fn inherit_self<S, C>(self, state: Option<S>, context: C) -> RawError<S>
+    pub fn derive<S, C>(self, state: Option<S>, context: C) -> RawError<S>
     where
         S: Debug + Send + Sync + 'static,
         C: context::Context,
