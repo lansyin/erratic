@@ -14,9 +14,9 @@ fn from_error_round_trip() {
 
 #[test]
 fn builder_with_error_builds_correctly() {
-    let err = mkerr!(error = TestError("oops"), context = TestMessage("payload"),).stateless();
+    let err = mkerr!(error = TestError("oops"), context = TestMessage("context"),).stateless();
     let (context, source) = err.into_parts::<TestMessage, TestError>();
-    assert_matches!(context, Some(TestMessage("payload")));
+    assert_matches!(context, Some(TestMessage("context")));
     assert_matches!(source, Some(TestError("oops")));
 }
 
@@ -47,12 +47,12 @@ fn builder_case1() {
     {
         let err: Error<TestState> = mkerr!(
             state = TestState::FileNotFound,
-            context = TestMessage("payload"),
+            context = TestMessage("context"),
             error = TestError("oops"),
         );
         let (state, context, source) = err.into_parts::<TestMessage, TestError>();
         assert_eq!(state, Some(TestState::FileNotFound));
-        assert_matches!(context, Some(TestMessage("payload")));
+        assert_matches!(context, Some(TestMessage("context")));
         assert_matches!(source, Some(TestError("oops")));
     }
 }
@@ -84,12 +84,11 @@ fn builder_case3() {
     // error + context -> state (no fast path)
     {
         let err: Error<TestState> = Error::with_error(TestError("oops"))
-            .with_context(mkctx!("ctx"))
-            .with_context(TestMessage("payload"))
+            .with_context(TestMessage("context"))
             .into();
         let (state, context, source) = err.into_parts::<TestMessage, TestError>();
         assert!(state.is_none());
-        assert_eq!(context, Some(TestMessage("payload")));
+        assert_eq!(context, Some(TestMessage("context")));
         assert_matches!(source, Some(TestError("oops")));
     }
 }
@@ -146,12 +145,11 @@ fn builder_case6() {
     {
         let inner = mkerr!(error = TestError("inner")).stateless();
         let outer: Error<TestState> = Error::with_error(inner)
-            .with_context(mkctx!("outer ctx"))
-            .with_context(TestMessage("outer payload"))
+            .with_context(TestMessage("outer context"))
             .into();
         let (state, context, _source) = outer.into_parts::<TestMessage, TestError>();
         assert!(state.is_none());
-        assert_matches!(context, Some(TestMessage("outer payload")));
+        assert_matches!(context, Some(TestMessage("outer context")));
     }
 }
 
