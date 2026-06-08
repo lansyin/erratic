@@ -6,7 +6,7 @@ use core::{
 
 /// Not an error, a zero-sized error placeholder for [`Builder`][crate::Builder], also represents
 /// the end of source chain in [`Error`][crate::Error]. It is used by [`Builder`][crate::Builder]
-/// and will not appear in the iterator returned by [`chain`][crate::Error::chain].
+/// and will not appear in public APIs.
 #[derive(Debug)]
 pub struct Nae {
     _private: (),

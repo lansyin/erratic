@@ -36,7 +36,7 @@ fn read_weak(r: &mut Weak<Reader>, buf: &mut [u8]) -> Result<u64> {
     let r = r.upgrade()
         .with_context(mkctx!("stream expired"))?; // Works the same as `mkres`, no alloc.
     let n = r.read(buf)
-        .with_context(mkctx!("failed to read from stream {}", r.id()))?; // Evaluated lazily.
+        .with_context(mkctx!("failed to read from {}", r.id()))?; // Evaluated lazily.
     Ok(n)
 }
 ```
@@ -58,7 +58,7 @@ fn try_write(w: &mut Writer, data: &[u8; 64]) -> Result<(), Error<State>> {
         .ok()
         .with_state(State::RetryLater)?; // No alloc.
     w.write(data)
-        .with_context(mkctx!("failed to write to stream: {}", w.id()))?;
+        .with_context(mkctx!("failed to write to {}", w.id()))?;
     Ok(())
 }
 ```
