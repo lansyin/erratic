@@ -500,18 +500,7 @@ where
         let Err(vacant) = match_else!(rtti::concretize::<_, Vacant<S2>>(vacant), Ok(vacant) => {
             return vacant.with_state(state);
         });
-        match vacant.try_into_stateless() {
-            Ok(err) => Error(RawError::new(
-                Some(S2::into_repr(state)),
-                err.erase(),
-                Contextless::new(),
-            )),
-            Err(_) => Error(RawError::new(
-                Some(S2::into_repr(state)),
-                Nae::new(),
-                Contextless::new(),
-            )),
-        }
+        vacant.derive(state, Contextless::new())
     }
 
     pub fn lift_state<S2>(self) -> Error<S2>
