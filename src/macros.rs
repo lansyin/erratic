@@ -46,7 +46,7 @@ macro_rules! match_else {
     };
 }
 
-/// Creates a literal value, or declares one or more named literal types.
+/// Creates a lazily-evaluated context from a format string.
 ///
 /// # Examples
 ///
@@ -54,41 +54,33 @@ macro_rules! match_else {
 /// # use erratic::*;
 /// # fn foo() -> Result<()> {
 /// # let foo = || -> std::result::Result<(), std::io::Error> { unimplemented!() };
-/// // Creates an ad-hoc literal value.
-/// foo().with_context(literal!("file not found"))?;
-///
-/// // Defines a list of typed literals.
-/// literal!{
-///     pub NotFound: "file not found";
-///     pub InternalError: "internal error";
-/// }
-/// foo().with_context(NotFound)?;
-/// foo().with_context_ty::<InternalError>()?;
+/// # let stream_id = 1;
+/// // A plain literal, no allocation.
+/// foo().with_context(mkctx!("file not found"))?;
+/// // With format args, allocated only on the error path.
+/// foo().with_context(mkctx!("failed to read from stream {stream_id}"))?;
 /// # Ok(())
 /// # }
 /// ```
 #[macro_export]
-macro_rules! literal {
-    ($lit:literal) => {{
+macro_rules! mkctx {
+    ($fmt:literal $($args:tt)*) => {{
         struct Literal;
 
         impl $crate::context::Literal for Literal {
-            const LITERAL: &'static str = $lit;
+            const LITERAL: &'static str = $fmt;
         }
 
-        Literal
-    }};
-    {
-        $( $vis:vis $name:ident: $lit:literal; )+
-    } => {
-        $(
-            $vis struct $name;
+        $crate::context::Mkctx::__priv_new(|| -> $crate::macros::__priv_reexport::core::option::Option<$crate::macros::__priv_reexport::string::String> {
+            let args = $crate::macros::__priv_reexport::core::format_args!($fmt $($args)*);
 
-            impl $crate::context::Literal for $name {
-                const LITERAL: &'static str = $lit;
+            if args.as_str().is_some() {
+                return $crate::macros::__priv_reexport::core::option::Option::None;
             }
-        )+
-    };
+
+            $crate::macros::__priv_reexport::core::option::Option::Some($crate::macros::__priv_reexport::string::ToString::to_string(&args))
+        }, Literal)
+    }};
 }
 
 /// Constructs an [`Error`][crate::Error] from a variety of input types.
@@ -109,28 +101,23 @@ macro_rules! literal {
 /// let _: Error = mkerr!("{} not found", filename);
 /// let _: _            = mkerr!(state = State::NotFound);
 /// let _: Error<State> = mkerr!(state = State::NotFound);
-/// let _: Error = mkerr!(context = "file not found");
-/// let _: Error = mkerr!(context = "failed to open", payload = filename);
 /// let _: Error<State> = mkerr!(
 ///     state = State::NotFound,
-///     context = "while opening",
-///     payload = filename,
 ///     error = err,
+///     context = mkctx!("failed to open {filename}"),
 /// );
 /// # let err = mkerr!("oops").stateless().erase();
-/// # let get_user_manual_url = || "";
 /// let _: Error<State> = mkerr!(
 ///     state = State::NotFound,
 ///     error = err,
-///     "{filename} not found, check guides at {}",
-///     get_user_manual_url(),
+///     "failed to open {filename}",
 /// );
 /// # }
 /// ```
 ///
 /// # Format String
 ///
-/// The format string is mutually exclusive with the payload.
+/// The format string is mutually exclusive with the context.
 ///
 /// # Argument Order
 ///
@@ -138,54 +125,33 @@ macro_rules! literal {
 #[macro_export]
 macro_rules! mkerr {
     ($($key:ident=$value:expr),+ $(, $($fmt:literal $($args:tt)*)?)?) => {
-        $crate::__priv_mkerr_kvs!(@sort[,,,] $($key=$value,)+ $($(payload=$crate::macros::__priv_reexport::format!($fmt $($args)*),)?)?)
+        $crate::__priv_mkerr_kvs!(@sort[,,] $($key=$value,)+ $($(context=$crate::mkctx!($fmt $($args)*),)?)?)
     };
     ($fmt:literal $($args:tt)*) => {{
-        fn make_error<'a, S>(args: $crate::macros::__priv_reexport::core::fmt::Arguments<'a>) -> $crate::Error<S>
-        where
-            S: $crate::state::State + ?Sized,
-        {
-            if args.as_str().is_some() {
-                struct Literal;
-
-                impl $crate::context::Literal for Literal {
-                    const LITERAL: &'static str = $fmt;
-                }
-
-                $crate::Error::from_context(Literal)
-            } else {
-                $crate::Error::from_payload($crate::macros::__priv_reexport::string::ToString::to_string(&args))
-            }
-        }
-        make_error($crate::macros::__priv_reexport::core::format_args!($fmt $($args)*))
+        $crate::Error::from_context($crate::mkctx!($fmt $($args)*))
     }};
 }
 
 #[macro_export]
 #[doc(hidden)]
 macro_rules! __priv_mkerr_kvs {
-    (@sort[$($_:expr)?, $($c:expr)?, $($p:expr)?, $($e:expr)?] state=$s:expr, $($k:ident=$v:expr,)*) => {{
+    (@sort[$($_:expr)?, $($c:expr)?,  $($e:expr)?] state=$s:expr, $($k:ident=$v:expr,)*) => {{
         $( let _ = $_; $crate::macros::__priv_reexport::core::compile_error!("state can only be set once");)?
-        $crate::__priv_mkerr_kvs!(@sort[$s, $($c)?, $($p)?, $($e)?] $($k=$v,)*)
+        $crate::__priv_mkerr_kvs!(@sort[$s, $($c)?, $($e)?] $($k=$v,)*)
     }};
-    (@sort[$($s:expr)?, $($_:expr)?, $($p:expr)?, $($e:expr)?] context=$c:expr, $($k:ident=$v:expr,)*) => {{
-        $( let _ = $_; $crate::macros::__priv_reexport::core::compile_error!("context can only be set once");)?
-        $crate::__priv_mkerr_kvs!(@sort[$($s)?, $c, $($p)?, $($e)?] $($k=$v,)*)
+    (@sort[$($s:expr)?, $($_:expr)?,  $($e:expr)?] context=$c:expr, $($k:ident=$v:expr,)*) => {{
+        $( let _ = $_; $crate::macros::__priv_reexport::core::compile_error!("context can only be set once. note: the format string counts as a context.");)?
+        $crate::__priv_mkerr_kvs!(@sort[$($s)?, $c, $($e)?] $($k=$v,)*)
     }};
-    (@sort[$($s:expr)?, $($c:expr)?, $($_:expr)?, $($e:expr)?] payload=$p:expr, $($k:ident=$v:expr,)*) => {{
-        $( let _ = $_; $crate::macros::__priv_reexport::core::compile_error!("payload can only be set once. note: the format string counts as a payload.");)?
-        $crate::__priv_mkerr_kvs!(@sort[$($s)?, $($c)?, $p, $($e)?] $($k=$v,)*)
-    }};
-    (@sort[$($s:expr)?, $($c:expr)?, $($p:expr)?, $($_:expr)?] error=$e:expr, $($k:ident=$v:expr,)*) => {{
+    (@sort[$($s:expr)?, $($c:expr)?,  $($_:expr)?] error=$e:expr, $($k:ident=$v:expr,)*) => {{
         $( let _ = $_; $crate::macros::__priv_reexport::core::compile_error!("error can only be set once");)?
-        $crate::__priv_mkerr_kvs!(@sort[$($s)?, $($c)?, $($p)?, $e] $($k=$v,)*)
+        $crate::__priv_mkerr_kvs!(@sort[$($s)?, $($c)?, $e] $($k=$v,)*)
     }};
-    (@sort[$($s:expr)?, $($c:expr)?, $($p:expr)?, $($e:expr)?]) => {{
+    (@sort[$($s:expr)?, $($c:expr)?,  $($e:expr)?]) => {{
         let builder = ($crate::macros::__priv_reexport::core::option::Option::None::<()>);
         $(let builder = builder.ok_or($e);)?
         $(let builder = $crate::BuilderExt::with_state(builder, $s);)?
-        $(let builder = $crate::BuilderExt::with_context(builder, $crate::literal!($c));)?
-        $(let builder = $crate::BuilderExt::with_payload(builder, $p);)?
+        $(let builder = $crate::BuilderExt::with_context(builder, $c);)?
         $crate::__priv_mkerr_kvs!(@infer[$($s)?] builder.unwrap_err())
     }};
     (@infer[] $builder:expr) => {
@@ -253,13 +219,11 @@ mod tests {
         let err_from_mkerr = mkerr!(
             state = 42,
             context = "test",
-            payload = "error message",
             error = mkerr!("source").stateless().erase(),
         );
         let err_from_builder = Error::with_error(mkerr!("source").stateless().erase())
             .with_state(42)
-            .with_context(literal!("test"))
-            .with_payload("error message")
+            .with_context("test")
             .build_error();
 
         assert_eq!(
@@ -273,13 +237,11 @@ mod tests {
         let err_from_mkerr = mkerr!(
             context = "test",
             error = mkerr!("source").stateless().erase(),
-            payload = "error message",
             state = 42,
         );
         let err_from_builder = Error::with_error(mkerr!("source").stateless().erase())
             .with_state(42)
-            .with_context(literal!("test"))
-            .with_payload("error message")
+            .with_context("test")
             .build_error();
 
         assert_eq!(
@@ -292,15 +254,13 @@ mod tests {
     fn error_from_hybrid() {
         let world = "world!";
         let err_from_mkerr = mkerr!(
-            context = "test",
             error = mkerr!("source").stateless().erase(),
             state = 42,
             "hello {world}"
         );
         let err_from_builder = Error::with_error(mkerr!("source").stateless().erase())
             .with_state(42)
-            .with_context(literal!("test"))
-            .with_payload(format!("hello {world}"))
+            .with_context(format!("hello {world}"))
             .build_error();
 
         assert_eq!(
@@ -329,13 +289,13 @@ mod tests {
     fn error_from_literal_like_format_string() {
         let filename = "file.txt";
         let err = mkerr!("{filename} not found").stateless();
-        assert!(err.has_payload_of::<String>());
+        assert!(err.has_context_of::<String>());
     }
 
     #[test]
     fn error_from_literal_without_allocation() {
         let err = mkerr!("file not found").stateless();
-        assert!(!err.has_payload_of::<String>());
+        assert!(!err.has_context_of::<String>());
     }
 
     #[test]
@@ -343,14 +303,12 @@ mod tests {
         let world = "world";
         let exclamation = "!";
         let err_from_mkerr = mkerr!(
-            context = "test",
             error = mkerr!("source").stateless().erase(),
             state = 42,
             "hello {world}{}",
             exclamation,
         );
         let err_from_mkres: result::Result<(), _> = mkres!(
-            context = "test",
             error = mkerr!("source").stateless().erase(),
             state = 42,
             "hello {world}{}",
@@ -359,6 +317,65 @@ mod tests {
         assert_eq!(
             err_from_mkerr.to_string(),
             err_from_mkres.unwrap_err().to_string()
+        );
+    }
+
+    #[test]
+    fn mkctx_is_lazy() {
+        use core::sync::atomic::{AtomicBool, Ordering};
+
+        static CALLED: AtomicBool = AtomicBool::new(false);
+
+        struct CallTracker;
+
+        impl core::fmt::Display for CallTracker {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                CALLED.store(true, Ordering::SeqCst);
+                write!(f, "tracked")
+            }
+        }
+
+        // mkctx creates a closure; the closure is not called yet
+        let builder = Error::<Stateless>::with_error(mkerr!("oops").stateless().erase())
+            .with_context(mkctx!("{}", CallTracker));
+
+        assert!(
+            !CALLED.load(Ordering::SeqCst),
+            "mkctx should not execute the closure before materialization"
+        );
+
+        // Materialize the error — this calls into_display which runs the closure
+        let _err: Error = builder.build_error();
+
+        assert!(
+            CALLED.load(Ordering::SeqCst),
+            "mkctx should execute the closure when materialized"
+        );
+    }
+
+    #[test]
+    fn mkctx_plain_literal_does_not_allocate() {
+        // A plain literal returns None from into_display — no String allocation
+        let ctx = mkctx!("hello");
+        assert!(
+            ctx.try_into_repr().is_none(),
+            "mkctx with a plain literal should not allocate"
+        );
+
+        // A format string with args returns Some — allocation occurs
+        let name = "world";
+        let ctx = mkctx!("hello {}", name);
+        assert_eq!(
+            ctx.try_into_repr(),
+            Some("hello world".into()),
+            "mkctx with format args should allocate"
+        );
+
+        let ctx = mkctx!("hello {name}");
+        assert_eq!(
+            ctx.try_into_repr(),
+            Some("hello world".into()),
+            "mkctx with format args should allocate"
         );
     }
 }

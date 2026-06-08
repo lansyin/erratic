@@ -20,11 +20,11 @@ fn write(filename: &str) -> Result<()> {
 }
 ```
 
-## Attaching Context & Payload
+## Attaching Context
 
-When constructing an error, you can optionally attach a static context and/or a dynamic payload.
-If attached, the memory is merged into a single allocation when the source error is materialized.
-If only a context is provided, no heap allocation occurs at all.
+When constructing an error, you can optionally attach a context. If a context is attached, it's memory
+will be merged into a single allocation when the error is materialized. If the context is the only component
+of the error, no heap allocation occurs.
 
 ```rust
 use erratic::*;
@@ -34,12 +34,9 @@ fn read_weak(r: &mut Weak<Reader>, buf: &mut [u8]) -> Result<u64> {
         return mkres!("buf must not be empty"); // No alloc so long as no format args.
     }
     let r = r.upgrade()
-        .with_context(literal!("stream expired"))?; // No alloc.
-    //  .with_payload("stream expired")?;
+        .with_context(mkctx!("stream expired"))?; // Works the same as `mkres`, no alloc.
     let n = r.read(buf)
-        .with_context(literal!("failed to read from stream: "))
-        .with_payload(r.id())?; // Alloc once for error, id, and context.
-    //  .with_payload_fn(|| format!("failed to read from stream: {}", w.id()))?;
+        .with_context(mkctx!("failed to read from stream {}", r.id()))?; // Evaluated lazily.
     Ok(n)
 }
 ```
@@ -47,8 +44,8 @@ fn read_weak(r: &mut Weak<Reader>, buf: &mut [u8]) -> Result<u64> {
 ## Binding State
 
 When propagating an error that requires special handling, you can attach a generic state to it.
-If the state is small enough and neither the source error, context, nor payload is attached,
-the state is inlined without any heap allocation.
+If the state is small enough and it's the only component of the error, the state is inlined
+without any heap allocation.
 
 ```rust
 use erratic::*;
@@ -61,15 +58,14 @@ fn try_write(w: &mut Writer, data: &[u8; 64]) -> Result<(), Error<State>> {
         .ok()
         .with_state(State::RetryLater)?; // No alloc.
     w.write(data)
-        .with_context(literal!("failed to write to stream: "))
-        .with_payload(w.id())?;
+        .with_context(mkctx!("failed to write to stream: {}", w.id()))?;
     Ok(())
 }
 ```
 
-When no runtime state is actually stored, errors can be cheaply converted between different state types.
-This means infrastructure errors cross any number of layers with a single allocation, domain errors avoid
-the heap entirely, and both share the same `Error<S>` type. All compose orthogonally.
+When no runtime state is actually stored, errors can be cheaply converted between different state types,
+which allows infrastructure errors to cross any number of layers with no extra allocation, domain errors
+avoid the heap entirely, and both share the same `Error<S>` type. All compose orthogonally.
 
 ```rust
 fn write(w: &mut Writer, data: &[u8; 64]) -> Result<()> {
@@ -113,12 +109,8 @@ error message is constructed from other attached components.
 
 ```
 <error> ::= <source>
-          | <state>": "<context><payload>
           | <state>": "<context>
-          | <state>": "<payload>
-          | <context><payload>
           | <context>
-          | <payload>
           | <state>
 ```
 
@@ -154,7 +146,7 @@ freeing up the lower 2 bits to encode its discriminant. Pointer tagging in this 
 (Allocation Required)
 [......01|........|........|........]
                                     \
-                                     `heap-> [VTable|State|Error|Payload|Context]
+                                     `heap-> [VTable|State|Error|Context]
 (Small State Only)
 [00000010|     ~    State     ~     ]
 ```

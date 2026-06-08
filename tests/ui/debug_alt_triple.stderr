@@ -1,9 +1,8 @@
 Error {
     state: FileNotFound,
-    context: "while copying file: ",
-    payload: "hello.txt",
+    context: "hello.txt",
     source: Error {
-        payload: "while invoking copy_context",
+        context: "while invoking copy_context",
         source: Error {
             context: "no such device",
         },

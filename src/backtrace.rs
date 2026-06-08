@@ -34,12 +34,7 @@ std::thread_local! {
 static DISABLED: AtomicBool = AtomicBool::new(false);
 
 impl WithBacktrace {
-    pub fn try_attach<E>(
-        err: E,
-    ) -> result::Result<
-        impl error::Error + Send + Sync + 'static,
-        impl error::Error + Send + Sync + 'static,
-    >
+    pub fn try_attach<E>(err: E) -> result::Result<Self, E>
     where
         E: error::Error + Send + Sync + 'static,
     {

@@ -15,11 +15,11 @@
 //! }
 //! ```
 //!
-//! # Attaching Context & Payload
+//! # Attaching Context
 //!
-//! When constructing an error, you can optionally attach a static context and/or a dynamic payload.
-//! If attached, the memory is merged into a single allocation when the source error is materialized.
-//! If only a context is provided, no heap allocation occurs at all.
+//! When constructing an error, you can optionally attach a context. If a context is attached, it's memory
+//! will be merged into a single allocation when the error is materialized. If the context is the only component
+//! of the error, no heap allocation occurs.
 //!
 //! ```
 //! # use std::sync::Weak;
@@ -35,12 +35,9 @@
 //!         return mkres!("buf must not be empty"); // No alloc so long as no format args.
 //!     }
 //!     let r = r.upgrade()
-//!         .with_context(literal!("stream expired"))?; // No alloc.
-//!     //  .with_payload("stream expired")?;
+//!         .with_context(mkctx!("stream expired"))?; // Works the same as `mkres`, no alloc.
 //!     let n = r.read(buf)
-//!         .with_context(literal!("failed to read from stream: "))
-//!         .with_payload(r.id())?; // Alloc once for error, id, and context.
-//!     //  .with_payload_fn(|| format!("failed to read from stream: {}", w.id()))?;
+//!         .with_context(mkctx!("failed to read from stream {}", r.id()))?; // Evaluated lazily.
 //!     Ok(n)
 //! }
 //! ```
@@ -48,8 +45,8 @@
 //! # Binding State
 //!
 //! When propagating an error that requires special handling, you can attach a generic state to it.
-//! If the state is small enough and neither the source error, context, nor payload is attached,
-//! the state is inlined without any heap allocation.
+//! If the state is small enough and it's the only component of the error, the state is inlined
+//! without any heap allocation.
 //!
 //! ```
 //! # use std::{result::Result};
@@ -69,15 +66,14 @@
 //!         .ok()
 //!         .with_state(State::RetryLater)?; // No alloc.
 //!     w.write(data)
-//!         .with_context(literal!("failed to write to stream: "))
-//!         .with_payload(w.id())?;
+//!         .with_context(mkctx!("failed to write to stream: {}", w.id()))?;
 //!     Ok(())
 //! }
 //! ```
 //!
-//! When no runtime state is actually stored, errors can be cheaply converted between different state types.
-//! This means infrastructure errors cross any number of layers with a single allocation, domain errors avoid
-//! the heap entirely, and both share the same `Error<S>` type. All compose orthogonally.
+//! When no runtime state is actually stored, errors can be cheaply converted between different state types,
+//! which allows infrastructure errors to cross any number of layers with no extra allocation, domain errors
+//! avoid the heap entirely, and both share the same `Error<S>` type. All compose orthogonally.
 //!
 //! ```
 //! # use std::{thread, result};
@@ -127,12 +123,8 @@
 //!
 //! ```text
 //! <error> ::= <source>
-//!           | <state>": "<context><payload>
 //!           | <state>": "<context>
-//!           | <state>": "<payload>
-//!           | <context><payload>
 //!           | <context>
-//!           | <payload>
 //!           | <state>
 //! ```
 //!
@@ -168,7 +160,7 @@
 //! (Allocation Required)
 //! [......01|........|........|........]
 //!                                     \
-//!                                      `heap-> [VTable|State|Error|Payload|Context]
+//!                                      `heap-> [VTable|State|Error|Context]
 //! (Small State Only)
 //! [00000010|     ~    State     ~     ]
 //! ```
@@ -193,29 +185,26 @@ pub mod macros;
 
 pub mod context;
 pub mod nae;
-pub mod payload;
 pub mod state;
 
 use alloc::boxed::Box;
 use core::{
     error,
     fmt::{self, Debug, Display},
-    marker::PhantomData,
     ops::Deref,
     result,
 };
 
 use crate::{
-    context::{Context, Literal},
+    context::{Blank, Context, Contextless, Identity, IntoContext},
     nae::Nae,
-    payload::{Immediate, PayloadFn},
     raw::RawError,
     state::{State, Stateless, Vacant},
 };
 
 pub type Result<T> = result::Result<T, Error>;
 
-/// An error type that can carry optional state, source, context, and payload.
+/// An error type that can carry optional state, source, and context.
 #[repr(transparent)]
 pub struct Error<S = Stateless>(RawError<S::Repr>)
 where
@@ -223,90 +212,64 @@ where
 
 impl Error {
     /// Starts building an `Error` from a source error.
-    pub fn with_error<E>(
-        err: E,
-    ) -> Builder<E, Stateless, Immediate<payload::Empty>, context::Blank> {
+    pub fn with_error<E>(err: E) -> Builder<E, Stateless, Identity<Contextless>> {
         Builder {
             err,
-            context: PhantomData,
             state: None,
-            payload_fn: Immediate(payload::Empty::new()),
+            context_fn: Identity(Contextless::new()),
         }
     }
 
     /// Starts building an `Error` with a typed state.
     ///
-    /// The state is inlined when no source or payload is attached.
-    pub fn with_state<S>(state: S) -> Builder<Nae, S, Immediate<payload::Empty>, context::Blank>
+    /// The state is inlined when no source or context is attached.
+    pub fn with_state<S>(state: S) -> Builder<Nae, S, Identity<Contextless>>
     where
         S: State,
     {
         Builder {
             err: Nae::new(),
-            context: PhantomData,
             state: Some(state.into_repr()),
-            payload_fn: Immediate(payload::Empty::new()),
+            context_fn: Identity(Contextless::new()),
         }
     }
 
-    /// Starts building an `Error` with a payload.
-    pub fn with_payload<P>(payload: P) -> Builder<Nae, Stateless, Immediate<P>, context::Blank>
+    /// Starts building an `Error` with a context.
+    pub fn with_context<C>(context: C) -> Builder<Nae, Stateless, Identity<C>>
     where
-        P: Display + Send + Sync + 'static,
+        C: Context,
     {
         Builder {
             err: Nae::new(),
-            context: PhantomData,
             state: None,
-            payload_fn: Immediate(payload),
+            context_fn: Identity(context),
         }
     }
 
-    /// Starts building an `Error` with a lazily evaluated payload.
+    /// Starts building an `Error` with a lazily evaluated context.
     ///
-    /// The closure `payload_fn` is called only when the error is materialized.
-    pub fn with_payload_fn<F>(payload_fn: F) -> Builder<Nae, Stateless, F, context::Blank>
+    /// The closure `context_fn` is called only when the error is materialized.
+    pub fn with_context_fn<F>(context_fn: F) -> Builder<Nae, Stateless, F>
     where
-        F: PayloadFn,
+        F: IntoContext,
     {
         Builder {
             err: Nae::new(),
-            context: PhantomData,
             state: None,
-            payload_fn,
+            context_fn,
         }
     }
 
-    /// Starts building an `Error` with a typed literal context.
-    ///
-    /// For dynamic content, use [`with_payload`][Self::with_payload] instead.
-    pub fn with_context<L>(_ty: L) -> Builder<Nae, Stateless, Immediate<payload::Empty>, L>
-    where
-        L: Context,
-    {
-        Self::with_context_ty::<L>()
-    }
-
-    /// Starts building an `Error` with a literal context type, inferred at the call site.
-    pub fn with_context_ty<L>() -> Builder<Nae, Stateless, Immediate<payload::Empty>, L> {
-        Builder {
-            err: Nae::new(),
-            context: PhantomData,
-            state: None,
-            payload_fn: Immediate(payload::Empty::new()),
-        }
-    }
-
-    /// Extracts the context, payload, and source error.
+    /// Extracts the context and source error.
     ///
     /// Returns `None` when the corresponding requested type does not match.
-    pub fn into_parts<P, E>(self) -> (Option<&'static str>, Option<P>, Option<E>)
+    pub fn into_parts<C, E>(self) -> (Option<C>, Option<E>)
     where
         E: 'static,
-        P: 'static,
+        C: 'static,
     {
-        let (_state, context, payload, source) = self.0.into_parts::<P, E>();
-        (context, payload, source)
+        let (_state, context, source) = self.0.into_parts::<C, E>();
+        (context, source)
     }
 
     /// Helper for type inference when the state is not needed.
@@ -338,41 +301,11 @@ where
     }
 
     /// Creates an `Error` from a typed literal value.
-    pub fn from_context<L>(_ty: L) -> Self
+    pub fn from_context<C>(ctx: C) -> Self
     where
-        L: Literal,
+        C: Context,
     {
-        Self::from_context_ty::<L>()
-    }
-
-    /// Creates an `Error` from a typed literal, inferred at the call site.
-    pub fn from_context_ty<L>() -> Self
-    where
-        L: Literal,
-    {
-        if let Ok(err) =
-            rtti::concretize::<Error<Stateless>, Error<S>>(Error(RawError::new_const::<L>()))
-        {
-            return err;
-        }
-
-        Self(RawError::new_boxed::<_, _, context::Blank>(
-            None,
-            Nae::new(),
-            payload::Empty::new(),
-        ))
-    }
-
-    /// Creates an `Error` from a payload.
-    pub fn from_payload<P>(payload: P) -> Self
-    where
-        P: Display + Send + Sync + 'static,
-    {
-        Self(RawError::new_boxed::<_, P, context::Blank>(
-            None,
-            Nae::new(),
-            payload,
-        ))
+        Self(RawError::new(None, Nae::new(), ctx))
     }
 
     /// Creates an `Error` from a boxed error.
@@ -397,10 +330,10 @@ where
             }
         }
 
-        Self(RawError::new_boxed::<_, _, context::Blank>(
+        Self(RawError::new::<_, _>(
             None,
             BoxError(value),
-            payload::Empty::new(),
+            Contextless::new(),
         ))
     }
 
@@ -420,18 +353,17 @@ where
                         .expect("try_with_state will not fail with correct state"),
                 )),
             },
-            Ok((state, None)) => Err(Error(RawError::new_inline_or_boxed(state))),
+            Ok((state, None)) => Err(Error(RawError::new(
+                Some(state),
+                Nae::new(),
+                Contextless::new(),
+            ))),
         }
     }
 
     /// Returns a reference to the context, if present.
     pub fn context(&self) -> Option<&(dyn Display + Send + Sync + 'static)> {
         self.0.context()
-    }
-
-    /// Returns a reference to the payload, if present.
-    pub fn payload(&self) -> Option<&(dyn Display + Send + Sync + 'static)> {
-        self.0.payload()
     }
 
     /// Returns `true` if the wrapped source error is of type `E`.
@@ -463,28 +395,33 @@ where
         self.0.downcast_source_mut::<E>()
     }
 
-    /// Returns `true` if the attached payload is of type `P`.
-    pub fn has_payload_of<P>(&self) -> bool
+    /// Returns `true` if the attached context is of type `C`.
+    pub fn has_context_of<C>(&self) -> bool
     where
-        P: 'static,
+        C: 'static,
     {
-        self.0.downcast_payload_ref::<P>().is_some()
+        self.0.downcast_context_ref::<C>().is_some()
     }
 
-    /// Attempts to downcast the payload to `P` by shared reference.
-    pub fn downcast_payload_ref<P>(&self) -> Option<&P>
+    /// Attempts to downcast the context to `C` by shared reference.
+    pub fn downcast_context_ref<C>(&self) -> Option<&C>
     where
-        P: 'static,
+        C: 'static,
     {
-        self.0.downcast_payload_ref::<P>()
+        self.0.downcast_context_ref::<C>()
     }
 
-    /// Attempts to downcast the payload to `P` by mutable reference.
-    pub fn downcast_payload_mut<P>(&mut self) -> Option<&mut P>
+    /// Attempts to downcast the context to `C` by mutable reference.
+    ///
+    /// # Caveats
+    ///
+    /// This method returns `None` if the error is allocation-free, i.e. created from a string literal.
+    /// Note that when backtrace is enabled via environment variables, all errors are heap allocated.
+    pub fn downcast_context_mut<C>(&mut self) -> Option<&mut C>
     where
-        P: 'static,
+        C: 'static,
     {
-        self.0.downcast_payload_mut::<P>()
+        self.0.downcast_context_mut::<C>()
     }
 
     /// Consumes `self` and returns the boxed source error, if any.
@@ -511,11 +448,7 @@ where
             return Error(err.0.with_phantom_state());
         });
         // Case #3: self has a different state.
-        Error(RawError::new_boxed::<_, _, context::Blank>(
-            None,
-            err.erase(),
-            payload::Empty::new(),
-        ))
+        Error(RawError::new(None, err.erase(), Contextless::new()))
     }
 
     /// Returns the backtrace, if any.
@@ -532,7 +465,11 @@ where
 {
     /// Creates an `Error` from a state value.
     pub fn from_state(state: S) -> Self {
-        Error(RawError::new_inline_or_boxed(S::into_repr(state)))
+        Error(RawError::new(
+            Some(S::into_repr(state)),
+            Nae::new(),
+            Contextless::new(),
+        ))
     }
 
     /// Returns a reference to the attached state.
@@ -540,16 +477,16 @@ where
         self.0.state().map(S::from_repr_ref)
     }
 
-    /// Consumes `self` and returns the state, context, payload, and error.
+    /// Consumes `self` and returns the state, context, and error.
     ///
     /// Returns `None` when the requested types do not match.
-    pub fn into_parts<P, E>(self) -> (Option<S>, Option<&'static str>, Option<P>, Option<E>)
+    pub fn into_parts<C, E>(self) -> (Option<S>, Option<C>, Option<E>)
     where
         E: 'static,
-        P: 'static,
+        C: 'static,
     {
-        let (state, context, payload, error) = self.0.into_parts::<P, E>();
-        (state.map(S::from_repr), context, payload, error)
+        let (state, context, error) = self.0.into_parts::<C, E>();
+        (state.map(S::from_repr), context, error)
     }
 
     /// Attempts to extract the state.  
@@ -573,12 +510,16 @@ where
             return vacant.with_state(state);
         });
         match vacant.try_into_stateless() {
-            Ok(err) => Error(RawError::new_boxed::<_, _, context::Blank>(
+            Ok(err) => Error(RawError::new(
                 Some(S2::into_repr(state)),
                 err.erase(),
-                payload::Empty::new(),
+                Contextless::new(),
             )),
-            Err(_) => Error(RawError::new_inline_or_boxed(S2::into_repr(state))),
+            Err(_) => Error(RawError::new(
+                Some(S2::into_repr(state)),
+                Nae::new(),
+                Contextless::new(),
+            )),
         }
     }
 
@@ -614,11 +555,7 @@ where
             Ok(err_unit) => return Error(err_unit.0.with_phantom_state()),
         );
 
-        Error(RawError::new_boxed::<_, _, context::Blank>(
-            None,
-            err,
-            payload::Empty::new(),
-        ))
+        Error(RawError::new(None, err, Contextless::new()))
     }
 }
 
@@ -718,55 +655,36 @@ where
 }
 
 /// An intermediate builder for constructing an [`Error`].
-///
-/// `Builder` accumulates the error source, state, payload, and context,
-/// then materializes them into an `Error<S>` via [`Into`].
 #[derive(Debug)]
-pub struct Builder<E, S, F, L>
+pub struct Builder<E, S, F>
 where
-    F: PayloadFn,
+    F: IntoContext,
     S: State + ?Sized,
-    L: ?Sized,
 {
     err: E,
     state: Option<S::Repr>,
-    payload_fn: F,
-    context: PhantomData<L>,
+    context_fn: F,
 }
 
 // Builder Case #1: generic error; state -> state
-impl<E, S, F, L> From<Builder<E, S, F, L>> for Error<S>
+impl<E, S, F> From<Builder<E, S, F>> for Error<S>
 where
-    F: PayloadFn,
+    F: IntoContext,
     E: error::Error + Send + Sync + 'static,
     S: State + ?Sized,
-    L: Context + ?Sized,
 {
-    fn from(value: Builder<E, S, F, L>) -> Self {
+    fn from(value: Builder<E, S, F>) -> Self {
         let has_state = !rtti::is_same_ty::<S, Stateless>();
-        let has_context = !rtti::is_same_ty::<L, context::Blank>();
         let has_error = !rtti::is_same_ty::<E, Nae>();
-        let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
+        let has_context = !rtti::is_same_ty::<<F::Output as Context>::Repr, Blank>();
 
-        match (has_state, has_context, has_error, has_payload) {
-            (false, false, false, false) => unreachable!(),
-            (false, false, true, false) => value.err.into(),
-            (true, false, false, false) => {
-                Error::<S>(RawError::new_inline_or_boxed(match value.state {
-                    Some(state) => state,
-                    None => unreachable!(), // Note: It's unreachable because `has_state = true`.
-                }))
-            }
-            (false, true, false, false) => {
-                let Ok(body) = match_else!(rtti::concretize::<_, RawError<S::Repr>>(RawError::new_const::<L>()),
-                    Err(_) => unreachable!(),
-                );
-                Error(body)
-            }
-            _ => Error::<S>(RawError::new_boxed::<_, _, L>(
+        match (has_state, has_error, has_context) {
+            (false, false, false) => unreachable!(),
+            (false, true, false) => value.err.into(),
+            _ => Error::<S>(RawError::new(
                 value.state,
                 value.err,
-                value.payload_fn.call(),
+                value.context_fn.into_context(),
             )),
         }
     }
@@ -774,55 +692,48 @@ where
 
 // Builder Case #2: generic error; state -> stateless
 // Removed as it has no meaningful use case.
-// Signature: impl<E, S, F, L> From<Builder<E, S, F, L>> for Error
+// Signature: impl<E, S, F> From<Builder<E, S, F>> for Error
 
 // Builder Case #3: generic error; stateless -> state
-impl<E, S, F, L> From<Builder<E, Stateless, F, L>> for Error<S>
+impl<E, S, F> From<Builder<E, Stateless, F>> for Error<S>
 where
-    F: PayloadFn,
+    F: IntoContext,
     E: error::Error + Send + Sync + 'static,
     S: State,
-    L: Context + ?Sized,
 {
-    fn from(value: Builder<E, Stateless, F, L>) -> Self {
-        let has_context = !rtti::is_same_ty::<L, context::Blank>();
+    fn from(value: Builder<E, Stateless, F>) -> Self {
         let has_error = !rtti::is_same_ty::<E, Nae>();
-        let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
+        let has_context = !rtti::is_same_ty::<<F::Output as Context>::Repr, Blank>();
 
-        match (has_context, has_error, has_payload) {
-            (false, false, false) => unreachable!(),
-            (false, true, false) => value.err.into(),
-            (true, false, false) => {
-                Error::<Stateless>(RawError::new_const::<L>()).with_phantom_state()
-            }
-            _ => Error(RawError::new_boxed::<_, _, L>(
+        match (has_error, has_context) {
+            (false, false) => unreachable!(),
+            (true, false) => value.err.into(),
+            _ => Error(RawError::new(
                 None,
                 value.err,
-                value.payload_fn.call(),
+                value.context_fn.into_context(),
             )),
         }
     }
 }
 
 // Builder Case #4: erratic error; state -> state
-impl<S1, S, F, L> From<Builder<Error<S1>, S, F, L>> for Error<S>
+impl<S1, S, F> From<Builder<Error<S1>, S, F>> for Error<S>
 where
     S1: State + ?Sized,
-    F: PayloadFn,
+    F: IntoContext,
     S: State + ?Sized,
-    L: Context + ?Sized,
 {
-    fn from(value: Builder<Error<S1>, S, F, L>) -> Self {
+    fn from(value: Builder<Error<S1>, S, F>) -> Self {
         let has_state = !rtti::is_same_ty::<S, Stateless>();
-        let has_context = !rtti::is_same_ty::<L, context::Blank>();
-        let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
+        let has_context = !rtti::is_same_ty::<<F::Output as Context>::Repr, Blank>();
 
-        match (has_state, has_context, has_payload) {
-            (false, false, false) => value.err.with_phantom_state(),
-            _ => Error(RawError::new_boxed::<_, _, L>(
+        match (has_state, has_context) {
+            (false, false) => value.err.with_phantom_state(),
+            _ => Error(RawError::new(
                 value.state,
                 value.err.erase(),
-                value.payload_fn.call(),
+                value.context_fn.into_context(),
             )),
         }
     }
@@ -833,23 +744,21 @@ where
 // Signature: impl<S1, S, F, L> From<Builder<Error<S1>, S, F, L>> for Error
 
 // Builder Case #6: erratic error; stateless -> state
-impl<S1, S, F, L> From<Builder<Error<S1>, Stateless, F, L>> for Error<S>
+impl<S1, S, F> From<Builder<Error<S1>, Stateless, F>> for Error<S>
 where
     S1: State + ?Sized,
-    F: PayloadFn,
+    F: IntoContext,
     S: State,
-    L: Context + ?Sized,
 {
-    fn from(value: Builder<Error<S1>, Stateless, F, L>) -> Self {
-        let has_context = !rtti::is_same_ty::<L, context::Blank>();
-        let has_payload = !rtti::is_same_ty::<F::Output, payload::Empty>();
+    fn from(value: Builder<Error<S1>, Stateless, F>) -> Self {
+        let has_context = !rtti::is_same_ty::<<F::Output as Context>::Repr, Blank>();
 
-        match (has_context, has_payload) {
-            (false, false) => value.err.with_phantom_state(),
-            _ => Error(RawError::new_boxed::<_, _, L>(
+        match has_context {
+            false => value.err.with_phantom_state(),
+            _ => Error(RawError::new(
                 None,
                 value.err.erase(),
-                value.payload_fn.call(),
+                value.context_fn.into_context(),
             )),
         }
     }
@@ -938,12 +847,11 @@ where
     }
 }
 
-impl<E1, S, F, L> StateExt for Builder<E1, S, F, L>
+impl<E1, S, F> StateExt for Builder<E1, S, F>
 where
     E1: error::Error + Send + Sync + 'static,
-    F: PayloadFn,
+    F: IntoContext,
     S: State,
-    L: Context + ?Sized,
 {
     type T = ();
     type Result<T, E> = E;
@@ -967,12 +875,11 @@ where
     }
 }
 
-impl<S1, S, F, L> StateExt for Builder<Error<S1>, S, F, L>
+impl<S1, S, F> StateExt for Builder<Error<S1>, S, F>
 where
     S1: State + ?Sized,
-    F: PayloadFn,
+    F: IntoContext,
     S: State,
-    L: Context + ?Sized,
 {
     type T = ();
     type S = S;
@@ -996,12 +903,11 @@ where
     }
 }
 
-impl<T1, E1, S, F, L> StateExt for result::Result<T1, Builder<E1, S, F, L>>
+impl<T1, E1, S, F> StateExt for result::Result<T1, Builder<E1, S, F>>
 where
     E1: error::Error + Send + Sync + 'static,
-    F: PayloadFn,
+    F: IntoContext,
     S: State,
-    L: Context + ?Sized,
 {
     type T = T1;
     type S = S;
@@ -1028,12 +934,11 @@ where
     }
 }
 
-impl<T1, S1, S, F, L> StateExt for result::Result<T1, Builder<Error<S1>, S, F, L>>
+impl<T1, S1, S, F> StateExt for result::Result<T1, Builder<Error<S1>, S, F>>
 where
     S1: State + ?Sized,
-    F: PayloadFn,
+    F: IntoContext,
     S: State,
-    L: Context + ?Sized,
 {
     type T = T1;
     type S = S;
@@ -1060,55 +965,48 @@ where
     }
 }
 
-/// Extension trait for attaching context, state, or payload to an existing error.
+/// Extension trait for attaching context and state to an existing error.
 pub trait BuilderExt: Sized {
     type Result<E>;
 
     type E;
     type S: State + ?Sized;
-    type F: PayloadFn;
-    type L: Literal + ?Sized;
+    type F: IntoContext;
 
-    /// Attaches a literal context identified by its type.
-    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>>
-    where
-        L: Context;
-
-    /// Attaches a static literal context.
+    /// Attaches anything implements [`Display`] as the error context.
     ///
-    /// For dynamic content, use [`with_payload`][Self::with_payload] instead. It's encouraged to
-    /// just use `.with_payload("..")`, since in most cases we are wrapping a source error and
-    /// the allocation cost is already paid.
-    fn with_context<L>(self, _ty: L) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>>
+    /// # Examples
+    ///
+    /// ```
+    /// # use erratic::*;
+    /// # fn foo() -> Result<()> {
+    /// # let foo = || -> std::result::Result<(), std::io::Error> { unimplemented!() };
+    /// # let stream_id = 1;
+    /// # let filename = "";
+    /// foo().with_context("file not found")?;
+    /// foo().with_context(mkctx!("file not found"))?;
+    /// foo().with_context(filename.to_string())?;
+    /// foo().with_context(mkctx!("failed to read from stream {stream_id}"))?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    fn with_context<C>(self, context: C) -> Self::Result<Builder<Self::E, Self::S, Identity<C>>>
     where
-        L: Context,
+        C: Context,
     {
-        self.with_context_ty::<L>()
+        self.with_context_fn(Identity(context))
     }
 
     /// Attaches a typed state.
-    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F, Self::L>>
+    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F>>
     where
         S: State + Sized;
 
-    /// Attaches a lazily-evaluated payload.
-    fn with_payload_fn<F>(
-        self,
-        payload_fn: F,
-    ) -> Self::Result<Builder<Self::E, Self::S, F, Self::L>>
+    /// Attaches a lazily-evaluated context.
+    fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
     where
-        F: PayloadFn;
-
-    /// Attaches a displayable payload.
-    fn with_payload<P>(
-        self,
-        payload: P,
-    ) -> Self::Result<Builder<Self::E, Self::S, Immediate<P>, Self::L>>
-    where
-        P: Display + Send + Sync + 'static,
-    {
-        self.with_payload_fn(Immediate(payload))
-    }
+        F: IntoContext;
 }
 
 impl<T, E1> BuilderExt for result::Result<T, E1>
@@ -1119,45 +1017,27 @@ where
 
     type E = E1;
     type S = Stateless;
-    type F = Immediate<payload::Empty>;
-    type L = context::Blank;
+    type F = Identity<Contextless>;
 
-    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>>
-    where
-        L: Context,
-    {
-        self.map_err(|err| Builder {
-            err,
-            context: PhantomData,
-            state: None,
-            payload_fn: Immediate(payload::Empty::new()),
-        })
-    }
-
-    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F, Self::L>>
+    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F>>
     where
         S: State + Sized,
     {
         self.map_err(|err| Builder {
             err,
-            context: PhantomData,
             state: Some(state.into_repr()),
-            payload_fn: Immediate(payload::Empty::new()),
+            context_fn: Identity(Contextless::new()),
         })
     }
 
-    fn with_payload_fn<F>(
-        self,
-        payload_fn: F,
-    ) -> Self::Result<Builder<Self::E, Self::S, F, Self::L>>
+    fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
     where
-        F: PayloadFn,
+        F: IntoContext,
     {
         self.map_err(|err| Builder {
             err,
-            context: PhantomData,
             state: None,
-            payload_fn,
+            context_fn,
         })
     }
 }
@@ -1170,151 +1050,95 @@ where
 
     type E = Error<S1>;
     type S = Stateless;
-    type F = Immediate<payload::Empty>;
-    type L = context::Blank;
+    type F = Identity<Contextless>;
 
-    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>>
-    where
-        L: Context,
-    {
-        self.map_err(|err| Builder {
-            err,
-            context: PhantomData,
-            state: None,
-            payload_fn: Immediate(payload::Empty::new()),
-        })
-    }
-
-    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F, Self::L>>
+    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F>>
     where
         S: State,
     {
         self.map_err(|err| Builder {
             err,
-            context: PhantomData,
             state: Some(state.into_repr()),
-            payload_fn: Immediate(payload::Empty::new()),
+            context_fn: Identity(Contextless::new()),
         })
     }
 
-    fn with_payload_fn<F>(
-        self,
-        payload_fn: F,
-    ) -> Self::Result<Builder<Self::E, Self::S, F, Self::L>>
+    fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
     where
-        F: PayloadFn,
+        F: IntoContext,
     {
         self.map_err(|err| Builder {
             err,
-            context: PhantomData,
             state: None,
-            payload_fn,
+            context_fn,
         })
     }
 }
 
-impl<E1, S1, F1, L1> BuilderExt for Builder<E1, S1, F1, L1>
+impl<E1, S1, F1> BuilderExt for Builder<E1, S1, F1>
 where
-    F1: PayloadFn,
+    F1: IntoContext,
     S1: State + ?Sized,
-    L1: Literal + ?Sized,
 {
     type Result<E> = E;
 
     type E = E1;
     type S = S1;
     type F = F1;
-    type L = L1;
 
-    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>>
-    where
-        L: Context,
-    {
-        Builder {
-            err: self.err,
-            context: PhantomData,
-            state: self.state,
-            payload_fn: self.payload_fn,
-        }
-    }
-
-    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F, Self::L>>
+    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F>>
     where
         S: State,
     {
         Builder {
             state: Some(state.into_repr()),
             err: self.err,
-            context: self.context,
-            payload_fn: self.payload_fn,
+            context_fn: self.context_fn,
         }
     }
 
-    fn with_payload_fn<F>(
-        self,
-        payload_fn: F,
-    ) -> Self::Result<Builder<Self::E, Self::S, F, Self::L>>
+    fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
     where
-        F: PayloadFn,
+        F: IntoContext,
     {
         Builder {
             err: self.err,
-            context: self.context,
             state: self.state,
-            payload_fn,
+            context_fn,
         }
     }
 }
 
-impl<T, E1, S1, F1, L1> BuilderExt for result::Result<T, Builder<E1, S1, F1, L1>>
+impl<T, E1, S1, F1> BuilderExt for result::Result<T, Builder<E1, S1, F1>>
 where
-    F1: PayloadFn,
+    F1: IntoContext,
     S1: State + ?Sized,
-    L1: Literal + ?Sized,
 {
     type Result<E> = result::Result<T, E>;
 
     type E = E1;
     type S = S1;
     type F = F1;
-    type L = L1;
 
-    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>>
-    where
-        L: Context,
-    {
-        self.map_err(|err| Builder {
-            err: err.err,
-            context: PhantomData,
-            state: err.state,
-            payload_fn: err.payload_fn,
-        })
-    }
-
-    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F, Self::L>>
+    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F>>
     where
         S: State,
     {
         self.map_err(|err| Builder {
             state: Some(state.into_repr()),
             err: err.err,
-            context: err.context,
-            payload_fn: err.payload_fn,
+            context_fn: err.context_fn,
         })
     }
 
-    fn with_payload_fn<F>(
-        self,
-        payload_fn: F,
-    ) -> Self::Result<Builder<Self::E, Self::S, F, Self::L>>
+    fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
     where
-        F: PayloadFn,
+        F: IntoContext,
     {
         self.map_err(|err| Builder {
             err: err.err,
-            context: err.context,
             state: err.state,
-            payload_fn,
+            context_fn,
         })
     }
 }
@@ -1324,45 +1148,27 @@ impl<T> BuilderExt for Option<T> {
 
     type E = Nae;
     type S = Stateless;
-    type F = Immediate<payload::Empty>;
-    type L = context::Blank;
+    type F = Identity<Contextless>;
 
-    fn with_context_ty<L>(self) -> Self::Result<Builder<Self::E, Self::S, Self::F, L>>
-    where
-        L: Context,
-    {
-        self.ok_or(Builder {
-            err: Nae::new(),
-            context: PhantomData,
-            state: None,
-            payload_fn: Immediate(payload::Empty::new()),
-        })
-    }
-
-    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F, Self::L>>
+    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F>>
     where
         S: State,
     {
         self.ok_or(Builder {
             state: Some(state.into_repr()),
             err: Nae::new(),
-            context: PhantomData,
-            payload_fn: Immediate(payload::Empty::new()),
+            context_fn: Identity(Contextless::new()),
         })
     }
 
-    fn with_payload_fn<F>(
-        self,
-        payload_fn: F,
-    ) -> Self::Result<Builder<Self::E, Self::S, F, Self::L>>
+    fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
     where
-        F: PayloadFn,
+        F: IntoContext,
     {
         self.ok_or(Builder {
             err: Nae::new(),
-            context: PhantomData,
             state: None,
-            payload_fn,
+            context_fn,
         })
     }
 }
@@ -1395,12 +1201,11 @@ where
     }
 }
 
-impl<E1, S, F, L> ErrorExt for Builder<E1, S, F, L>
+impl<E1, S, F> ErrorExt for Builder<E1, S, F>
 where
     E1: error::Error + Send + Sync + 'static,
-    F: PayloadFn,
+    F: IntoContext,
     S: State + ?Sized,
-    L: Context + ?Sized,
 {
     type Result<E> = E;
     type S = S;
@@ -1414,12 +1219,11 @@ where
     }
 }
 
-impl<S1, S, F, L> ErrorExt for Builder<Error<S1>, S, F, L>
+impl<S1, S, F> ErrorExt for Builder<Error<S1>, S, F>
 where
     S1: State + ?Sized,
-    F: PayloadFn,
+    F: IntoContext,
     S: State + ?Sized,
-    L: Context + ?Sized,
 {
     type Result<E> = E;
     type S = S;
@@ -1428,8 +1232,7 @@ where
         Builder {
             err: self.err.erase(),
             state: self.state,
-            payload_fn: self.payload_fn,
-            context: self.context,
+            context_fn: self.context_fn,
         }
         .build_error()
     }
@@ -1439,12 +1242,11 @@ where
     }
 }
 
-impl<T, E1, S, F, L> ErrorExt for result::Result<T, Builder<E1, S, F, L>>
+impl<T, E1, S, F> ErrorExt for result::Result<T, Builder<E1, S, F>>
 where
     E1: error::Error + Send + Sync + 'static,
-    F: PayloadFn,
+    F: IntoContext,
     S: State + ?Sized,
-    L: Context + ?Sized,
 {
     type Result<E> = result::Result<T, E>;
     type S = S;
@@ -1458,12 +1260,11 @@ where
     }
 }
 
-impl<T, S1, S, F, L> ErrorExt for result::Result<T, Builder<Error<S1>, S, F, L>>
+impl<T, S1, S, F> ErrorExt for result::Result<T, Builder<Error<S1>, S, F>>
 where
     S1: State + ?Sized,
-    F: PayloadFn,
+    F: IntoContext,
     S: State + ?Sized,
-    L: Context + ?Sized,
 {
     type Result<E> = result::Result<T, E>;
     type S = S;
@@ -1473,8 +1274,7 @@ where
             Builder {
                 err: err.err.erase(),
                 state: err.state,
-                payload_fn: err.payload_fn,
-                context: err.context,
+                context_fn: err.context_fn,
             }
             .build_error()
         })

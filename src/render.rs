@@ -16,28 +16,21 @@ impl<'a> Debug for DisplayAsDebug<'a> {
     }
 }
 
-fn format_state_context_payload(
+fn format_state_context(
     f: &mut fmt::Formatter<'_>,
     state: Option<&impl Debug>,
     context: Option<&impl Display>,
-    payload: Option<&impl Display>,
 ) -> result::Result<bool, fmt::Error> {
-    let context_payload = match (context, payload) {
-        (None, None) => None,
-        (None, Some(payload)) => Some(format_args!("{}", *payload)),
-        (Some(context), None) => Some(format_args!("{}", *context)),
-        (Some(context), Some(payload)) => Some(format_args!("{}{}", *context, *payload)),
-    };
-    match (state, context_payload) {
+    match (state, context) {
         (None, None) => return Ok(false),
-        (None, Some(context_payload)) => {
-            write!(f, "{}", context_payload)?;
+        (None, Some(context)) => {
+            write!(f, "{}", context)?;
         }
         (Some(state), None) => {
             write!(f, "{state:?}")?;
         }
-        (Some(state), Some(context_payload)) => {
-            write!(f, "{:?}: {}", state, context_payload)?;
+        (Some(state), Some(context)) => {
+            write!(f, "{:?}: {}", state, context)?;
         }
     }
     Ok(true)
@@ -48,7 +41,6 @@ pub fn format_debug_struct<S>(
     container_name: &'static str,
     state: Option<&S>,
     context: Option<&dyn Display>,
-    payload: Option<&dyn Display>,
     source: Option<&(dyn error::Error + 'static)>,
     backtrace: Option<&dyn Backtrace>,
 ) -> fmt::Result
@@ -63,10 +55,6 @@ where
 
     if let Some(context) = context {
         ds.field("context", &DisplayAsDebug(context));
-    }
-
-    if let Some(payload) = payload {
-        ds.field("payload", &DisplayAsDebug(payload));
     }
 
     if let Some(source) = source {
@@ -84,7 +72,6 @@ pub fn format_chain<S>(
     f: &mut fmt::Formatter<'_>,
     state: Option<&S>,
     context: Option<&dyn Display>,
-    payload: Option<&dyn Display>,
     source: Option<&(dyn error::Error + 'static)>,
 ) -> fmt::Result
 where
@@ -93,8 +80,7 @@ where
     const SOURCE_PREFIX: &str = "\n  -> ";
 
     let mut source = source;
-    let has_additional_info =
-        format_state_context_payload(f, state, context.as_ref(), payload.as_ref())?;
+    let has_additional_info = format_state_context(f, state, context.as_ref())?;
     let mut dedup = DedupLast::new();
 
     if !has_additional_info {
@@ -118,7 +104,6 @@ pub fn format_debug<S>(
     f: &mut fmt::Formatter<'_>,
     state: Option<&S>,
     context: Option<&dyn Display>,
-    payload: Option<&dyn Display>,
     source: Option<&(dyn error::Error + 'static)>,
     backtrace: Option<&dyn Backtrace>,
 ) -> fmt::Result
@@ -133,12 +118,11 @@ where
             "Error",
             state,
             context,
-            payload,
             source,
             (!show_less).then_some(backtrace).flatten(),
         )
     } else {
-        format_chain(f, state, context, payload, source)?;
+        format_chain(f, state, context, source)?;
 
         if !show_less && let Some(backtrace) = backtrace {
             write!(f, "\nBacktrace:\n{backtrace}")?;
@@ -152,7 +136,6 @@ pub fn format_display<S>(
     f: &mut fmt::Formatter<'_>,
     state: Option<&S>,
     context: Option<&dyn Display>,
-    payload: Option<&dyn Display>,
     source: Option<&(dyn error::Error + 'static)>,
     _backtrace: Option<&dyn Backtrace>,
 ) -> fmt::Result
@@ -160,10 +143,9 @@ where
     S: Debug + 'static,
 {
     if f.alternate() {
-        format_chain(f, state, context, payload, source)?;
+        format_chain(f, state, context, source)?;
     } else {
-        let has_additional_info =
-            format_state_context_payload(f, state, context.as_ref(), payload.as_ref())?;
+        let has_additional_info = format_state_context(f, state, context.as_ref())?;
 
         if !has_additional_info {
             let Some(err) = source else {

@@ -7,24 +7,17 @@ use std::{assert_matches, mem, result};
 #[test]
 fn from_error_round_trip() {
     let err = mkerr!(error = TestError("oops")).stateless();
-    let (context, payload, source) = err.into_parts::<TestMessage, TestError>();
+    let (context, source) = err.into_parts::<TestMessage, TestError>();
     assert_matches!(source, Some(TestError("oops")));
-    assert!(payload.is_none());
     assert!(context.is_none());
 }
 
 #[test]
 fn builder_with_error_builds_correctly() {
-    let err = mkerr!(
-        error = TestError("oops"),
-        context = "context",
-        payload = TestMessage("payload"),
-    )
-    .stateless();
-    let (context, payload, source) = err.into_parts::<TestMessage, TestError>();
-    assert_matches!(context, Some("context"));
+    let err = mkerr!(error = TestError("oops"), context = TestMessage("payload"),).stateless();
+    let (context, source) = err.into_parts::<TestMessage, TestError>();
+    assert_matches!(context, Some(TestMessage("payload")));
     assert_matches!(source, Some(TestError("oops")));
-    assert_matches!(payload, Some(TestMessage("payload")));
 }
 
 #[test]
@@ -33,9 +26,8 @@ fn builder_case1() {
     {
         let err: Error = Error::with_error(TestError("oops")).into();
         assert_eq!(err.chain().count(), 1);
-        let (context, payload, source) = err.into_parts::<TestMessage, TestError>();
+        let (context, source) = err.into_parts::<TestMessage, TestError>();
         assert!(context.is_none());
-        assert!(payload.is_none());
         assert_matches!(source, Some(TestError("oops")));
     }
     // state only (fast path)
@@ -46,24 +38,21 @@ fn builder_case1() {
     }
     // context only (fast path)
     {
-        let err: Error = Error::with_context(literal!("context only")).into();
-        let (context, payload, source) = err.into_parts::<TestMessage, TestError>();
+        let err: Error = Error::with_context(mkctx!("context only")).into();
+        let (context, source) = err.into_parts::<&'static str, TestError>();
         assert_matches!(context, Some("context only"));
-        assert!(payload.is_none());
         assert!(source.is_none());
     }
     // all present — no data loss
     {
         let err: Error<TestState> = mkerr!(
             state = TestState::FileNotFound,
-            context = "ctx",
-            payload = TestMessage("payload"),
+            context = TestMessage("payload"),
             error = TestError("oops"),
         );
-        let (state, context, payload, source) = err.into_parts::<TestMessage, TestError>();
+        let (state, context, source) = err.into_parts::<TestMessage, TestError>();
         assert_eq!(state, Some(TestState::FileNotFound));
-        assert_eq!(context, Some("ctx"));
-        assert_eq!(payload, Some(TestMessage("payload")));
+        assert_matches!(context, Some(TestMessage("payload")));
         assert_matches!(source, Some(TestError("oops")));
     }
 }
@@ -79,31 +68,28 @@ fn builder_case3() {
     {
         let err: Error<TestState> = Error::with_error(TestError("oops")).into();
         assert_eq!(err.chain().count(), 1);
-        let (state, context, payload, source) = err.into_parts::<TestMessage, TestError>();
+        let (state, context, source) = err.into_parts::<TestMessage, TestError>();
         assert!(state.is_none());
         assert!(context.is_none());
-        assert!(payload.is_none());
         assert_matches!(source, Some(TestError("oops")));
     }
     // context only -> state (fast path)
     {
-        let err: Error<TestState> = Error::with_context(literal!("context only")).into();
-        let (state, context, payload, source) = err.into_parts::<TestMessage, TestError>();
+        let err: Error<TestState> = Error::with_context("context only").into();
+        let (state, context, source) = err.into_parts::<&str, TestError>();
         assert!(state.is_none());
-        assert_matches!(context, Some("context only"));
-        assert!(payload.is_none());
+        assert_eq!(context, Some("context only"));
         assert!(source.is_none());
     }
-    // error + context + payload -> state (no fast path)
+    // error + context -> state (no fast path)
     {
         let err: Error<TestState> = Error::with_error(TestError("oops"))
-            .with_context(literal!("ctx"))
-            .with_payload(TestMessage("payload"))
+            .with_context(mkctx!("ctx"))
+            .with_context(TestMessage("payload"))
             .into();
-        let (state, context, payload, source) = err.into_parts::<TestMessage, TestError>();
+        let (state, context, source) = err.into_parts::<TestMessage, TestError>();
         assert!(state.is_none());
-        assert_eq!(context, Some("ctx"));
-        assert_eq!(payload, Some(TestMessage("payload")));
+        assert_eq!(context, Some(TestMessage("payload")));
         assert_matches!(source, Some(TestError("oops")));
     }
 }
@@ -116,29 +102,27 @@ fn builder_case4() {
             mkerr!(error = TestError("inner"), state = TestState::FileNotFound);
         let outer: Error<TestState> = Error::with_error(inner).into();
         assert_eq!(outer.chain().count(), 1);
-        let (state, context, payload, source) = outer.into_parts::<TestMessage, TestError>();
+        let (state, context, source) = outer.into_parts::<TestMessage, TestError>();
         assert_eq!(state, Some(TestState::FileNotFound));
         assert!(context.is_none());
-        assert!(payload.is_none());
         assert_matches!(source, Some(TestError("inner")));
     }
-    // erratic source + context + payload (no fast path)
+    // erratic source + context (no fast path)
     {
         let inner: Error<TestState> =
             mkerr!(error = TestError("inner"), state = TestState::FileNotFound);
         let outer: Error<TestState> = Error::with_error(inner)
-            .with_context(literal!("outer ctx"))
-            .with_payload(TestMessage("outer payload"))
+            .with_context(mkctx!("outer ctx"))
+            .with_context(TestMessage("outer payload"))
             .into();
         assert!(
             outer
                 .chain()
                 .any(|e| e.downcast_ref::<TestError>().is_some())
         );
-        let (state, context, payload, _source) = outer.into_parts::<TestMessage, TestError>();
+        let (state, context, _source) = outer.into_parts::<TestMessage, TestError>();
         assert!(state.is_none());
-        assert_eq!(context, Some("outer ctx"));
-        assert_eq!(payload, Some(TestMessage("outer payload")));
+        assert_matches!(context, Some(TestMessage("outer payload")));
     }
 }
 
@@ -154,23 +138,21 @@ fn builder_case6() {
         let inner = mkerr!(error = TestError("inner")).stateless();
         let outer: Error<TestState> = Error::with_error(inner).into();
         assert_eq!(outer.chain().count(), 1);
-        let (state, context, payload, source) = outer.into_parts::<TestMessage, TestError>();
+        let (state, context, source) = outer.into_parts::<TestMessage, TestError>();
         assert!(state.is_none());
         assert!(context.is_none());
-        assert!(payload.is_none());
         assert_matches!(source, Some(TestError("inner")));
     }
-    // erratic source + context + payload -> state (no fast path)
+    // erratic source + context -> state (no fast path)
     {
         let inner = mkerr!(error = TestError("inner")).stateless();
         let outer: Error<TestState> = Error::with_error(inner)
-            .with_context(literal!("outer ctx"))
-            .with_payload(TestMessage("outer payload"))
+            .with_context(mkctx!("outer ctx"))
+            .with_context(TestMessage("outer payload"))
             .into();
-        let (state, context, payload, _source) = outer.into_parts::<TestMessage, TestError>();
+        let (state, context, _source) = outer.into_parts::<TestMessage, TestError>();
         assert!(state.is_none());
-        assert_eq!(context, Some("outer ctx"));
-        assert_eq!(payload, Some(TestMessage("outer payload")));
+        assert_matches!(context, Some(TestMessage("outer payload")));
     }
 }
 

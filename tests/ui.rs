@@ -8,8 +8,7 @@ fn generate_simple() -> Error<TestState> {
     mkerr!(
         error = TestError("no such device"),
         state = TestState::FileNotFound,
-        context = "while opening file: ",
-        payload = TestMessage("hello.txt")
+        context = TestMessage("hello.txt"),
     )
 }
 
@@ -22,8 +21,7 @@ fn generate_triple() -> Error<TestState> {
     mkerr!(
         error = source_3,
         state = TestState::FileNotFound,
-        context = "while copying file: ",
-        payload = TestMessage("hello.txt")
+        context = TestMessage("hello.txt"),
     )
 }
 

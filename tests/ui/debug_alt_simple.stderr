@@ -1,7 +1,6 @@
 Error {
     state: FileNotFound,
-    context: "while opening file: ",
-    payload: "hello.txt",
+    context: "hello.txt",
     source: TestError(
         "no such device",
     ),

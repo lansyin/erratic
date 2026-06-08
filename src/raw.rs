@@ -11,9 +11,9 @@ use core::{
 
 use crate::{
     backtrace::WithBacktrace,
-    context, match_else,
+    context::{self, Blank, Context},
+    match_else,
     nae::Nae,
-    payload,
     ptr::{Align4, Align4Own, Align4PtrCompat, Align4Ref, Metadata, Mut, Ref},
     render, rtti,
 };
@@ -125,28 +125,24 @@ impl<S> RawError<S> {
 
 impl RawError<Infallible> {
     /// Constructs a const-variant [`RawError`] from a typed literal.
-    pub fn new_const<L>() -> Self
+    fn try_new_const<C>() -> Option<Self>
     where
-        L: context::Context + ?Sized,
+        C: Context,
     {
-        #[cfg(feature = "backtrace")]
-        if let Ok(source) = WithBacktrace::try_attach(Nae::new()) {
-            return RawError::<Infallible>::new_boxed_::<_, _, L>(
-                None,
-                source,
-                payload::Empty::new(),
-            );
+        if C::FALLBACK.is_none() {
+            return None;
         }
-
         // Note: Relies on const promotion to produce a new constant.
         let body: &'static Align4<ConstBody> = &const {
-            Align4(ConstBody {
-                context: L::LITERAL,
-            })
+            let literal = match C::FALLBACK {
+                Some(v) => v, // Note: As of Rust 1.96, unwrap_or_default is unavailable in const blocks.
+                None => "", // Note: This branch is never taken; it only exists to keep rustc happy.
+            };
+            Align4(ConstBody { context: literal })
         };
-        Self {
+        Some(Self {
             const_body: ManuallyDrop::new(Align4Ref::new(body, Self::KIND_CONST)),
-        }
+        })
     }
 
     /// Converts to a state-tagged error without storing any runtime state.
@@ -166,84 +162,87 @@ impl RawError<Infallible> {
 
 impl<S> RawError<S> {
     /// Constructs an inline-variant [`RawError`] with `state` stored directly.
-    pub fn try_new_inline(state: S) -> result::Result<Self, S>
+    fn try_new_inline(state: S) -> result::Result<Self, S>
     where
         S: Debug + Send + Sync + 'static,
     {
-        #[cfg(feature = "backtrace")]
-        if let Ok(source) = WithBacktrace::try_attach(Nae::new()) {
-            return Ok(Self::new_boxed_::<_, _, context::Blank>(
-                Some(state),
-                source,
-                payload::Empty::new(),
-            ));
-        }
-
         Ok(Self {
             inline_body: ManuallyDrop::new(Align4PtrCompat::new(Self::KIND_INLINE, state)?),
         })
     }
 
-    /// Constructs a [RawError], storing the given state inline when the state fits within
-    /// the inline storage.
-    pub fn new_inline_or_boxed(state: S) -> Self
-    where
-        S: Debug + Send + Sync + 'static,
-    {
-        let Err(state) = match_else!(Self::try_new_inline(state),
-            Ok(this) => return this,
-        );
-        Self::new_boxed::<Nae, payload::Empty, context::Blank>(
-            Some(state),
-            Nae::new(),
-            payload::Empty::new(),
-        )
-    }
-
-    /// Constructs a boxed-variant [`RawError`] containing source, payload, and context.
-    ///
-    /// The source, payload, and context are packed into a single heap allocation
-    /// alongside a vtable for type-erased access.
-    pub fn new_boxed<E, P, L>(state: Option<S>, source: E, payload: P) -> Self
+    /// Constructs a [`RawError`].
+    pub fn new<E, C>(state: Option<S>, source: E, context: C) -> Self
     where
         S: Debug + Send + Sync + 'static,
         E: error::Error + Send + Sync + 'static,
-        P: Display + Send + Sync + 'static,
-        L: context::Context + ?Sized,
+        C: context::Context,
     {
+        let context = context.try_into_repr();
+        let context_fallback = C::FALLBACK;
+
         match WithBacktrace::try_attach(source) {
-            Ok(source) => Self::new_boxed_::<_, _, L>(state, source, payload),
-            Err(source) => Self::new_boxed_::<_, _, L>(state, source, payload),
+            Ok(source) => match (context, context_fallback) {
+                (Some(context), _) => Self::new_boxed(state, source, context),
+                (None, Some(context)) => Self::new_boxed(state, source, context),
+                (None, None) => Self::new_boxed(state, source, Blank::new()),
+            },
+            Err(source) => {
+                let mut state = state;
+                let has_state = state.is_some();
+                let has_source = !rtti::is_same_ty::<E, Nae>();
+                let has_context = !rtti::is_same_ty::<C::Repr, Blank>();
+
+                match (has_state, has_context, has_source) {
+                    (true, false, false) => {
+                        let state_value = state.take().unwrap();
+                        let Err(state_value) = match_else!(Self::try_new_inline(state_value), Ok(this) => {
+                            return this;
+                        });
+                        state = Some(state_value);
+                    }
+                    (false, true, false) if context.is_none() && context_fallback.is_some() => {
+                        if let Some(this) = RawError::try_new_const::<C>() {
+                            return this.with_phantom_state();
+                        }
+                    }
+                    _ => {}
+                }
+
+                match (context, context_fallback) {
+                    (Some(context), _) => Self::new_boxed(state, source, context),
+                    (None, Some(context)) => Self::new_boxed(state, source, context),
+                    (None, None) => Self::new_boxed(state, source, Blank::new()),
+                }
+            }
         }
     }
 
-    fn new_boxed_<E, P, L>(state: Option<S>, source: E, payload: P) -> Self
+    fn new_boxed<E, C>(state: Option<S>, source: E, context: C) -> Self
     where
         S: Debug + Send + Sync + 'static,
         E: error::Error + Send + Sync + 'static,
-        P: Display + Send + Sync + 'static,
-        L: context::Context + ?Sized,
+        C: Display + Send + Sync + 'static,
     {
-        let (vtable, state) = DynBody::<S, E, P, L::Repr>::vtable_from_state(state);
+        let (vtable, state) = DynBody::<S, E, C>::vtable_from_state(state);
 
         // # Safety
         //
-        // The `Align4Own` pointer is cast to `DynBody<Infallible, (), (), ()>` for uniform storage.
-        // This is valid because all monomorphizations of `DynBody<S, E, P, L::Repr>` share
-        // the same vtable pointer, and the concrete `S`, `E`, `P`, `L` are erased.
+        // The `Align4Own` pointer is cast to `DynBody<Infallible, (), ()>` for uniform storage.
+        // This is valid because all monomorphizations of `DynBody<S, E, C::Repr>` share
+        // the same vtable pointer, and the concrete `S`, `E`, `C` are erased.
         // The cast only changes the type parameter defaults — it does not violate the layout
         // because `()` is a ZST.
         // Due to `Align4Own`assumes a correct layout, and that's not true after the cast,
         // we need to put it in a `ManuallyDrop` and drop it via vtable instead.
-        Self {
+        RawError::<S> {
             boxed_body: unsafe {
                 Align4Own::from_boxed(
-                    Box::new(Align4(DynBody::<S, E, P, L::Repr> {
+                    Box::new(Align4(DynBody::<S, E, C> {
                         vtable,
                         state,
                         source,
-                        payload,
-                        context: L::new_context(),
+                        context,
                     })),
                     RawError::<S>::KIND_BOXED,
                 )
@@ -269,19 +268,6 @@ impl<S> RawError<S> {
                 (vtable.context)(body.borrow())
             },
             SelectRef::Inline(_body) => None,
-        }
-    }
-
-    /// Returns a reference to the displayable payload, if present.
-    pub fn payload(&self) -> Option<&'_ (dyn Display + Send + Sync + 'static)> {
-        match self.select_ref() {
-            SelectRef::Inline(_body) => None,
-            SelectRef::Const(_body) => None,
-            SelectRef::Boxed(body) => unsafe {
-                let vtable = DynBody::vtable(body.borrow());
-                // Safety: The body pointer is confirmed valid.
-                (vtable.payload)(body.borrow())
-            },
         }
     }
 
@@ -331,21 +317,23 @@ impl<S> RawError<S> {
         self.source_mut()?.downcast_mut::<E>()
     }
 
-    /// Attempts to downcast the stored payload to `P`.
-    pub fn downcast_payload_ref<P>(&self) -> Option<&P>
+    /// Attempts to downcast the stored context to `C`.
+    pub fn downcast_context_ref<C>(&self) -> Option<&C>
     where
-        P: 'static,
+        C: 'static,
     {
         match self.select_ref() {
-            SelectRef::Const(_body) => None,
+            SelectRef::Const(body) => {
+                rtti::concretize_ref::<_, C>(&body.borrow().deref().context).ok()
+            }
             SelectRef::Inline(_body) => None,
             SelectRef::Boxed(body) => unsafe {
                 let vtable = DynBody::vtable(body.borrow());
-                let mut result = None::<&P>;
+                let mut result = None::<&C>;
                 // Safety: The body pointer is confirmed valid.
-                (vtable.downcast_payload_ref)(
+                (vtable.downcast_context_ref)(
                     body.borrow(),
-                    TypeId::of::<P>(),
+                    TypeId::of::<C>(),
                     NonNull::from_mut(&mut result).cast(),
                 );
                 result
@@ -353,21 +341,21 @@ impl<S> RawError<S> {
         }
     }
 
-    /// Attempts to downcast the stored payload to `P` by mutable reference.
-    pub fn downcast_payload_mut<P>(&mut self) -> Option<&mut P>
+    /// Attempts to downcast the stored context to `C` by mutable reference.
+    pub fn downcast_context_mut<C>(&mut self) -> Option<&mut C>
     where
-        P: 'static,
+        C: 'static,
     {
         match self.select_mut() {
             SelectMut::Const(_body) => None,
             SelectMut::Inline(_body) => None,
             SelectMut::Boxed(body) => unsafe {
                 let vtable = DynBody::vtable(body.borrow());
-                let mut result = None::<&mut P>;
+                let mut result = None::<&mut C>;
                 // Safety: The body pointer is confirmed valid.
-                (vtable.downcast_payload_mut)(
+                (vtable.downcast_context_mut)(
                     body.borrow_mut(),
-                    TypeId::of::<P>(),
+                    TypeId::of::<C>(),
                     NonNull::from_mut(&mut result).cast(),
                 );
                 result
@@ -411,48 +399,44 @@ impl<S> RawError<S> {
         }
     }
 
-    /// Consumes `self` and extracts the source error and payload by type.
+    /// Consumes `self` and extracts the source error and paylaad by type.
     ///
-    /// Returns `None` if the types do not match or no source/payload exists.
+    /// Returns `None` if the types do not match or no source/paylaad exists.
     ///
     /// # Existence Guarantee
     /// It's guaranteed that at least one components exist.
-    pub fn into_parts<P, E>(self) -> (Option<S>, Option<&'static str>, Option<P>, Option<E>)
+    pub fn into_parts<C, E>(self) -> (Option<S>, Option<C>, Option<E>)
     where
         E: 'static,
-        P: 'static,
+        C: 'static,
     {
         match self.select_own() {
-            SelectOwn::Const(body) => (
-                None,
-                Some(
-                    // Safety: The project to context is inbound.
-                    unsafe { body.borrow().project(|v| &raw const (*v).context).copied() },
-                ),
-                None,
-                None,
-            ),
-            SelectOwn::Inline(body) => (Some(body.into_value()), None, None, None),
+            SelectOwn::Const(body) => {
+                // Safety: The project to context is inbound.
+                let context =
+                    unsafe { body.borrow().project(|v| &raw const (*v).context).copied() };
+                let context = rtti::concretize::<_, C>(context).ok();
+                (None, context, None)
+            }
+            SelectOwn::Inline(body) => (Some(body.into_value()), None, None),
             SelectOwn::Boxed(body) => unsafe {
                 let vtable = DynBody::vtable(body.borrow());
                 let mut state: Option<S> = None;
-                let mut context: Option<&'static str> = None;
-                let mut payload: Option<P> = None;
+                let mut context: Option<C> = None;
                 let mut err: Option<E> = None;
 
-                // Safety: The body, state, context, payload, and error pointers are confirmed valid.
+                // Safety: The body, state, context, and error pointers are confirmed valid.
                 (vtable.into_parts)(
                     body,
                     TypeId::of::<E>(),
                     NonNull::from_mut(&mut err).cast(),
-                    TypeId::of::<P>(),
-                    NonNull::from_mut(&mut payload).cast(),
+                    TypeId::of::<C>(),
                     NonNull::from_mut(&mut context).cast(),
                     TypeId::of::<S>(),
                     NonNull::from_mut(&mut state).cast(),
                 );
 
-                (state, context, payload, err)
+                (state, context, err)
             },
         }
     }
@@ -594,7 +578,6 @@ where
             f,
             self.state(),
             self.context().map(|v| v as _),
-            self.payload().map(|v| v as _),
             self.source().map(|v| v as _),
             WithBacktrace::search_debug(|| self.source().map(|v| v as _)),
         )
@@ -610,7 +593,6 @@ where
             f,
             self.state(),
             self.context().map(|v| v as _),
-            self.payload().map(|v| v as _),
             self.source().map(|v| v as _),
             WithBacktrace::search_display(|| self.source().map(|v| v as _)),
         )
@@ -632,35 +614,33 @@ pub struct ConstBody {
     context: &'static str,
 }
 
-/// Heap-allocated error body with type-erased source, payload, and context.
+/// Heap-allocated error body with type-erased source and context.
 ///
-/// The concrete types `E`, `P`, `L` are only known at construction time and at
+/// The concrete types `E`, `C` are only known at construction time and at
 /// the monomorphized vtable function sites. The `RawError` stores the body as
-/// `DynBody<S, (), (), ()>`. The `S` can also be erased when the state is
+/// `DynBody<S, (), ()>`. The `S` can also be erased when the state is
 /// extracted.
 ///
 /// # Safety
 ///
 /// The `vtable` pointer must point to a `DynBodyVTable` that was monomorphized
-/// for the same `S`, `E`, `P`, `L` as the stored data.
+/// for the same `S`, `E`, `C` as the stored data.
 #[repr(C)]
-struct DynBody<S = Infallible, E = (), P = (), L = ()>
+struct DynBody<S = Infallible, E = (), C = ()>
 where
     S: 'static,
     E: 'static,
-    P: 'static,
-    L: 'static,
+    C: 'static,
 {
     vtable: Align4Ref<'static, DynBodyVTable>, // Note: The vtable must be the first field as the other fields may be erased.
     state: MaybeUninit<S>,
     source: E,
-    payload: P,
-    context: L,
+    context: C,
 }
 
 /// Virtual function table for type-erased operations on [`DynBody`].
 ///
-/// Each function pointer is monomorphized for the concrete `S`, `E`, `P`, `L`.
+/// Each function pointer is monomorphized for the concrete `S`, `E`, `C`.
 ///
 /// # Safety
 ///
@@ -680,7 +660,6 @@ struct DynBodyVTable {
         TypeId,
         NonNull<()>,
         TypeId,
-        NonNull<()>,
         NonNull<()>,
         TypeId,
         NonNull<()>,
@@ -704,48 +683,44 @@ struct DynBodyVTable {
         unsafe fn(Mut<'_, DynBody>) -> Option<&mut (dyn error::Error + Send + Sync + 'static)>,
     /// See [DynBody::state].
     state: unsafe fn(Ref<'_, DynBody>, TypeId, NonNull<()>),
-    /// See [DynBody::payload].
-    payload: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn Display + Send + Sync + 'static)>,
     /// See [DynBody::context].
     context: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn Display + Send + Sync + 'static)>,
-    /// See [DynBody::downcast_payload_ref].
-    downcast_payload_ref: unsafe fn(Ref<'_, DynBody>, TypeId, NonNull<()>),
-    /// See [DynBody::downcast_payload_mut].
-    downcast_payload_mut: unsafe fn(Mut<'_, DynBody>, TypeId, NonNull<()>),
+    /// See [DynBody::downcast_context_ref].
+    downcast_context_ref: unsafe fn(Ref<'_, DynBody>, TypeId, NonNull<()>),
+    /// See [DynBody::downcast_context_mut].
+    downcast_context_mut: unsafe fn(Mut<'_, DynBody>, TypeId, NonNull<()>),
 }
 
 impl DynBodyVTable {
-    const fn new<S, E, P, L>() -> Self
+    const fn new<S, E, C>() -> Self
     where
         S: Debug + Send + Sync + 'static,
         E: error::Error + Send + Sync + 'static,
-        L: Display + Send + Sync + 'static,
-        P: Display + Send + Sync + 'static,
+        C: Display + Send + Sync + 'static,
     {
         DynBodyVTable {
-            drop: DynBody::<S, E, P, L>::drop,
-            into_source: DynBody::<S, E, P, L>::into_source,
-            into_parts: DynBody::<S, E, P, L>::into_parts,
-            extract_state: DynBody::<S, E, P, L>::extract_state,
-            into_boxed_error: DynBody::<S, E, P, L>::into_boxed_error,
-            try_set_state: DynBody::<S, E, P, L>::try_set_state,
-            source: DynBody::<S, E, P, L>::source,
-            source_mut: DynBody::<S, E, P, L>::source_mut,
-            state: DynBody::<S, E, P, L>::state,
-            payload: DynBody::<S, E, P, L>::payload,
-            context: DynBody::<S, E, P, L>::context,
-            downcast_payload_ref: DynBody::<S, E, P, L>::downcast_payload_ref,
-            downcast_payload_mut: DynBody::<S, E, P, L>::downcast_payload_mut,
+            drop: DynBody::<S, E, C>::drop,
+            into_source: DynBody::<S, E, C>::into_source,
+            into_parts: DynBody::<S, E, C>::into_parts,
+            extract_state: DynBody::<S, E, C>::extract_state,
+            into_boxed_error: DynBody::<S, E, C>::into_boxed_error,
+            try_set_state: DynBody::<S, E, C>::try_set_state,
+            source: DynBody::<S, E, C>::source,
+            source_mut: DynBody::<S, E, C>::source_mut,
+            state: DynBody::<S, E, C>::state,
+            context: DynBody::<S, E, C>::context,
+            downcast_context_ref: DynBody::<S, E, C>::downcast_context_ref,
+            downcast_context_mut: DynBody::<S, E, C>::downcast_context_mut,
         }
     }
 }
 
-impl<S, E, P, L> DynBody<S, E, P, L> {
+impl<S, E, C> DynBody<S, E, C> {
     const NO_STATE: Metadata = Metadata::_0;
     const HAS_STATE: Metadata = Metadata::_1;
 
     /// Returns a static shared reference to the vtable.
-    fn vtable(this: Ref<'_, DynBody<S, E, P, L>>) -> &'static DynBodyVTable {
+    fn vtable(this: Ref<'_, DynBody<S, E, C>>) -> &'static DynBodyVTable {
         unsafe {
             this.project(|body| &raw const (*body).vtable)
                 .deref()
@@ -755,17 +730,16 @@ impl<S, E, P, L> DynBody<S, E, P, L> {
     }
 }
 
-impl<S, E, P, L> DynBody<S, E, P, L>
+impl<S, E, C> DynBody<S, E, C>
 where
     S: Debug + Send + Sync + 'static,
     E: error::Error + Send + Sync + 'static,
-    P: Display + Send + Sync + 'static,
-    L: Display + Send + Sync + 'static,
+    C: Display + Send + Sync + 'static,
 {
     fn vtable_from_state(state: Option<S>) -> (Align4Ref<'static, DynBodyVTable>, MaybeUninit<S>) {
         (
             Align4Ref::new(
-                &const { Align4(DynBodyVTable::new::<S, E, P, L>()) },
+                &const { Align4(DynBodyVTable::new::<S, E, C>()) },
                 match state {
                     Some(_) => Self::HAS_STATE,
                     None => Self::NO_STATE,
@@ -826,33 +800,31 @@ where
     }
 
     /// Consumes `self` and decomposes into its raw components:
-    /// `(state, source, payload, context)`.
-    fn destruct(self) -> (Option<S>, E, P, L) {
+    /// `(state, source, context)`.
+    fn destruct(self) -> (Option<S>, E, C) {
         let has_state = self.has_state();
         let mut this = MaybeUninit::new(self);
         let this = this.as_mut_ptr();
         unsafe {
             let state = has_state.then(|| (&raw mut (*this).state).read().assume_init());
             let source = (&raw mut (*this).source).read();
-            let payload = (&raw mut (*this).payload).read();
             let context = (&raw mut (*this).context).read();
-            (state, source, payload, context)
+            (state, source, context)
         }
     }
 }
 
-impl<S, E, P, L> DynBody<S, E, P, L>
+impl<S, E, C> DynBody<S, E, C>
 where
     S: Debug + Send + Sync + 'static,
     E: error::Error + Send + Sync + 'static,
-    P: Display + Send + Sync + 'static,
-    L: Display + Send + Sync + 'static,
+    C: Display + Send + Sync + 'static,
 {
     /// Drops the boxed body.
     ///
     /// # Safety
     ///
-    /// - `this` must be a valid `Align4Own` pointing to a heap-allocated `DynBody<S, E, P, L>`.
+    /// - `this` must be a valid `Align4Own` pointing to a heap-allocated `DynBody<S, E, C>`.
     unsafe fn drop(mut this: ManuallyDrop<Align4Own<DynBody>>) {
         unsafe {
             let this = ManuallyDrop::take(&mut this).cast::<Self>();
@@ -884,21 +856,20 @@ where
         }
     }
 
-    /// Decomposes the boxed body: extracts source and payload into caller-provided
+    /// Decomposes the boxed body: extracts source and context into caller-provided
     /// `Option`s (if the `TypeId` matches), and returns the state.
     ///
     /// # Safety
     ///
-    /// - `this` must be a valid `Align4Own` pointing to `DynBody<S, E, P, L>`.
-    /// - `source_dst`, `payload_dst`,`context_dst`, `state_dst` must be valid, aligned, mutable
-    ///   pointers to `Option<E>`, `Option<P>`, `Option<&'static str>` and `Option<S>` respectively.
+    /// - `this` must be a valid `Align4Own` pointing to `DynBody<S, E, C>`.
+    /// - `source_dst`, `context_dst`, `state_dst` must be valid, aligned, mutable
+    ///   pointers to `Option<E>`, `Option<C>` and `Option<S>` respectively.
     #[allow(clippy::too_many_arguments)]
     unsafe fn into_parts(
         mut this: ManuallyDrop<Align4Own<DynBody>>,
         source_ty: TypeId,
         source_dst: NonNull<()>,
-        payload_ty: TypeId,
-        payload_dst: NonNull<()>,
+        context_ty: TypeId,
         context_dst: NonNull<()>,
         state_ty: TypeId,
         state_dst: NonNull<()>,
@@ -906,7 +877,7 @@ where
         let Align4(this) = *unsafe {
             ManuallyDrop::into_inner(ManuallyDrop::take(&mut this).cast::<Self>()).into_boxed()
         };
-        let (state, source, payload, context) = this.destruct();
+        let (state, source, context) = this.destruct();
 
         if !rtti::is_same_ty::<E, Nae>() {
             match rtti::concretize::<_, WithBacktrace>(source) {
@@ -921,14 +892,9 @@ where
                 _ => {}
             }
         }
-        if !rtti::is_same_ty::<P, payload::Empty>() && TypeId::of::<P>() == payload_ty {
-            // Safety: The caller guarantees `payload_dst` points to a valid `Option<P>`.
-            let dst = unsafe { payload_dst.cast::<Option<P>>().as_mut() };
-            dst.replace(payload);
-        }
-        if !rtti::is_same_ty::<L, context::Unit>() && rtti::is_same_ty::<L, &'static str>() {
-            // Safety: The caller guarantees `context_dst` points to a valid `Option<&'static str>`.
-            let dst = unsafe { context_dst.cast::<Option<L>>().as_mut() };
+        if !rtti::is_same_ty::<C, Blank>() && TypeId::of::<C>() == context_ty {
+            // Safety: The caller guarantees `context_dst` points to a valid `Option<C>`.
+            let dst = unsafe { context_dst.cast::<Option<C>>().as_mut() };
             dst.replace(context);
         }
         if TypeId::of::<S>() == state_ty {
@@ -941,7 +907,7 @@ where
     ///
     /// # Safety
     ///
-    /// - `this` must be a valid `Align4Own` pointing to `DynBody<S, E, P, L>`.
+    /// - `this` must be a valid `Align4Own` pointing to `DynBody<S, E, C>`.
     /// - `state_dst` must be a valid, aligned, mutable pointer to `Option<StateTy>`.
     unsafe fn extract_state(
         mut this: ManuallyDrop<Align4Own<DynBody>>,
@@ -984,7 +950,7 @@ where
     ///
     /// # Safety
     ///
-    /// - `this` must be a valid `Mut` pointing to `DynBody<S, E, P, L>`.
+    /// - `this` must be a valid `Mut` pointing to `DynBody<S, E, C>`.
     /// - `state_src` must be a valid, aligned, mutable pointer to `Option<S>`.
     unsafe fn try_set_state(
         this: Mut<'_, DynBody>,
@@ -1009,7 +975,7 @@ where
     ///
     /// # Safety
     ///
-    /// - `this` must point to a valid `DynBody<S, E, P, L>`.
+    /// - `this` must point to a valid `DynBody<S, E, C>`.
     unsafe fn source(
         this: Ref<'_, DynBody>,
     ) -> Option<&(dyn error::Error + Send + Sync + 'static)> {
@@ -1031,7 +997,7 @@ where
     ///
     /// # Safety
     ///
-    /// - `this` must point to a valid `DynBody<S, E, P, L>`.
+    /// - `this` must point to a valid `DynBody<S, E, C>`.
     unsafe fn source_mut(
         this: Mut<'_, DynBody>,
     ) -> Option<&mut (dyn error::Error + Send + Sync + 'static)> {
@@ -1042,7 +1008,7 @@ where
         }
 
         // Note: Check the type first. As of Rust 2024 doing the same thing in the `Err` case of
-        // `concretize_mut` will run into NLL problem case #3:
+        // `concretize_mut` will run into NCC problem case #3:
         // https://smallcultfollowing.com/babysteps/blog/2016/04/27/non-lexical-lifetimes-introduction/
         if !rtti::is_same_ty::<E, WithBacktrace>() || WithBacktrace::searching() {
             return Some(&mut this.source as _);
@@ -1058,7 +1024,7 @@ where
     ///
     /// # Safety
     ///
-    /// - `this` must point to a valid `DynBody<S, E, P, L>`.
+    /// - `this` must point to a valid `DynBody<S, E, C>`.
     /// - `dst` must be a valid, aligned, mutable pointer to `Option<&StateTy>`.
     unsafe fn state(this: Ref<'_, DynBody>, state_ty: TypeId, state_dst: NonNull<()>) {
         let this = unsafe { this.cast::<Self>().deref() };
@@ -1072,72 +1038,57 @@ where
         }
     }
 
-    /// Returns a reference to the displayable payload.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must point to a valid `DynBody<S, E, P, L>`.
-    unsafe fn payload(this: Ref<'_, DynBody>) -> Option<&(dyn Display + Send + Sync + 'static)> {
-        let this = unsafe { this.cast::<Self>().deref() };
-
-        if rtti::is_same_ty::<P, payload::Empty>() {
-            None
-        } else {
-            Some(&this.payload as &(dyn Display + Send + Sync + 'static))
-        }
-    }
-
     /// Returns a reference to the displayable context.
     ///
     /// # Safety
     ///
-    /// - `this` must point to a valid `DynBody<S, E, P, L>`.
+    /// - `this` must point to a valid `DynBody<S, E, C>`.
     unsafe fn context(this: Ref<'_, DynBody>) -> Option<&(dyn Display + Send + Sync + 'static)> {
         let this = unsafe { this.cast::<Self>().deref() };
 
-        if rtti::is_same_ty::<L, context::Unit>() {
+        if rtti::is_same_ty::<C, Blank>() {
             None
         } else {
             Some(&this.context as &(dyn Display + Send + Sync + 'static))
         }
     }
 
-    /// Attempts to downcast the payload field to the requested type `P`.
+    /// Attempts to downcast the context field to the requested type `C`.
     ///
-    /// Writes `Some(&P)` into `dst` if the type matches, otherwise does nothing.
+    /// Writes `Some(&C)` into `dst` if the type matches, otherwise does nothing.
     ///
     /// # Safety
     ///
-    /// Same as [`downcast_source_ref`](DynBody::downcast_source_ref) for the payload field.
+    /// Same as [`downcast_source_ref`](DynBody::downcast_source_ref) for the context field.
     /// - `dst` must be a valid, aligned, mutable pointer to `Option<&Ty>`.
-    unsafe fn downcast_payload_ref(this: Ref<'_, DynBody>, ty: TypeId, dst: NonNull<()>) {
+    unsafe fn downcast_context_ref(this: Ref<'_, DynBody>, ty: TypeId, dst: NonNull<()>) {
         let this = unsafe { this.cast::<Self>().deref() };
 
-        if !rtti::is_same_ty::<P, payload::Empty>() && TypeId::of::<P>() == ty {
-            let dst = unsafe { dst.cast::<Option<&P>>().as_mut() };
-            *dst = Some(&this.payload);
+        if !rtti::is_same_ty::<C, Blank>() && TypeId::of::<C>() == ty {
+            let dst = unsafe { dst.cast::<Option<&C>>().as_mut() };
+            *dst = Some(&this.context);
         }
     }
 
-    /// Attempts to downcast the payload field to the requested type `P` (mutable).
+    /// Attempts to downcast the context field to the requested type `C` (mutable).
     ///
-    /// Writes `Some(&mut P)` into `dst` if the type matches, otherwise does nothing.
+    /// Writes `Some(&mut C)` into `dst` if the type matches, otherwise does nothing.
     ///
     /// # Safety
     ///
-    /// Same as [`downcast_payload_ref`](DynBody::downcast_payload_ref) with mutable access.
+    /// Same as [`downcast_context_ref`](DynBody::downcast_context_ref) with mutable access.
     /// - `dst` must be a valid, aligned, mutable pointer to `Option<&mut Ty>`.
-    unsafe fn downcast_payload_mut(this: Mut<'_, DynBody>, ty: TypeId, dst: NonNull<()>) {
+    unsafe fn downcast_context_mut(this: Mut<'_, DynBody>, ty: TypeId, dst: NonNull<()>) {
         let this = unsafe { this.cast::<Self>().deref_mut() };
 
-        if !rtti::is_same_ty::<P, payload::Empty>() && TypeId::of::<P>() == ty {
-            let dst = unsafe { dst.cast::<Option<&mut P>>().as_mut() };
-            *dst = Some(&mut this.payload);
+        if !rtti::is_same_ty::<C, Blank>() && TypeId::of::<C>() == ty {
+            let dst = unsafe { dst.cast::<Option<&mut C>>().as_mut() };
+            *dst = Some(&mut this.context);
         }
     }
 }
 
-impl<S, E, P, L> Drop for DynBody<S, E, P, L> {
+impl<S, E, C> Drop for DynBody<S, E, C> {
     fn drop(&mut self) {
         unsafe {
             match Metadata((&raw const (self.vtable) as *const u8).read() & Metadata::MASK) {
@@ -1151,50 +1102,45 @@ impl<S, E, P, L> Drop for DynBody<S, E, P, L> {
     }
 }
 
-impl<S, E, P, L> fmt::Debug for DynBody<S, E, P, L>
+impl<S, E, C> fmt::Debug for DynBody<S, E, C>
 where
     S: Debug + Send + Sync + 'static,
     E: error::Error + Send + Sync + 'static,
-    P: Display + Send + Sync + 'static,
-    L: Display + Send + Sync + 'static,
+    C: Display + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         render::format_debug(
             f,
             self.try_get_state(),
-            (!rtti::is_same_ty::<L, context::Unit>()).then_some(&self.context),
-            (!rtti::is_same_ty::<P, payload::Empty>()).then_some(&self.payload),
+            (!rtti::is_same_ty::<C, Blank>()).then_some(&self.context),
             self.source(),
             WithBacktrace::search_debug(|| self.source()),
         )
     }
 }
 
-impl<S, E, P, L> fmt::Display for DynBody<S, E, P, L>
+impl<S, E, C> fmt::Display for DynBody<S, E, C>
 where
     S: Debug + Send + Sync + 'static,
     E: error::Error + Send + Sync + 'static,
-    P: Display + Send + Sync + 'static,
-    L: Display + Send + Sync + 'static,
+    C: Display + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         render::format_display(
             f,
             self.try_get_state(),
-            (!rtti::is_same_ty::<L, context::Unit>()).then_some(&self.context),
-            (!rtti::is_same_ty::<P, payload::Empty>()).then_some(&self.payload),
+            (!rtti::is_same_ty::<C, Blank>()).then_some(&self.context),
             self.source(),
             WithBacktrace::search_display(|| self.source()),
         )
     }
 }
 
-impl<S, E, P, L> error::Error for DynBody<S, E, P, L>
+impl<S, E, C> error::Error for DynBody<S, E, C>
 where
     S: Debug + Send + Sync + 'static,
     E: error::Error + Send + Sync + 'static,
-    P: Display + Send + Sync + 'static,
-    L: Display + Send + Sync + 'static,
+    C: Display + Send + Sync + 'static,
 {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         if rtti::is_same_ty::<E, Nae>() {
@@ -1242,12 +1188,8 @@ impl RawVacant {
 
         unsafe {
             let body_ref = body.borrow();
-            match (
-                (vt.context)(body_ref),
-                (vt.payload)(body_ref),
-                (vt.source)(body_ref),
-            ) {
-                (None, None, None) => Err(RawVacant(body)),
+            match ((vt.context)(body_ref), (vt.source)(body_ref)) {
+                (None, None) => Err(RawVacant(body)),
                 _ => Ok(RawError { boxed_body: body }),
             }
         }
@@ -1261,7 +1203,6 @@ impl Debug for RawVacant {
 
         unsafe {
             let context = (vt.context)(body_ref);
-            let payload = (vt.payload)(body_ref);
             let source = (vt.source)(body_ref);
             let backtrace = (!f.sign_minus())
                 .then(|| {
@@ -1276,7 +1217,6 @@ impl Debug for RawVacant {
                 "Vacant",
                 None,
                 context.map(|v| v as _),
-                payload.map(|v| v as _),
                 source.map(|v| v as _),
                 backtrace,
             )
@@ -1309,11 +1249,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::{
-        context::{Blank, Literal},
-        nae::Nae,
-        payload,
-    };
+    use crate::{context::Contextless, nae::Nae};
 
     // --- Test helpers ---
 
@@ -1330,20 +1266,17 @@ mod tests {
     impl error::Error for TestError {}
 
     /// A typed literal for testing.
+    #[derive(Debug)]
     struct TestContext;
 
-    impl Literal for TestContext {
-        const LITERAL: &'static str = "test context";
-    }
+    impl Context for TestContext {
+        type Repr = Infallible;
 
-    /// A custom payload type.
-    #[derive(Debug, PartialEq)]
-    struct TestPayload(u32);
-
-    impl Display for TestPayload {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "payload({})", self.0)
+        fn try_into_repr(self) -> Option<Self::Repr> {
+            None
         }
+
+        const FALLBACK: Option<&'static str> = Some("test context");
     }
 
     // --- RawError kind() discrimination ---
@@ -1351,25 +1284,21 @@ mod tests {
     #[cfg(not(feature = "backtrace"))]
     #[test]
     fn kind_discriminates_const() {
-        let err = RawError::new_const::<TestContext>();
+        let err = RawError::try_new_const::<TestContext>().unwrap();
         assert_eq!(err.kind(), RawError::<()>::KIND_CONST);
     }
 
     #[cfg(not(feature = "backtrace"))]
     #[test]
     fn kind_discriminates_inline() {
-        let err = RawError::try_new_inline(4216u16).unwrap();
+        let err = RawError::try_new_inline(42u8).unwrap();
         assert_eq!(err.kind(), RawError::<u16>::KIND_INLINE);
     }
 
     #[cfg(not(feature = "backtrace"))]
     #[test]
     fn kind_discriminates_boxed() {
-        let err = RawError::new_boxed::<_, _, Blank>(
-            None::<Infallible>,
-            TestError("oops"),
-            payload::Empty::new(),
-        );
+        let err = RawError::new_boxed(None::<Infallible>, TestError("oops"), Blank::new());
         assert_eq!(err.kind(), RawError::<()>::KIND_BOXED);
     }
 
@@ -1377,33 +1306,21 @@ mod tests {
 
     #[test]
     fn const_variant_context() {
-        let err = RawError::new_const::<TestContext>();
+        let err = RawError::try_new_const::<TestContext>().unwrap();
         let ctx = err.context();
         assert_eq!(ctx.unwrap().to_string(), "test context");
     }
 
     #[test]
     fn const_variant_source_is_none() {
-        let err = RawError::new_const::<TestContext>();
+        let err = RawError::try_new_const::<TestContext>().unwrap();
         assert!(err.source().is_none());
-    }
-
-    #[test]
-    fn const_variant_payload_is_none() {
-        let err = RawError::new_const::<TestContext>();
-        assert!(err.payload().is_none());
     }
 
     // --- Inline variant ---
 
     #[test]
     fn inline_variant_state() {
-        let err = RawError::try_new_inline(42u16).unwrap();
-        assert_matches!(err.state(), Some(42));
-    }
-
-    #[test]
-    fn inline_variant_into_state() {
         let err = RawError::try_new_inline(42u16).unwrap();
         assert_matches!(err.state(), Some(42));
     }
@@ -1420,75 +1337,35 @@ mod tests {
         assert!(err.source().is_none());
     }
 
-    #[test]
-    fn inline_variant_payload_is_none() {
-        let err = RawError::try_new_inline(42u16).unwrap();
-        assert!(err.payload().is_none());
-    }
-
     // Boxed variant ---
 
     #[test]
     fn boxed_variant_source() {
-        let err = RawError::new_boxed::<_, _, Blank>(
-            None::<Infallible>,
-            TestError("oops"),
-            payload::Empty::new(),
-        );
+        let err = RawError::new_boxed(None::<Infallible>, TestError("oops"), Blank::new());
         let src = err.source();
         assert_eq!(src.unwrap().to_string(), "oops");
     }
 
     #[test]
     fn boxed_variant_downcast_source() {
-        let err = RawError::new_boxed::<_, _, Blank>(
-            None::<Infallible>,
-            TestError("oops"),
-            payload::Empty::new(),
-        );
+        let err = RawError::new_boxed(None::<Infallible>, TestError("oops"), Blank::new());
         let downcasted = err.downcast_source_ref::<TestError>();
         assert_matches!(downcasted, Some(TestError("oops")));
     }
 
     #[test]
     fn boxed_variant_downcast_source_wrong_type() {
-        let err = RawError::new_boxed::<_, _, Blank>(
-            None::<Infallible>,
-            TestError("oops"),
-            payload::Empty::new(),
-        );
+        let err = RawError::new_boxed(None::<Infallible>, TestError("oops"), Blank::new());
         let downcasted = err.downcast_source_ref::<Nae>();
         assert!(downcasted.is_none());
     }
 
     #[test]
-    fn boxed_variant_payload() {
-        let err = RawError::new_boxed::<_, _, Blank>(
-            None::<Infallible>,
-            TestError("oops"),
-            TestPayload(42),
-        );
-        let pl = err.payload();
-        assert_eq!(pl.unwrap().to_string(), "payload(42)");
-    }
-
-    #[test]
-    fn boxed_variant_downcast_payload() {
-        let err = RawError::new_boxed::<_, _, Blank>(
-            None::<Infallible>,
-            TestError("oops"),
-            TestPayload(42),
-        );
-        let downcasted = err.downcast_payload_ref::<TestPayload>();
-        assert_matches!(downcasted, Some(TestPayload(42)));
-    }
-
-    #[test]
     fn boxed_variant_context() {
-        let err = RawError::new_boxed::<_, _, TestContext>(
+        let err = RawError::new_boxed(
             None::<Infallible>,
             TestError("oops"),
-            payload::Empty::new(),
+            TestContext::FALLBACK.unwrap(),
         );
         let ctx = err.context();
         assert_eq!(ctx.unwrap().to_string(), "test context");
@@ -1497,42 +1374,23 @@ mod tests {
     #[test]
     fn boxed_variant_nae_source_is_none() {
         // When source is `Nae`, `.source()` should return `None`.
-        let err =
-            RawError::new_boxed::<_, _, Blank>(Some(42u32), Nae::new(), payload::Empty::new());
+        let err = RawError::new_boxed(Some(42u32), Nae::new(), Blank::new());
         assert!(err.source().is_none());
         assert_matches!(err.state(), Some(42));
-    }
-
-    #[test]
-    fn boxed_variant_empty_payload_is_none() {
-        let err = RawError::new_boxed::<_, _, Blank>(
-            None::<Infallible>,
-            TestError("oops"),
-            payload::Empty::new(),
-        );
-        assert!(err.payload().is_none());
     }
 
     // --- into_source ---
 
     #[test]
     fn boxed_variant_into_source_returns_boxed_error() {
-        let err = RawError::new_boxed::<_, _, Blank>(
-            None::<Infallible>,
-            TestError("oops"),
-            payload::Empty::new(),
-        );
+        let err = RawError::new_boxed(None::<Infallible>, TestError("oops"), Blank::new());
         let src = err.into_source();
         assert_eq!(src.unwrap().to_string(), "oops");
     }
 
     #[test]
     fn boxed_variant_into_source_nae_returns_none() {
-        let err = RawError::new_boxed::<_, _, Blank>(
-            None::<Infallible>,
-            Nae::new(),
-            payload::Empty::new(),
-        );
+        let err = RawError::new_boxed(None::<Infallible>, Nae::new(), Blank::new());
         assert!(err.into_source().is_none());
     }
 
@@ -1540,45 +1398,39 @@ mod tests {
 
     #[test]
     fn boxed_variant_into_parts_matches_types() {
-        let err = RawError::new_boxed::<_, _, TestContext>(
+        let err = RawError::new_boxed(
             Some("state"),
             TestError("oops"),
-            TestPayload(99),
+            TestContext::FALLBACK.unwrap(),
         );
-        let (state, context, payload, source) = err.into_parts::<TestPayload, TestError>();
+        let (state, context, source) = err.into_parts::<&str, TestError>();
         assert_matches!(state, Some("state"));
         assert_matches!(source, Some(TestError("oops")));
-        assert_matches!(payload, Some(TestPayload(99)));
-        assert!(matches!(context, Some(TestContext::LITERAL)))
+        assert_eq!(context, TestContext::FALLBACK);
     }
 
     #[test]
-    fn boxed_variant_into_parts_wrong_source_type() {
-        let err = RawError::new_boxed::<_, _, Blank>(
-            None::<Infallible>,
-            TestError("oops"),
-            payload::Empty::new(),
-        );
-        let (_, _, payload, source) = err.into_parts::<payload::Empty, String>();
-        assert!(source.is_none());
-        assert!(payload.is_none());
+    fn boxed_variant_into_parts_context_downcasts() {
+        let err = RawError::new_boxed(None::<Infallible>, TestError("oops"), Blank::new());
+        let (_, context, _) = err.into_parts::<Blank, String>();
+        assert!(context.is_none());
     }
 
     #[test]
     fn const_variant_into_parts() {
-        let err = RawError::new_const::<TestContext>();
-        let (state, _, payload, source) = err.into_parts::<TestPayload, TestError>();
+        let err = RawError::try_new_const::<TestContext>().unwrap();
+        let (state, context, source) = err.into_parts::<&str, TestError>();
         assert!(source.is_none());
-        assert!(payload.is_none());
+        assert_eq!(context, TestContext::FALLBACK);
         assert_eq!(state, None);
     }
 
     #[test]
     fn inline_variant_into_parts() {
         let err = RawError::try_new_inline(42u16).unwrap();
-        let (state, _, payload, source) = err.into_parts::<TestPayload, TestError>();
+        let (state, context, source) = err.into_parts::<Blank, TestError>();
         assert!(source.is_none());
-        assert!(payload.is_none());
+        assert!(context.is_none());
         assert_matches!(state, Some(42));
     }
 
@@ -1609,11 +1461,7 @@ mod tests {
         impl error::Error for DropWatch {}
 
         {
-            let _err = RawError::new_boxed::<_, _, Blank>(
-                None::<Infallible>,
-                DropWatch,
-                payload::Empty::new(),
-            );
+            let _err = RawError::new_boxed(None::<Infallible>, DropWatch, Blank::new());
         } // drop here
         assert!(DROPPED.load(Ordering::SeqCst));
     }
@@ -1622,7 +1470,7 @@ mod tests {
 
     #[test]
     fn const_variant_state_is_none() {
-        let err = RawError::new_const::<TestContext>();
+        let err = RawError::try_new_const::<TestContext>().unwrap();
         assert!(err.state().is_none());
     }
 
@@ -1643,29 +1491,28 @@ mod tests {
     #[test]
     fn state_extraction() {
         {
-            let err = RawError::new_inline_or_boxed(42u16);
+            let err = RawError::new(Some(42u8), Nae::new(), Contextless::new());
             if cfg!(feature = "backtrace") {
-                assert_matches!(err.extract_state(), Ok((42, Some(_))));
+                assert_matches!(err.extract_state(), Ok((42, Some(_) | None)));
             } else {
                 assert_matches!(err.extract_state(), Ok((42, None)));
             }
         }
         {
-            let err = RawError::new_inline_or_boxed(42u128);
+            let err = RawError::new(Some(42u128), Nae::new(), Contextless::new());
             assert_matches!(err.extract_state(), Ok((42, Some(_))));
         }
         {
-            let err =
-                RawError::new_boxed::<_, _, Blank>(None::<Infallible>, Nae::new(), format!("oops"));
+            let err = RawError::new_boxed(None::<Infallible>, Nae::new(), format!("oops"));
             assert_matches!(err.extract_state(), Err(err) if format!("{err}") == "oops");
         }
         {
-            let err = RawError::new_boxed::<_, _, Blank>(Some(42i32), Nae::new(), format!("oops"));
+            let err = RawError::new_boxed(Some(42i32), Nae::new(), format!("oops"));
             match err.extract_state() {
                 Ok((state, Some(vacant))) if state == 42 => {
                     let err = vacant.try_with_state(state).unwrap();
                     assert_eq!(err.state(), Some(&42));
-                    assert_eq!(err.payload().unwrap().to_string(), "oops");
+                    assert_eq!(err.context().unwrap().to_string(), "oops");
                 }
                 _ => panic!("extract should not fail"),
             }
