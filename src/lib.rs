@@ -276,6 +276,14 @@ impl Error {
     pub fn stateless(self) -> Self {
         self
     }
+
+    /// Converts to an error of another state without providing the state value.
+    pub fn with_phantom_state<S>(self) -> Error<S>
+    where
+        S: State + ?Sized,
+    {
+        Error(self.0.with_phantom_state())
+    }
 }
 
 impl<S> Error<S>
@@ -432,23 +440,6 @@ where
     /// Iterates over the source error chain, starting from the immediate source.
     pub fn chain(&self) -> impl Iterator<Item = &(dyn error::Error + 'static)> {
         self.0.chain()
-    }
-
-    /// Converts to an error of another state without providing the state value.
-    pub fn with_phantom_state<S2>(self) -> Error<S2>
-    where
-        S2: State + ?Sized,
-    {
-        // Case #1: S = S2
-        let Err(err) = match_else!(rtti::concretize::<_, Error<S2>>(self), Ok(err) => {
-            return err;
-        });
-        // Case #2: self has no state.
-        let Err(err) = match_else!(err.try_into_stateless(), Ok(err) => {
-            return Error(err.0.with_phantom_state());
-        });
-        // Case #3: self has a different state.
-        Error(RawError::new(None, err.erase(), Contextless::new()))
     }
 
     /// Returns the backtrace, if any.
@@ -717,25 +708,24 @@ where
     }
 }
 
-// Builder Case #4: erratic error; state -> state
-impl<S1, S, F> From<Builder<Error<S1>, S, F>> for Error<S>
+// Builder Case #4: erratic error; state+stateless -> state
+impl<S, F> From<Builder<Error<S>, Stateless, F>> for Error<S>
 where
-    S1: State + ?Sized,
     F: IntoContext,
-    S: State + ?Sized,
+    S: State,
 {
-    fn from(value: Builder<Error<S1>, S, F>) -> Self {
-        let has_state = !rtti::is_same_ty::<S, Stateless>();
+    fn from(value: Builder<Error<S>, Stateless, F>) -> Self {
         let has_context = !rtti::is_same_ty::<<F::Output as Context>::Repr, Blank>();
 
-        match (has_state, has_context) {
-            (false, false) => value.err.with_phantom_state(),
-            _ => Error(RawError::new(
-                value.state,
-                value.err.erase(),
-                value.context_fn.into_context(),
-            )),
+        if !has_context {
+            return value.err;
         }
+
+        let Ok((state, vacant)) = match_else!(value.err.extract_state(), Err(err) => {
+            return err.with_phantom_state();
+        });
+
+        vacant.derive(state, value.context_fn.into_context())
     }
 }
 
@@ -743,14 +733,13 @@ where
 // Removed as it has no meaningful use case.
 // Signature: impl<S1, S, F, L> From<Builder<Error<S1>, S, F, L>> for Error
 
-// Builder Case #6: erratic error; stateless -> state
-impl<S1, S, F> From<Builder<Error<S1>, Stateless, F>> for Error<S>
+// Builder Case #6: erratic error; stateless+stateless -> state
+impl<S, F> From<Builder<Error<Stateless>, Stateless, F>> for Error<S>
 where
-    S1: State + ?Sized,
     F: IntoContext,
-    S: State,
+    S: State + ?Sized,
 {
-    fn from(value: Builder<Error<S1>, Stateless, F>) -> Self {
+    fn from(value: Builder<Error<Stateless>, Stateless, F>) -> Self {
         let has_context = !rtti::is_same_ty::<<F::Output as Context>::Repr, Blank>();
 
         match has_context {

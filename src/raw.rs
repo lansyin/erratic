@@ -654,6 +654,8 @@ struct DynBodyVTable {
     into_source: unsafe fn(
         ManuallyDrop<Align4Own<DynBody>>,
     ) -> Option<Box<dyn error::Error + Send + Sync + 'static>>,
+    /// See [DynBody::into_backtrace].
+    into_backtrace: unsafe fn(ManuallyDrop<Align4Own<DynBody>>) -> Option<WithBacktrace>,
     /// See [DynBody::into_parts].
     into_parts: unsafe fn(
         ManuallyDrop<Align4Own<DynBody>>,
@@ -701,6 +703,7 @@ impl DynBodyVTable {
         DynBodyVTable {
             drop: DynBody::<S, E, C>::drop,
             into_source: DynBody::<S, E, C>::into_source,
+            into_backtrace: DynBody::<S, E, C>::into_backtrace,
             into_parts: DynBody::<S, E, C>::into_parts,
             extract_state: DynBody::<S, E, C>::extract_state,
             into_boxed_error: DynBody::<S, E, C>::into_boxed_error,
@@ -853,6 +856,28 @@ where
         match rtti::concretize::<_, WithBacktrace>(source) {
             Ok(with_backtrace) => with_backtrace.into_source(),
             Err(source) => Some(Box::new(source)),
+        }
+    }
+
+    /// Extracts the source error as a trait object from the boxed body.
+    ///
+    /// # Safety
+    ///
+    /// - `this` must be a valid `Align4Own` pointing to `DynBody<S, E, C>`.
+    unsafe fn into_backtrace(mut this: ManuallyDrop<Align4Own<DynBody>>) -> Option<WithBacktrace> {
+        let Align4(this) = *unsafe {
+            ManuallyDrop::into_inner(ManuallyDrop::take(&mut this).cast::<Self>()).into_boxed()
+        };
+
+        if rtti::is_same_ty::<E, Nae>() {
+            return None;
+        };
+
+        let (_, source, ..) = this.destruct();
+
+        match rtti::concretize::<_, WithBacktrace>(source) {
+            Ok(with_backtrace) => Some(with_backtrace),
+            Err(_source) => None,
         }
     }
 
@@ -1191,6 +1216,27 @@ impl RawVacant {
             match ((vt.context)(body_ref), (vt.source)(body_ref)) {
                 (None, None) => Err(RawVacant(body)),
                 _ => Ok(RawError { boxed_body: body }),
+            }
+        }
+    }
+
+    pub fn inherit_self<S, C>(self, state: Option<S>, context: C) -> RawError<S>
+    where
+        S: Debug + Send + Sync + 'static,
+        C: context::Context,
+    {
+        let mut this = ManuallyDrop::new(self);
+        let body = unsafe { ManuallyDrop::new(ManuallyDrop::take(&mut this.0)) };
+        let vt = DynBody::vtable(body.borrow());
+
+        unsafe {
+            let body_ref = body.borrow();
+            match ((vt.context)(body_ref), (vt.source)(body_ref)) {
+                (None, None) => match (vt.into_backtrace)(body) {
+                    Some(backtrace) => RawError::new(state, backtrace, context),
+                    None => RawError::new(state, Nae::new(), context),
+                },
+                _ => RawError::new(state, RawError::<Infallible> { boxed_body: body }, context),
             }
         }
     }

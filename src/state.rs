@@ -1,7 +1,12 @@
 //! State traits and the [`Stateless`] marker.
 use core::{convert::Infallible, fmt::Debug, marker::PhantomData, result};
 
-use crate::{Error, raw::RawVacant};
+use crate::{
+    Error,
+    context::Context,
+    nae::Nae,
+    raw::{RawError, RawVacant},
+};
 
 /// Associates an error state type with its stored representation.
 ///
@@ -103,6 +108,33 @@ where
             Ok(err) => Ok(Error(err)),
             Err(err) => Err(Self::new(Some(err))),
         }
+    }
+
+    /// Derives an error from this vacant.
+    pub fn derive<S2, C>(self, state: S2, context: C) -> Error<S2>
+    where
+        S2: State,
+        C: Context,
+    {
+        let Some(vacant) = self.inner else {
+            return Error(RawError::new(
+                Some(S2::into_repr(state)),
+                Nae::new(),
+                context,
+            ));
+        };
+        Error(vacant.inherit_self(Some(S2::into_repr(state)), context))
+    }
+
+    /// Derives a stateless error from this vacant.
+    pub fn derive_stateless<C>(self, context: C) -> Error
+    where
+        C: Context,
+    {
+        let Some(vacant) = self.inner else {
+            return Error(RawError::new(None, Nae::new(), context));
+        };
+        Error(vacant.inherit_self(None, context))
     }
 }
 

@@ -112,8 +112,7 @@ fn builder_case4() {
         let inner: Error<TestState> =
             mkerr!(error = TestError("inner"), state = TestState::FileNotFound);
         let outer: Error<TestState> = Error::with_error(inner)
-            .with_context(mkctx!("outer ctx"))
-            .with_context(TestMessage("outer payload"))
+            .with_context(TestMessage("outer ctx"))
             .into();
         assert!(
             outer
@@ -121,8 +120,8 @@ fn builder_case4() {
                 .any(|e| e.downcast_ref::<TestError>().is_some())
         );
         let (state, context, _source) = outer.into_parts::<TestMessage, TestError>();
-        assert!(state.is_none());
-        assert_matches!(context, Some(TestMessage("outer payload")));
+        assert_eq!(state, Some(TestState::FileNotFound));
+        assert_matches!(context, Some(TestMessage("outer ctx")));
     }
 }
 
