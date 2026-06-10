@@ -4,9 +4,8 @@ use core::{
     fmt::{self, Display},
 };
 
-/// Not an error, a zero-sized error placeholder for [`Builder`][crate::Builder], also represents
-/// the end of source chain in [`Error`][crate::Error]. It is used by [`Builder`][crate::Builder]
-/// and will not appear in public APIs.
+/// Not an error, a zero-sized error placeholder for [`Builder`][crate::Builder]. It is consumed
+/// during materialization and never appears in the error chain or source.
 #[derive(Debug)]
 pub struct Nae {
     _private: (),

@@ -1,4 +1,4 @@
-//! State traits and the [`Stateless`] marker.
+//! State helpers and the [`Stateless`] marker.
 use core::{convert::Infallible, fmt::Debug, marker::PhantomData, result};
 
 use crate::{

@@ -1,5 +1,5 @@
 //! This library provides `Error<S = Stateless>`, an error type with **optional** dynamic dispatch,
-//! enabling applications to handle errors uniformly across different contexts.
+//! enabling applications to handle errors uniformly across different scenarios.
 //!
 //! # Quick Start
 //!
@@ -7,9 +7,7 @@
 //! Compared to the latter, it occupies only 1 usize, making the happy path faster.
 //! ```
 //! # use std::{fs::File, io::Write};
-//! use erratic::*;
-//!
-//! fn write(filename: &str) -> Result<()> {
+//! fn say_hi(filename: &str) -> erratic::Result<()> {
 //!     File::open(filename)?.write_all(b"Hello, World!")?;
 //!     Ok(())
 //! }
@@ -17,9 +15,8 @@
 //!
 //! # Attaching Context
 //!
-//! When constructing an error, you can optionally attach a context. If a context is attached, it's memory
-//! will be merged into a single allocation when the error is materialized. If the context is the only component
-//! of the error, no heap allocation occurs.
+//! When constructing an error, you can optionally attach a context. If the context is a literal string
+//! and it's the only component of the error, no heap allocation occurs.
 //!
 //! ```
 //! # use std::sync::Weak;
@@ -35,16 +32,17 @@
 //!         return mkres!("buf must not be empty"); // No alloc so long as no format args.
 //!     }
 //!     let r = r.upgrade()
-//!         .with_context(mkctx!("stream expired"))?; // Works the same as `mkres`, no alloc.
+//!         .with_context("stream expired")?; // Accepts any value implementing `Display`.
 //!     let n = r.read(buf)
-//!         .with_context(mkctx!("failed to read from {}", r.id()))?; // Evaluated lazily.
+//!         .with_context(mkctx!("cannot read {}", r.id()))?; // `mkctx!` evaluates lazily.
+//!     //  .with_context_fn(|| format!("cannot read {}", r.id()))?; // Same as the previous line.
 //!     Ok(n)
 //! }
 //! ```
 //!
 //! # Binding State
 //!
-//! When propagating an error that requires special handling, you can attach a generic state to it.
+//! When propagating an error that requires special handling, you can optionally attach a state to it.
 //! If the state is small enough and it's the only component of the error, the state is inlined
 //! without any heap allocation.
 //!
@@ -71,8 +69,8 @@
 //! }
 //! ```
 //!
-//! When no runtime state is actually stored, errors can be cheaply converted between different state types,
-//! which allows infrastructure errors to cross any number of layers with no extra allocation, domain errors
+//! When no runtime state is actually stored, errors can be cheaply converted between different state types.
+//! This allows infrastructure errors to cross any number of layers with no extra allocation, domain errors
 //! avoid the heap entirely, and both share the same `Error<S>` type. All compose orthogonally.
 //!
 //! ```
@@ -98,6 +96,8 @@
 //!
 //! - `impl Error`  -> `Error`
 //! - `impl Error`  -> `Error<S>`
+//! - `Builder<..>`  -> `Error`
+//! - `Builder<..>`  -> `Error<S>`
 //! - `Error`       -> `Error<S>`
 //!
 //! Stateful errors are meant to be handled explicitly. Several utility methods are provided:
@@ -111,8 +111,8 @@
 //!
 //! When the `backtrace` feature is enabled and backtrace capture is configured via
 //! [environment variables][backtrace-conf], `Error<S>` automatically captures a backtrace if there isn't
-//! already one in the source chain. The backtrace will be appended after the error chain during debug
-//! formatting, unless the minus sign, e.g. `{:-?}`, is specified to suppress it.
+//! one already in the source chain. The backtrace will be appended after the error chain during debug
+//! formatting, unless the minus flag, e.g. `{:-?}`, is specified to suppress it.
 //!
 //! [backtrace-conf]: https://doc.rust-lang.org/std/backtrace/index.html#environment-variables
 //!
@@ -308,7 +308,7 @@ where
         err.into()
     }
 
-    /// Creates an `Error` from a typed literal value.
+    /// Creates an `Error` from a context.
     pub fn from_context<C>(ctx: C) -> Self
     where
         C: Context,

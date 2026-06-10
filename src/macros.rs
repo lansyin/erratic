@@ -48,6 +48,12 @@ macro_rules! match_else {
 
 /// Creates a lazily-evaluated context from a format string.
 ///
+/// If the format string contains only a literal, it will be converted to a [typed literal][literal].
+/// This eliminates all allocations when it's the only component of the error, e.g. building a
+/// stateless error from an `Option`.
+///
+/// [literal]: crate::context::Literal
+///
 /// # Examples
 ///
 /// ```
@@ -55,9 +61,12 @@ macro_rules! match_else {
 /// # fn foo() -> Result<()> {
 /// # let foo = || -> std::result::Result<(), std::io::Error> { unimplemented!() };
 /// # let stream_id = 1;
+/// # let stream_id = 1;
 /// // A plain literal, no allocation.
 /// foo().with_context(mkctx!("file not found"))?;
-/// // With format args, allocated only on the error path.
+/// // A runtime value, one allocation for the error.
+/// foo().with_context(stream_id)?;
+/// // With format args, the format string adds a second allocation when materializing the error.
 /// foo().with_context(mkctx!("failed to read from stream {stream_id}"))?;
 /// # Ok(())
 /// # }
@@ -84,6 +93,10 @@ macro_rules! mkctx {
 }
 
 /// Constructs an [`Error`][crate::Error] from a variety of input types.
+///
+/// If the only component is a string literal or a small state, no allocation occurs. A state is
+/// considered "small" when its size is under a pointer and its alignment is relaxed enough to fit
+/// within the inline storage.
 ///
 /// # Examples
 ///

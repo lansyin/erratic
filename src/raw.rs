@@ -1220,6 +1220,8 @@ impl RawVacant {
         }
     }
 
+    /// Derives a new error from this vacant while preserving the backtrace. This is the only way to
+    /// turn a vacant into an error when no state, context, or source is left to wrap.
     pub fn derive<S, C>(self, state: Option<S>, context: C) -> RawError<S>
     where
         S: Debug + Send + Sync + 'static,
