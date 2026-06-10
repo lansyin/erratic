@@ -107,7 +107,7 @@ where
 pub trait ContextFn {
     type Output: Context;
 
-    fn into_context(self) -> Self::Output;
+    fn call(self) -> Self::Output;
 }
 
 impl<T, R> ContextFn for T
@@ -117,7 +117,7 @@ where
 {
     type Output = R;
 
-    fn into_context(self) -> Self::Output {
+    fn call(self) -> Self::Output {
         self()
     }
 }
@@ -134,7 +134,7 @@ where
 {
     type Output = C;
 
-    fn into_context(self) -> Self::Output {
+    fn call(self) -> Self::Output {
         self.0
     }
 }

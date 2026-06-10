@@ -90,7 +90,7 @@ where
             _ => Error::<S>(RawError::new(
                 value.state,
                 value.err,
-                value.context_fn.into_context(),
+                value.context_fn.call(),
             )),
         }
     }
@@ -114,11 +114,7 @@ where
         match (has_error, has_context) {
             (false, false) => unreachable!(),
             (true, false) => value.err.into(),
-            _ => Error(RawError::new(
-                None,
-                value.err,
-                value.context_fn.into_context(),
-            )),
+            _ => Error(RawError::new(None, value.err, value.context_fn.call())),
         }
     }
 }
@@ -140,7 +136,7 @@ where
             return err.with_phantom_state();
         });
 
-        vacant.derive(state, value.context_fn.into_context())
+        vacant.derive(state, value.context_fn.call())
     }
 }
 
@@ -162,7 +158,7 @@ where
             _ => Error(RawError::new(
                 None,
                 value.err.erase(),
-                value.context_fn.into_context(),
+                value.context_fn.call(),
             )),
         }
     }
