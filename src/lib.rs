@@ -488,6 +488,7 @@ where
         }
     }
 
+    /// Converts to another state via a closure.
     pub fn map_state<F, S2>(self, f: F) -> Error<S2>
     where
         F: FnOnce(S) -> S2,
@@ -503,6 +504,7 @@ where
         vacant.derive(state, Contextless::new())
     }
 
+    /// Converts to another state via the `From` trait.
     pub fn lift_state<S2>(self) -> Error<S2>
     where
         S2: From<S> + State,
@@ -755,11 +757,13 @@ pub trait StateExt {
     where
         Self::S: Sized;
 
+    /// Converts to another state via a closure.
     fn map_state<F, S>(self, f: F) -> Self::Result<Self::T, Error<S>>
     where
         F: FnOnce(Self::S) -> S,
         S: State;
 
+    /// Converts to another state via the `From` trait.
     fn lift_state<S>(self) -> Self::Result<Self::T, Error<S>>
     where
         S: State,
