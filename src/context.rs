@@ -1,9 +1,11 @@
-//! Context traits and its placeholder for [`Builder`][crate::Builder].
+//! Context helpers and traits.
 use core::fmt::{self, Debug, Display};
 
 use alloc::string::String;
 
-/// A displayable value that can be attached to an [`Error`](crate::Error) as context.
+/// A trait for types that can be used as an error context.
+///
+/// Most types implement `Context::Repr = Self` via blanket impl.
 pub trait Context: Sized {
     const FALLBACK: Option<&'static str> = None;
 
@@ -38,32 +40,32 @@ impl Contextless {
 }
 
 impl Context for Contextless {
-    type Repr = Blank;
+    type Repr = Empty;
 
     fn try_into_repr(self) -> Option<Self::Repr> {
         None
     }
 }
 
-/// A zero-sized display placeholder for [`Contextless`].
+/// A zero-sized type used as the context storage for [`Contextless`].
 #[derive(Debug)]
-pub struct Blank {
+pub struct Empty {
     _priv: (),
 }
 
-impl Blank {
+impl Empty {
     pub(crate) const fn new() -> Self {
         Self { _priv: () }
     }
 }
 
-impl Display for Blank {
+impl Display for Empty {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Ok(())
     }
 }
 
-/// A marker trait for zero-sized types that represent a `&'static str` literal.
+/// A trait for types representing string literals.
 pub trait Literal {
     const LITERAL: &'static str;
 }
@@ -102,13 +104,13 @@ where
 }
 
 /// A trait for types that can [produce a context][crate::BuilderExt::with_context_fn].
-pub trait IntoContext {
+pub trait ContextFn {
     type Output: Context;
 
     fn into_context(self) -> Self::Output;
 }
 
-impl<T, R> IntoContext for T
+impl<T, R> ContextFn for T
 where
     T: FnOnce() -> R,
     R: Context,
@@ -120,13 +122,13 @@ where
     }
 }
 
-/// A wrapper that can be used as [`IntoContext`].
+/// A wrapper that wraps values as [`ContextFn`].
 #[derive(Debug)]
 pub struct Identity<C>(pub C)
 where
     C: Context;
 
-impl<C> IntoContext for Identity<C>
+impl<C> ContextFn for Identity<C>
 where
     C: Context,
 {

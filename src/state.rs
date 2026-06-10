@@ -1,4 +1,4 @@
-//! State helpers and the [`Stateless`] marker.
+//! State helpers and traits.
 use core::{convert::Infallible, fmt::Debug, marker::PhantomData, result};
 
 use crate::{
@@ -64,8 +64,9 @@ impl State for Stateless {
     type Repr = Infallible;
 }
 
-/// An [`Error<S>`] with its state temporarily extracted. It maintains a compatible
-/// storage layout to support reattachment.
+/// An [`Error<S>`] with its state temporarily extracted.
+///
+/// It maintains a compatible storage layout to support reattachment.
 pub struct Vacant<S>
 where
     S: State,

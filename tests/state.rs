@@ -1,18 +1,18 @@
 mod common;
 
 use common::{TestError, TestMessage, TestState};
-use erratic::*;
+use erratic::{builder::Builder, *};
 use std::assert_matches;
 
 #[test]
 fn builder_with_state_inlines_when_no_source() {
-    let err: Error<TestState> = Error::with_state(TestState::FileNotFound).build_error();
+    let err: Error<TestState> = Builder::with_state(TestState::FileNotFound).build_error();
     assert_matches!(err.state(), Some(TestState::FileNotFound));
 }
 
 #[test]
 fn builder_with_state_and_context_boxes() {
-    let err: Error<TestState> = Error::with_state(TestState::FileNotFound)
+    let err: Error<TestState> = Builder::with_state(TestState::FileNotFound)
         .with_context(TestMessage("data"))
         .build_error();
     assert_matches!(err.state(), Some(TestState::FileNotFound));

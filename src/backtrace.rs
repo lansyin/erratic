@@ -18,7 +18,7 @@ use core::{
 
 use crate::nae::Nae;
 
-pub struct WithBacktrace {
+pub(crate) struct WithBacktrace {
     err: Box<dyn error::Error + Send + Sync + 'static>,
     take_err: unsafe fn(Self, TypeId, NonNull<()>) -> Option<Self>,
     #[cfg(feature = "backtrace")]
@@ -198,7 +198,7 @@ impl error::Error for WithBacktrace {
     }
 }
 
-pub trait Backtrace: Debug + Display {}
+pub(crate) trait Backtrace: Debug + Display {}
 
 #[cfg(feature = "backtrace")]
 impl Backtrace for std::backtrace::Backtrace {}

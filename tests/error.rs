@@ -1,7 +1,7 @@
 mod common;
 
 use common::{TestError, TestMessage, TestState};
-use erratic::{nae::Nae, *};
+use erratic::{builder::Builder, nae::Nae, *};
 use std::{assert_matches, mem, result};
 
 #[test]
@@ -24,7 +24,7 @@ fn builder_with_error_builds_correctly() {
 fn builder_case1() {
     // error only (fast path)
     {
-        let err: Error = Error::with_error(TestError("oops")).into();
+        let err: Error = Builder::with_error(TestError("oops")).into();
         assert_eq!(err.chain().count(), 1);
         let (context, source) = err.into_parts::<TestMessage, TestError>();
         assert!(context.is_none());
@@ -32,13 +32,13 @@ fn builder_case1() {
     }
     // state only (fast path)
     {
-        let err: Error<TestState> = Error::with_state(TestState::FileNotFound).into();
+        let err: Error<TestState> = Builder::with_state(TestState::FileNotFound).into();
         assert_eq!(err.state().unwrap(), &TestState::FileNotFound);
         assert!(err.into_source().is_none());
     }
     // context only (fast path)
     {
-        let err: Error = Error::with_context(mkctx!("context only")).into();
+        let err: Error = Builder::with_context(mkctx!("context only")).into();
         let (context, source) = err.into_parts::<&'static str, TestError>();
         assert_matches!(context, Some("context only"));
         assert!(source.is_none());
@@ -66,7 +66,7 @@ fn builder_case2() {
 fn builder_case3() {
     // error only -> state (fast path)
     {
-        let err: Error<TestState> = Error::with_error(TestError("oops")).into();
+        let err: Error<TestState> = Builder::with_error(TestError("oops")).into();
         assert_eq!(err.chain().count(), 1);
         let (state, context, source) = err.into_parts::<TestMessage, TestError>();
         assert!(state.is_none());
@@ -75,7 +75,7 @@ fn builder_case3() {
     }
     // context only -> state (fast path)
     {
-        let err: Error<TestState> = Error::with_context("context only").into();
+        let err: Error<TestState> = Builder::with_context("context only").into();
         let (state, context, source) = err.into_parts::<&str, TestError>();
         assert!(state.is_none());
         assert_eq!(context, Some("context only"));
@@ -83,7 +83,7 @@ fn builder_case3() {
     }
     // error + context -> state (no fast path)
     {
-        let err: Error<TestState> = Error::with_error(TestError("oops"))
+        let err: Error<TestState> = Builder::with_error(TestError("oops"))
             .with_context(TestMessage("context"))
             .into();
         let (state, context, source) = err.into_parts::<TestMessage, TestError>();
@@ -99,7 +99,7 @@ fn builder_case4() {
     {
         let inner: Error<TestState> =
             mkerr!(error = TestError("inner"), state = TestState::FileNotFound);
-        let outer: Error<TestState> = Error::with_error(inner).into();
+        let outer: Error<TestState> = Builder::with_error(inner).into();
         assert_eq!(outer.chain().count(), 1);
         let (state, context, source) = outer.into_parts::<TestMessage, TestError>();
         assert_eq!(state, Some(TestState::FileNotFound));
@@ -110,7 +110,7 @@ fn builder_case4() {
     {
         let inner: Error<TestState> =
             mkerr!(error = TestError("inner"), state = TestState::FileNotFound);
-        let outer: Error<TestState> = Error::with_error(inner)
+        let outer: Error<TestState> = Builder::with_error(inner)
             .with_context(TestMessage("outer ctx"))
             .into();
         assert!(
@@ -134,7 +134,7 @@ fn builder_case6() {
     // erratic stateless -> state (fast path)
     {
         let inner = mkerr!(error = TestError("inner")).stateless();
-        let outer: Error<TestState> = Error::with_error(inner).into();
+        let outer: Error<TestState> = Builder::with_error(inner).into();
         assert_eq!(outer.chain().count(), 1);
         let (state, context, source) = outer.into_parts::<TestMessage, TestError>();
         assert!(state.is_none());
@@ -144,7 +144,7 @@ fn builder_case6() {
     // erratic source + context -> state (no fast path)
     {
         let inner = mkerr!(error = TestError("inner")).stateless();
-        let outer: Error<TestState> = Error::with_error(inner)
+        let outer: Error<TestState> = Builder::with_error(inner)
             .with_context(TestMessage("outer context"))
             .into();
         let (state, context, _source) = outer.into_parts::<TestMessage, TestError>();
@@ -338,7 +338,7 @@ fn eliminate_alloc() {
     {
         let inner = TestError("inner");
         let mid = mkerr!(error = inner).stateless().erase();
-        let outer = Error::with_error(mid).build_error();
+        let outer = Builder::with_error(mid).build_error();
         assert_eq!(outer.chain().count(), 1);
     }
 }

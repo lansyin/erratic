@@ -234,7 +234,7 @@ mod tests {
             context = "test",
             error = mkerr!("source").stateless().erase(),
         );
-        let err_from_builder = Error::with_error(mkerr!("source").stateless().erase())
+        let err_from_builder = Builder::with_error(mkerr!("source").stateless().erase())
             .with_state(42)
             .with_context("test")
             .build_error();
@@ -252,7 +252,7 @@ mod tests {
             error = mkerr!("source").stateless().erase(),
             state = 42,
         );
-        let err_from_builder = Error::with_error(mkerr!("source").stateless().erase())
+        let err_from_builder = Builder::with_error(mkerr!("source").stateless().erase())
             .with_state(42)
             .with_context("test")
             .build_error();
@@ -271,7 +271,7 @@ mod tests {
             state = 42,
             "hello {world}"
         );
-        let err_from_builder = Error::with_error(mkerr!("source").stateless().erase())
+        let err_from_builder = Builder::with_error(mkerr!("source").stateless().erase())
             .with_state(42)
             .with_context(format!("hello {world}"))
             .build_error();
@@ -349,7 +349,7 @@ mod tests {
         }
 
         // mkctx creates a closure; the closure is not called yet
-        let builder = Error::<Stateless>::with_error(mkerr!("oops").stateless().erase())
+        let builder = Builder::with_error(mkerr!("oops").stateless().erase())
             .with_context(mkctx!("{}", CallTracker));
 
         assert!(

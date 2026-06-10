@@ -182,6 +182,7 @@ mod rtti;
 #[doc(hidden)]
 pub mod macros;
 
+pub mod builder;
 pub mod context;
 pub mod nae;
 pub mod state;
@@ -195,7 +196,8 @@ use core::{
 };
 
 use crate::{
-    context::{Blank, Context, Contextless, Identity, IntoContext},
+    builder::Builder,
+    context::{Context, ContextFn, Contextless, Identity},
     nae::Nae,
     raw::RawError,
     state::{State, Stateless, Vacant},
@@ -209,94 +211,16 @@ pub struct Error<S = Stateless>(RawError<S::Repr>)
 where
     S: State + ?Sized;
 
-impl Error {
-    /// Starts building an `Error` from a source error.
-    pub fn with_error<E>(err: E) -> Builder<E, Stateless, Identity<Contextless>> {
-        Builder {
-            err,
-            state: None,
-            context_fn: Identity(Contextless::new()),
-        }
-    }
-
-    /// Starts building an `Error` with a typed state.
-    ///
-    /// The state is inlined when no source or context is attached.
-    pub fn with_state<S>(state: S) -> Builder<Nae, S, Identity<Contextless>>
-    where
-        S: State,
-    {
-        Builder {
-            err: Nae::new(),
-            state: Some(state.into_repr()),
-            context_fn: Identity(Contextless::new()),
-        }
-    }
-
-    /// Starts building an `Error` with a context.
-    pub fn with_context<C>(context: C) -> Builder<Nae, Stateless, Identity<C>>
-    where
-        C: Context,
-    {
-        Builder {
-            err: Nae::new(),
-            state: None,
-            context_fn: Identity(context),
-        }
-    }
-
-    /// Starts building an `Error` with a lazily evaluated context.
-    ///
-    /// The closure `context_fn` is called only when the error is materialized.
-    pub fn with_context_fn<F>(context_fn: F) -> Builder<Nae, Stateless, F>
-    where
-        F: IntoContext,
-    {
-        Builder {
-            err: Nae::new(),
-            state: None,
-            context_fn,
-        }
-    }
-
-    /// Extracts the context and source error.
-    ///
-    /// Returns `None` when the corresponding requested type does not match.
-    pub fn into_parts<C, E>(self) -> (Option<C>, Option<E>)
-    where
-        E: 'static,
-        C: 'static,
-    {
-        let (_state, context, source) = self.0.into_parts::<C, E>();
-        (context, source)
-    }
-
-    /// Helper for type inference when the state is not needed.
-    pub fn stateless(self) -> Self {
-        self
-    }
-
-    /// Converts to an error of another state without providing the state value.
-    pub fn with_phantom_state<S>(self) -> Error<S>
-    where
-        S: State + ?Sized,
-    {
-        Error(self.0.with_phantom_state())
-    }
-}
-
 impl<S> Error<S>
 where
     S: State + ?Sized,
 {
-    /// Returns an opaque [`Error`][error::Error].
-    pub fn erase(self) -> impl error::Error + Send + Sync + 'static {
-        ImplError::<S>(self.0)
-    }
-
-    /// Returns a reference to an opaque [`Error`][error::Error].
-    pub fn erase_ref(&self) -> &(impl error::Error + Send + Sync + 'static) {
-        &self.0
+    /// Creates an `Error` from a context.
+    pub fn from_context<C>(ctx: C) -> Self
+    where
+        C: Context,
+    {
+        Self(RawError::new(None, Nae::new(), ctx))
     }
 
     /// Creates an `Error` from any [`Error`][core::error::Error].
@@ -305,14 +229,6 @@ where
         E: error::Error + Send + Sync + 'static,
     {
         err.into()
-    }
-
-    /// Creates an `Error` from a context.
-    pub fn from_context<C>(ctx: C) -> Self
-    where
-        C: Context,
-    {
-        Self(RawError::new(None, Nae::new(), ctx))
     }
 
     /// Creates an `Error` from a boxed error.
@@ -368,38 +284,19 @@ where
         }
     }
 
+    /// Returns an opaque [`Error`][error::Error].
+    pub fn erase(self) -> impl error::Error + Send + Sync + 'static {
+        ImplError::<S>(self.0)
+    }
+
+    /// Returns a reference to an opaque [`Error`][error::Error].
+    pub fn erase_ref(&self) -> &(impl error::Error + Send + Sync + 'static) {
+        &self.0
+    }
+
     /// Returns a reference to the context, if present.
     pub fn context(&self) -> Option<&(dyn Display + Send + Sync + 'static)> {
         self.0.context()
-    }
-
-    /// Returns `true` if the wrapped source error is of type `E`.
-    pub fn has_source_of<E>(&self) -> bool
-    where
-        E: error::Error + 'static,
-    {
-        self.0.downcast_source_ref::<E>().is_some()
-    }
-
-    /// Returns a reference to the source error, if any.
-    pub fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        self.0.source().map(|v| v as _)
-    }
-
-    /// Attempts to downcast the wrapped source error to `E` by shared reference.
-    pub fn downcast_source_ref<E>(&self) -> Option<&E>
-    where
-        E: error::Error + 'static,
-    {
-        self.0.downcast_source_ref::<E>()
-    }
-
-    /// Attempts to downcast the wrapped source error to `E` by mutable reference.
-    pub fn downcast_source_mut<E>(&mut self) -> Option<&mut E>
-    where
-        E: error::Error + 'static,
-    {
-        self.0.downcast_source_mut::<E>()
     }
 
     /// Returns `true` if the attached context is of type `C`.
@@ -431,14 +328,43 @@ where
         self.0.downcast_context_mut::<C>()
     }
 
-    /// Consumes `self` and returns the boxed source error, if any.
-    pub fn into_source(self) -> Option<Box<dyn error::Error + Send + Sync + 'static>> {
-        self.0.into_source()
+    /// Returns a reference to the source error, if any.
+    pub fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        self.0.source().map(|v| v as _)
     }
 
     /// Iterates over the source error chain, starting from the immediate source.
     pub fn chain(&self) -> impl Iterator<Item = &(dyn error::Error + 'static)> {
         self.0.chain()
+    }
+
+    /// Consumes `self` and returns the boxed source error, if any.
+    pub fn into_source(self) -> Option<Box<dyn error::Error + Send + Sync + 'static>> {
+        self.0.into_source()
+    }
+
+    /// Returns `true` if the wrapped source error is of type `E`.
+    pub fn has_source_of<E>(&self) -> bool
+    where
+        E: error::Error + 'static,
+    {
+        self.0.downcast_source_ref::<E>().is_some()
+    }
+
+    /// Attempts to downcast the wrapped source error to `E` by shared reference.
+    pub fn downcast_source_ref<E>(&self) -> Option<&E>
+    where
+        E: error::Error + 'static,
+    {
+        self.0.downcast_source_ref::<E>()
+    }
+
+    /// Attempts to downcast the wrapped source error to `E` by mutable reference.
+    pub fn downcast_source_mut<E>(&mut self) -> Option<&mut E>
+    where
+        E: error::Error + 'static,
+    {
+        self.0.downcast_source_mut::<E>()
     }
 
     /// Returns the backtrace, if any.
@@ -465,18 +391,6 @@ where
     /// Returns a reference to the attached state.
     pub fn state(&self) -> Option<&S> {
         self.0.state().map(S::from_repr_ref)
-    }
-
-    /// Consumes `self` and returns the state, context, and error.
-    ///
-    /// Returns `None` when the requested types do not match.
-    pub fn into_parts<C, E>(self) -> (Option<S>, Option<C>, Option<E>)
-    where
-        E: 'static,
-        C: 'static,
-    {
-        let (state, context, error) = self.0.into_parts::<C, E>();
-        (state.map(S::from_repr), context, error)
     }
 
     /// Attempts to extract the state.  
@@ -509,6 +423,45 @@ where
         S2: From<S> + State,
     {
         self.map_state(S2::from)
+    }
+
+    /// Consumes `self` and returns the state, context, and error.
+    ///
+    /// Returns `None` when the requested types do not match.
+    pub fn into_parts<C, E>(self) -> (Option<S>, Option<C>, Option<E>)
+    where
+        E: 'static,
+        C: 'static,
+    {
+        let (state, context, error) = self.0.into_parts::<C, E>();
+        (state.map(S::from_repr), context, error)
+    }
+}
+
+impl Error {
+    /// Helper for type inference when the state is not needed.
+    pub fn stateless(self) -> Self {
+        self
+    }
+
+    /// Converts to an error of another state without providing the state value.
+    pub fn with_phantom_state<S>(self) -> Error<S>
+    where
+        S: State + ?Sized,
+    {
+        Error(self.0.with_phantom_state())
+    }
+
+    /// Extracts the context and source error.
+    ///
+    /// Returns `None` when the corresponding requested type does not match.
+    pub fn into_parts<C, E>(self) -> (Option<C>, Option<E>)
+    where
+        E: 'static,
+        C: 'static,
+    {
+        let (_state, context, source) = self.0.into_parts::<C, E>();
+        (context, source)
     }
 }
 
@@ -635,114 +588,6 @@ where
     }
 }
 
-/// An intermediate builder for constructing an [`Error`].
-#[derive(Debug)]
-pub struct Builder<E, S, F>
-where
-    F: IntoContext,
-    S: State + ?Sized,
-{
-    err: E,
-    state: Option<S::Repr>,
-    context_fn: F,
-}
-
-// Builder Case #1: generic error; state -> state
-impl<E, S, F> From<Builder<E, S, F>> for Error<S>
-where
-    F: IntoContext,
-    E: error::Error + Send + Sync + 'static,
-    S: State + ?Sized,
-{
-    fn from(value: Builder<E, S, F>) -> Self {
-        let has_state = !rtti::is_same_ty::<S, Stateless>();
-        let has_error = !rtti::is_same_ty::<E, Nae>();
-        let has_context = !rtti::is_same_ty::<<F::Output as Context>::Repr, Blank>();
-
-        match (has_state, has_error, has_context) {
-            (false, false, false) => unreachable!(),
-            (false, true, false) => value.err.into(),
-            _ => Error::<S>(RawError::new(
-                value.state,
-                value.err,
-                value.context_fn.into_context(),
-            )),
-        }
-    }
-}
-
-// Builder Case #2: generic error; state -> stateless
-// Removed as it has no meaningful use case.
-// Signature: impl<E, S, F> From<Builder<E, S, F>> for Error
-
-// Builder Case #3: generic error; stateless -> state
-impl<E, S, F> From<Builder<E, Stateless, F>> for Error<S>
-where
-    F: IntoContext,
-    E: error::Error + Send + Sync + 'static,
-    S: State,
-{
-    fn from(value: Builder<E, Stateless, F>) -> Self {
-        let has_error = !rtti::is_same_ty::<E, Nae>();
-        let has_context = !rtti::is_same_ty::<<F::Output as Context>::Repr, Blank>();
-
-        match (has_error, has_context) {
-            (false, false) => unreachable!(),
-            (true, false) => value.err.into(),
-            _ => Error(RawError::new(
-                None,
-                value.err,
-                value.context_fn.into_context(),
-            )),
-        }
-    }
-}
-
-// Builder Case #4: erratic error; state+stateless -> state
-impl<S, F> From<Builder<Error<S>, Stateless, F>> for Error<S>
-where
-    F: IntoContext,
-    S: State,
-{
-    fn from(value: Builder<Error<S>, Stateless, F>) -> Self {
-        let has_context = !rtti::is_same_ty::<<F::Output as Context>::Repr, Blank>();
-
-        if !has_context {
-            return value.err;
-        }
-
-        let Ok((state, vacant)) = match_else!(value.err.extract_state(), Err(err) => {
-            return err.with_phantom_state();
-        });
-
-        vacant.derive(state, value.context_fn.into_context())
-    }
-}
-
-// Builder Case #5: erratic error; state -> stateless
-// Removed as it has no meaningful use case.
-// Signature: impl<S1, S, F, L> From<Builder<Error<S1>, S, F, L>> for Error
-
-// Builder Case #6: erratic error; stateless+stateless -> state
-impl<S, F> From<Builder<Error<Stateless>, Stateless, F>> for Error<S>
-where
-    F: IntoContext,
-    S: State + ?Sized,
-{
-    fn from(value: Builder<Error<Stateless>, Stateless, F>) -> Self {
-        let has_context = !rtti::is_same_ty::<<F::Output as Context>::Repr, Blank>();
-
-        match has_context {
-            false => value.err.with_phantom_state(),
-            _ => Error(RawError::new(
-                None,
-                value.err.erase(),
-                value.context_fn.into_context(),
-            )),
-        }
-    }
-}
-
 /// Extension trait for working with the state.
 pub trait StateExt {
     type T;
@@ -834,9 +679,9 @@ pub trait BuilderExt: Sized {
 
     type E;
     type S: State + ?Sized;
-    type F: IntoContext;
+    type F: ContextFn;
 
-    /// Attaches any value that implements [`Display`] as the error context.
+    /// Attaches any value that implements [`Context`] as the error context.
     ///
     /// # Examples
     ///
@@ -847,9 +692,8 @@ pub trait BuilderExt: Sized {
     /// # let stream_id = 1;
     /// # let filename = "";
     /// foo().with_context("file not found")?;
-    /// foo().with_context(mkctx!("file not found"))?;
     /// foo().with_context(filename.to_string())?;
-    /// foo().with_context(mkctx!("failed to read from stream {stream_id}"))?;
+    /// foo().with_context(mkctx!("cannot read {stream_id}"))?;
     /// # Ok(())
     /// # }
     /// ```
@@ -869,40 +713,7 @@ pub trait BuilderExt: Sized {
     /// Attaches a lazily-evaluated context.
     fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
     where
-        F: IntoContext;
-}
-
-impl<T, E1> BuilderExt for result::Result<T, E1>
-where
-    E1: error::Error + Send + Sync + 'static,
-{
-    type Result<E> = result::Result<T, E>;
-
-    type E = E1;
-    type S = Stateless;
-    type F = Identity<Contextless>;
-
-    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F>>
-    where
-        S: State + Sized,
-    {
-        self.map_err(|err| Builder {
-            err,
-            state: Some(state.into_repr()),
-            context_fn: Identity(Contextless::new()),
-        })
-    }
-
-    fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
-    where
-        F: IntoContext,
-    {
-        self.map_err(|err| Builder {
-            err,
-            state: None,
-            context_fn,
-        })
-    }
+        F: ContextFn;
 }
 
 impl<T, S1> BuilderExt for result::Result<T, Error<S1>>
@@ -928,108 +739,10 @@ where
 
     fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
     where
-        F: IntoContext,
+        F: ContextFn,
     {
         self.map_err(|err| Builder {
             err,
-            state: None,
-            context_fn,
-        })
-    }
-}
-
-impl<E1, S1, F1> BuilderExt for Builder<E1, S1, F1>
-where
-    F1: IntoContext,
-    S1: State + ?Sized,
-{
-    type Result<E> = E;
-
-    type E = E1;
-    type S = S1;
-    type F = F1;
-
-    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F>>
-    where
-        S: State,
-    {
-        Builder {
-            state: Some(state.into_repr()),
-            err: self.err,
-            context_fn: self.context_fn,
-        }
-    }
-
-    fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
-    where
-        F: IntoContext,
-    {
-        Builder {
-            err: self.err,
-            state: self.state,
-            context_fn,
-        }
-    }
-}
-
-impl<T, E1, S1, F1> BuilderExt for result::Result<T, Builder<E1, S1, F1>>
-where
-    F1: IntoContext,
-    S1: State + ?Sized,
-{
-    type Result<E> = result::Result<T, E>;
-
-    type E = E1;
-    type S = S1;
-    type F = F1;
-
-    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F>>
-    where
-        S: State,
-    {
-        self.map_err(|err| Builder {
-            state: Some(state.into_repr()),
-            err: err.err,
-            context_fn: err.context_fn,
-        })
-    }
-
-    fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
-    where
-        F: IntoContext,
-    {
-        self.map_err(|err| Builder {
-            err: err.err,
-            state: err.state,
-            context_fn,
-        })
-    }
-}
-
-impl<T> BuilderExt for Option<T> {
-    type Result<E> = result::Result<T, E>;
-
-    type E = Nae;
-    type S = Stateless;
-    type F = Identity<Contextless>;
-
-    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F>>
-    where
-        S: State,
-    {
-        self.ok_or(Builder {
-            state: Some(state.into_repr()),
-            err: Nae::new(),
-            context_fn: Identity(Contextless::new()),
-        })
-    }
-
-    fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
-    where
-        F: IntoContext,
-    {
-        self.ok_or(Builder {
-            err: Nae::new(),
             state: None,
             context_fn,
         })
@@ -1044,7 +757,7 @@ pub trait ErrorExt: Sized {
     /// Materializes the final [`Error<Self::S>`].
     fn build_error(self) -> Self::Result<Error<Self::S>>;
 
-    /// Materializes and then erases the state, returning an opaque `impl Error`.
+    /// Materializes and then erases the error, returning an opaque `impl Error`.
     fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>;
 }
 
@@ -1061,90 +774,6 @@ where
 
     fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
         self.erase()
-    }
-}
-
-impl<E1, S, F> ErrorExt for Builder<E1, S, F>
-where
-    E1: error::Error + Send + Sync + 'static,
-    F: IntoContext,
-    S: State + ?Sized,
-{
-    type Result<E> = E;
-    type S = S;
-
-    fn build_error(self) -> Self::Result<Error<Self::S>> {
-        self.into()
-    }
-
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
-        self.build_error().erase()
-    }
-}
-
-impl<S1, S, F> ErrorExt for Builder<Error<S1>, S, F>
-where
-    S1: State + ?Sized,
-    F: IntoContext,
-    S: State + ?Sized,
-{
-    type Result<E> = E;
-    type S = S;
-
-    fn build_error(self) -> Self::Result<Error<Self::S>> {
-        Builder {
-            err: self.err.erase(),
-            state: self.state,
-            context_fn: self.context_fn,
-        }
-        .build_error()
-    }
-
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
-        self.build_error().erase()
-    }
-}
-
-impl<T, E1, S, F> ErrorExt for result::Result<T, Builder<E1, S, F>>
-where
-    E1: error::Error + Send + Sync + 'static,
-    F: IntoContext,
-    S: State + ?Sized,
-{
-    type Result<E> = result::Result<T, E>;
-    type S = S;
-
-    fn build_error(self) -> Self::Result<Error<Self::S>> {
-        self.map_err(Error::from)
-    }
-
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
-        self.build_error().map_err(|err| err.erase())
-    }
-}
-
-impl<T, S1, S, F> ErrorExt for result::Result<T, Builder<Error<S1>, S, F>>
-where
-    S1: State + ?Sized,
-    F: IntoContext,
-    S: State + ?Sized,
-{
-    type Result<E> = result::Result<T, E>;
-    type S = S;
-
-    fn build_error(self) -> Self::Result<Error<Self::S>> {
-        self.map_err(|err| {
-            Builder {
-                err: err.err.erase(),
-                state: err.state,
-                context_fn: err.context_fn,
-            }
-            .build_error()
-        })
-    }
-
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
-        self.build_error().map_err(|err| err.erase())
     }
 }
 

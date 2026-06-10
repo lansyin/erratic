@@ -11,7 +11,7 @@ use core::{
 
 use crate::{
     backtrace::WithBacktrace,
-    context::{self, Blank, Context},
+    context::{self, Empty, Context},
     match_else,
     nae::Nae,
     ptr::{Align4, Align4Own, Align4PtrCompat, Align4Ref, Metadata, Mut, Ref},
@@ -185,13 +185,13 @@ impl<S> RawError<S> {
             Ok(source) => match (context, context_fallback) {
                 (Some(context), _) => Self::new_boxed(state, source, context),
                 (None, Some(context)) => Self::new_boxed(state, source, context),
-                (None, None) => Self::new_boxed(state, source, Blank::new()),
+                (None, None) => Self::new_boxed(state, source, Empty::new()),
             },
             Err(source) => {
                 let mut state = state;
                 let has_state = state.is_some();
                 let has_source = !rtti::is_same_ty::<E, Nae>();
-                let has_context = !rtti::is_same_ty::<C::Repr, Blank>();
+                let has_context = !rtti::is_same_ty::<C::Repr, Empty>();
 
                 match (has_state, has_context, has_source) {
                     (true, false, false) => {
@@ -212,7 +212,7 @@ impl<S> RawError<S> {
                 match (context, context_fallback) {
                     (Some(context), _) => Self::new_boxed(state, source, context),
                     (None, Some(context)) => Self::new_boxed(state, source, context),
-                    (None, None) => Self::new_boxed(state, source, Blank::new()),
+                    (None, None) => Self::new_boxed(state, source, Empty::new()),
                 }
             }
         }
@@ -917,7 +917,7 @@ where
                 _ => {}
             }
         }
-        if !rtti::is_same_ty::<C, Blank>() && TypeId::of::<C>() == context_ty {
+        if !rtti::is_same_ty::<C, Empty>() && TypeId::of::<C>() == context_ty {
             // Safety: The caller guarantees `context_dst` points to a valid `Option<C>`.
             let dst = unsafe { context_dst.cast::<Option<C>>().as_mut() };
             dst.replace(context);
@@ -1071,7 +1071,7 @@ where
     unsafe fn context(this: Ref<'_, DynBody>) -> Option<&(dyn Display + Send + Sync + 'static)> {
         let this = unsafe { this.cast::<Self>().deref() };
 
-        if rtti::is_same_ty::<C, Blank>() {
+        if rtti::is_same_ty::<C, Empty>() {
             None
         } else {
             Some(&this.context as &(dyn Display + Send + Sync + 'static))
@@ -1089,7 +1089,7 @@ where
     unsafe fn downcast_context_ref(this: Ref<'_, DynBody>, ty: TypeId, dst: NonNull<()>) {
         let this = unsafe { this.cast::<Self>().deref() };
 
-        if !rtti::is_same_ty::<C, Blank>() && TypeId::of::<C>() == ty {
+        if !rtti::is_same_ty::<C, Empty>() && TypeId::of::<C>() == ty {
             let dst = unsafe { dst.cast::<Option<&C>>().as_mut() };
             *dst = Some(&this.context);
         }
@@ -1106,7 +1106,7 @@ where
     unsafe fn downcast_context_mut(this: Mut<'_, DynBody>, ty: TypeId, dst: NonNull<()>) {
         let this = unsafe { this.cast::<Self>().deref_mut() };
 
-        if !rtti::is_same_ty::<C, Blank>() && TypeId::of::<C>() == ty {
+        if !rtti::is_same_ty::<C, Empty>() && TypeId::of::<C>() == ty {
             let dst = unsafe { dst.cast::<Option<&mut C>>().as_mut() };
             *dst = Some(&mut this.context);
         }
@@ -1137,7 +1137,7 @@ where
         render::format_debug(
             f,
             self.try_get_state(),
-            (!rtti::is_same_ty::<C, Blank>()).then_some(&self.context),
+            (!rtti::is_same_ty::<C, Empty>()).then_some(&self.context),
             self.source(),
             WithBacktrace::search_debug(|| self.source()),
         )
@@ -1154,7 +1154,7 @@ where
         render::format_display(
             f,
             self.try_get_state(),
-            (!rtti::is_same_ty::<C, Blank>()).then_some(&self.context),
+            (!rtti::is_same_ty::<C, Empty>()).then_some(&self.context),
             self.source(),
             WithBacktrace::search_display(|| self.source()),
         )
@@ -1346,7 +1346,7 @@ mod tests {
     #[cfg(not(feature = "backtrace"))]
     #[test]
     fn kind_discriminates_boxed() {
-        let err = RawError::new_boxed(None::<Infallible>, TestError("oops"), Blank::new());
+        let err = RawError::new_boxed(None::<Infallible>, TestError("oops"), Empty::new());
         assert_eq!(err.kind(), RawError::<()>::KIND_BOXED);
     }
 
@@ -1389,21 +1389,21 @@ mod tests {
 
     #[test]
     fn boxed_variant_source() {
-        let err = RawError::new_boxed(None::<Infallible>, TestError("oops"), Blank::new());
+        let err = RawError::new_boxed(None::<Infallible>, TestError("oops"), Empty::new());
         let src = err.source();
         assert_eq!(src.unwrap().to_string(), "oops");
     }
 
     #[test]
     fn boxed_variant_downcast_source() {
-        let err = RawError::new_boxed(None::<Infallible>, TestError("oops"), Blank::new());
+        let err = RawError::new_boxed(None::<Infallible>, TestError("oops"), Empty::new());
         let downcasted = err.downcast_source_ref::<TestError>();
         assert_matches!(downcasted, Some(TestError("oops")));
     }
 
     #[test]
     fn boxed_variant_downcast_source_wrong_type() {
-        let err = RawError::new_boxed(None::<Infallible>, TestError("oops"), Blank::new());
+        let err = RawError::new_boxed(None::<Infallible>, TestError("oops"), Empty::new());
         let downcasted = err.downcast_source_ref::<Nae>();
         assert!(downcasted.is_none());
     }
@@ -1422,7 +1422,7 @@ mod tests {
     #[test]
     fn boxed_variant_nae_source_is_none() {
         // When source is `Nae`, `.source()` should return `None`.
-        let err = RawError::new_boxed(Some(42u32), Nae::new(), Blank::new());
+        let err = RawError::new_boxed(Some(42u32), Nae::new(), Empty::new());
         assert!(err.source().is_none());
         assert_matches!(err.state(), Some(42));
     }
@@ -1431,14 +1431,14 @@ mod tests {
 
     #[test]
     fn boxed_variant_into_source_returns_boxed_error() {
-        let err = RawError::new_boxed(None::<Infallible>, TestError("oops"), Blank::new());
+        let err = RawError::new_boxed(None::<Infallible>, TestError("oops"), Empty::new());
         let src = err.into_source();
         assert_eq!(src.unwrap().to_string(), "oops");
     }
 
     #[test]
     fn boxed_variant_into_source_nae_returns_none() {
-        let err = RawError::new_boxed(None::<Infallible>, Nae::new(), Blank::new());
+        let err = RawError::new_boxed(None::<Infallible>, Nae::new(), Empty::new());
         assert!(err.into_source().is_none());
     }
 
@@ -1459,8 +1459,8 @@ mod tests {
 
     #[test]
     fn boxed_variant_into_parts_context_downcasts() {
-        let err = RawError::new_boxed(None::<Infallible>, TestError("oops"), Blank::new());
-        let (_, context, _) = err.into_parts::<Blank, String>();
+        let err = RawError::new_boxed(None::<Infallible>, TestError("oops"), Empty::new());
+        let (_, context, _) = err.into_parts::<Empty, String>();
         assert!(context.is_none());
     }
 
@@ -1476,7 +1476,7 @@ mod tests {
     #[test]
     fn inline_variant_into_parts() {
         let err = RawError::try_new_inline(42u16).unwrap();
-        let (state, context, source) = err.into_parts::<Blank, TestError>();
+        let (state, context, source) = err.into_parts::<Empty, TestError>();
         assert!(source.is_none());
         assert!(context.is_none());
         assert_matches!(state, Some(42));
@@ -1509,7 +1509,7 @@ mod tests {
         impl error::Error for DropWatch {}
 
         {
-            let _err = RawError::new_boxed(None::<Infallible>, DropWatch, Blank::new());
+            let _err = RawError::new_boxed(None::<Infallible>, DropWatch, Empty::new());
         } // drop here
         assert!(DROPPED.load(Ordering::SeqCst));
     }

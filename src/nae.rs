@@ -4,8 +4,9 @@ use core::{
     fmt::{self, Display},
 };
 
-/// Not an error, a zero-sized error placeholder for [`Builder`][crate::Builder]. It is consumed
-/// during materialization and never appears in the error chain or source.
+/// Not an error, a zero-sized error placeholder for [`Builder`][crate::Builder].
+///
+/// It is consumed during materialization and never appears in the error chain or source.
 #[derive(Debug)]
 pub struct Nae {
     _private: (),
