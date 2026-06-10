@@ -2,7 +2,7 @@ mod common;
 
 use common::{TestError, TestMessage, TestState};
 use erratic::{builder::Builder, nae::Nae, *};
-use std::{assert_matches, mem, result};
+use std::{mem, result};
 
 #[test]
 fn from_error_round_trip() {

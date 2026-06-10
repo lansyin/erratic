@@ -2,7 +2,6 @@ mod common;
 
 use common::{TestError, TestMessage, TestState};
 use erratic::{builder::Builder, *};
-use std::assert_matches;
 
 #[test]
 fn builder_with_state_inlines_when_no_source() {

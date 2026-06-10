@@ -30,3 +30,11 @@ impl Display for TestMessage {
         Display::fmt(self.0, f)
     }
 }
+
+// Boilerplate to make assert_matches! work on Rust versions prior to 1.96.
+#[macro_export(local_inner_macros)]
+macro_rules! assert_matches {
+    ($($args:tt)*) => {
+        core::assert!(core::matches!($($args)*))
+    };
+}

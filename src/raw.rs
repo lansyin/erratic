@@ -11,7 +11,7 @@ use core::{
 
 use crate::{
     backtrace::WithBacktrace,
-    context::{self, Empty, Context},
+    context::{self, Context, Empty},
     match_else,
     nae::Nae,
     ptr::{Align4, Align4Own, Align4PtrCompat, Align4Ref, Metadata, Mut, Ref},
@@ -129,6 +129,8 @@ impl RawError<Infallible> {
     where
         C: Context,
     {
+        // Note: Explicitly check the fallback context first as we CANNOT return in the const block.
+        #[allow(clippy::question_mark)]
         if C::FALLBACK.is_none() {
             return None;
         }
@@ -334,7 +336,7 @@ impl<S> RawError<S> {
                 (vtable.downcast_context_ref)(
                     body.borrow(),
                     TypeId::of::<C>(),
-                    NonNull::from_mut(&mut result).cast(),
+                    NonNull::from(&mut result).cast(),
                 );
                 result
             },
@@ -356,7 +358,7 @@ impl<S> RawError<S> {
                 (vtable.downcast_context_mut)(
                     body.borrow_mut(),
                     TypeId::of::<C>(),
-                    NonNull::from_mut(&mut result).cast(),
+                    NonNull::from(&mut result).cast(),
                 );
                 result
             },
@@ -378,7 +380,7 @@ impl<S> RawError<S> {
                 (vtable.state)(
                     body.borrow(),
                     TypeId::of::<S>(),
-                    NonNull::from_mut(&mut state).cast(),
+                    NonNull::from(&mut state).cast(),
                 );
 
                 state
@@ -429,11 +431,11 @@ impl<S> RawError<S> {
                 (vtable.into_parts)(
                     body,
                     TypeId::of::<E>(),
-                    NonNull::from_mut(&mut err).cast(),
+                    NonNull::from(&mut err).cast(),
                     TypeId::of::<C>(),
-                    NonNull::from_mut(&mut context).cast(),
+                    NonNull::from(&mut context).cast(),
                     TypeId::of::<S>(),
-                    NonNull::from_mut(&mut state).cast(),
+                    NonNull::from(&mut state).cast(),
                 );
 
                 (state, context, err)
@@ -455,7 +457,7 @@ impl<S> RawError<S> {
                     let re = (vt.extract_state)(
                         body,
                         TypeId::of::<S>(),
-                        NonNull::from_mut(&mut state_dst).cast(),
+                        NonNull::from(&mut state_dst).cast(),
                     );
 
                     match (state_dst, re) {
@@ -487,7 +489,7 @@ impl<S> RawError<S> {
                     (vtable.try_set_state)(
                         body.borrow_mut(),
                         TypeId::of::<S>(),
-                        NonNull::from_mut(&mut state).cast(),
+                        NonNull::from(&mut state).cast(),
                     )
                 };
 
@@ -875,10 +877,7 @@ where
 
         let (_, source, ..) = this.destruct();
 
-        match rtti::concretize::<_, WithBacktrace>(source) {
-            Ok(with_backtrace) => Some(with_backtrace),
-            Err(_source) => None,
-        }
+        rtti::concretize::<_, WithBacktrace>(source).ok()
     }
 
     /// Decomposes the boxed body: extracts source and context into caller-provided
@@ -1195,7 +1194,7 @@ impl RawVacant {
             (vt.try_set_state)(
                 body.borrow_mut(),
                 TypeId::of::<S>(),
-                NonNull::from_mut(&mut state_src).cast(),
+                NonNull::from(&mut state_src).cast(),
             );
 
             if let Some(state) = state_src {

@@ -38,33 +38,33 @@ impl WithBacktrace {
     where
         E: error::Error + Send + Sync + 'static,
     {
-        cfg_select! {
-            feature = "backtrace" => {
-                if DISABLED.load(Ordering::Relaxed) {
-                    return Err(err);
-                }
-                match Self::search(|| err.source()) {
-                    Some(_) => Err(err),
-                    None => {
-                        use std::backtrace::{Backtrace, BacktraceStatus};
+        #[cfg(feature = "backtrace")]
+        {
+            if DISABLED.load(Ordering::Relaxed) {
+                return Err(err);
+            }
+            match Self::search(|| err.source()) {
+                Some(_) => Err(err),
+                None => {
+                    use std::backtrace::{Backtrace, BacktraceStatus};
 
-                        let backtrace = Backtrace::capture();
-                        match backtrace.status() {
-                            BacktraceStatus::Captured => Ok(WithBacktrace {
-                                err: Box::new(err),
-                                take_err: Self::take_source_::<E>,
-                                backtrace,
-                            }),
-                            _ => {
-                                DISABLED.store(true, Ordering::Relaxed);
-                                Err(err)
-                            },
+                    let backtrace = Backtrace::capture();
+                    match backtrace.status() {
+                        BacktraceStatus::Captured => Ok(WithBacktrace {
+                            err: Box::new(err),
+                            take_err: Self::take_source_::<E>,
+                            backtrace,
+                        }),
+                        _ => {
+                            DISABLED.store(true, Ordering::Relaxed);
+                            Err(err)
                         }
                     }
                 }
             }
-            _ => Err::<Self, _>(err),
         }
+        #[cfg(not(feature = "backtrace"))]
+        Err::<Self, _>(err)
     }
 
     #[cfg(feature = "backtrace")]
@@ -93,31 +93,39 @@ impl WithBacktrace {
     }
 
     pub fn searching() -> bool {
-        cfg_select! {
-            feature = "backtrace" => SEARCHING.get(),
-            _ => false,
+        #[cfg(feature = "backtrace")]
+        {
+            SEARCHING.get()
+        }
+        #[cfg(not(feature = "backtrace"))]
+        {
+            false
         }
     }
 
     pub fn search_debug<'a>(
         #[allow(unused_variables)] f: impl FnOnce() -> Option<&'a (dyn error::Error + 'static)>,
     ) -> Option<&'a dyn Backtrace> {
-        cfg_select! {
-            feature = "backtrace" => {
-                Self::search(f).map(|b| b as _)
-            }
-            _ => None,
+        #[cfg(feature = "backtrace")]
+        {
+            Self::search(f).map(|b| b as _)
+        }
+        #[cfg(not(feature = "backtrace"))]
+        {
+            None
         }
     }
 
     pub fn search_display<'a>(
         #[allow(unused_variables)] f: impl FnOnce() -> Option<&'a (dyn error::Error + 'static)>,
     ) -> Option<&'a dyn Backtrace> {
-        cfg_select! {
-            feature = "backtrace" => {
-                Self::search(f).map(|b| b as _)
-            }
-            _ => None,
+        #[cfg(feature = "backtrace")]
+        {
+            Self::search(f).map(|b| b as _)
+        }
+        #[cfg(not(feature = "backtrace"))]
+        {
+            None
         }
     }
 

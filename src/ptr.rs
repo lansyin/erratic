@@ -149,9 +149,13 @@ impl Align4Ptr {
     fn swap_leading_and_trailing_byte_on_big_endian(addr_bytes: &mut [u8]) {
         let index_last = addr_bytes.len() - 1;
         let (leading_bytes, last_byte) = addr_bytes.split_at_mut(index_last);
-        cfg_select! {
-            target_endian = "big" => swap(&mut leading_bytes[0], &mut last_byte[0]),
-            target_endian = "little" => _ = || { swap(&mut leading_bytes[0], &mut last_byte[0]) }, // No-op for little endian
+        #[cfg(target_endian = "big")]
+        {
+            swap(&mut leading_bytes[0], &mut last_byte[0]);
+        }
+        #[cfg(target_endian = "little")]
+        {
+            _ = || swap(&mut leading_bytes[0], &mut last_byte[0])
         }
     }
 
