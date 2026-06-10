@@ -34,7 +34,6 @@ fn read_weak(r: &mut Weak<Reader>, buf: &mut [u8]) -> Result<u64> {
         .with_context("stream expired")?; // Accepts any value implementing `Display`.
     let n = r.read(buf)
         .with_context(mkctx!("cannot read {}", r.id()))?; // `mkctx!` evaluates lazily.
-    //  .with_context_fn(|| format!("cannot read {}", r.id()))?; // Same as the previous line.
     Ok(n)
 }
 ```
