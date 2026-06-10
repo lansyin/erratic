@@ -5,6 +5,7 @@
 //!
 //! In most cases, `Error` can serve as a drop-in replacement for `Box<dyn Error>`.
 //! Compared to the latter, it occupies only 1 usize, making the happy path faster.
+//!
 //! ```
 //! # use std::{fs::File, io::Write};
 //! fn say_hi(filename: &str) -> erratic::Result<()> {

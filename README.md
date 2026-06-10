@@ -11,6 +11,7 @@ enabling applications to handle errors uniformly across different scenarios.
 
 In most cases, `Error` can serve as a drop-in replacement for `Box<dyn Error>`.
 Compared to the latter, it occupies only 1 usize, making the happy path faster.
+
 ```rust
 fn say_hi(filename: &str) -> erratic::Result<()> {
     File::open(filename)?.write_all(b"Hello, World!")?;
