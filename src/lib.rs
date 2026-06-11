@@ -192,7 +192,7 @@ use alloc::boxed::Box;
 use core::{
     error,
     fmt::{self, Debug, Display},
-    ops::Deref,
+    ops::{Deref, DerefMut},
     result,
 };
 
@@ -474,6 +474,15 @@ where
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl<S> DerefMut for Error<S>
+where
+    S: State + ?Sized,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 

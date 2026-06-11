@@ -1,6 +1,7 @@
 mod common;
 
 use common::{TestError, TestMessage, TestState};
+use core::error;
 use erratic::{builder::Builder, nae::Nae, *};
 use std::{mem, result};
 
@@ -341,4 +342,11 @@ fn eliminate_alloc() {
         let outer = Builder::with_error(mid).build_error();
         assert_eq!(outer.chain().count(), 1);
     }
+}
+
+#[test]
+fn deref_and_deref_mut() {
+    let mut err = mkerr!("oops").stateless();
+    let _: &dyn error::Error = &*err;
+    let _: &mut dyn error::Error = &mut *err;
 }
