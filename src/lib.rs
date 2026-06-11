@@ -492,6 +492,7 @@ where
     S: State + ?Sized,
 {
     fn from(err: E) -> Self {
+        // TODO: Detect `ImplError<X>` for any X once Error::provide gets stabilized.
         let Err(err) = match_else!(rtti::concretize::<E, ImplError<S>>(err),
             Ok(err_unit) => return Error(err_unit.0),
         );

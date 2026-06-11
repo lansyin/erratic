@@ -18,6 +18,7 @@ use core::{
 
 use crate::nae::Nae;
 
+// TODO: Remove this workaround once Error::provide gets stabilized.
 pub(crate) struct WithBacktrace {
     err: Box<dyn error::Error + Send + Sync + 'static>,
     take_err: unsafe fn(Self, TypeId, NonNull<()>) -> Option<Self>,
