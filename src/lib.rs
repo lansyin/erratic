@@ -200,7 +200,7 @@ use crate::{
     builder::Builder,
     context::{Context, ContextFn, Contextless, Identity},
     nae::Nae,
-    raw::RawError,
+    raw::{ErasedRawError, RawError},
     state::{State, Stateless, Vacant},
 };
 
@@ -287,7 +287,7 @@ where
 
     /// Returns an opaque [`Error`][error::Error].
     pub fn erase(self) -> impl error::Error + Send + Sync + 'static {
-        ImplError::<S>(self.0)
+        self.0.erase()
     }
 
     /// Returns a reference to an opaque [`Error`][error::Error].
@@ -492,15 +492,13 @@ where
     S: State + ?Sized,
 {
     fn from(err: E) -> Self {
-        // TODO: Detect `ImplError<X>` for any X once Error::provide gets stabilized.
-        let Err(err) = match_else!(rtti::concretize::<E, ImplError<S>>(err),
-            Ok(err_unit) => return Error(err_unit.0),
-        );
-        let Err(err) = match_else!(rtti::concretize::<E, ImplError<Stateless>>(err),
-            Ok(err_unit) => return Error(err_unit.0.with_phantom_state()),
-        );
-
-        Error(RawError::new(None, err, Contextless::new()))
+        match rtti::concretize::<E, ErasedRawError>(err) {
+            Ok(erased) => match erased.try_into_stateless() {
+                Ok(stateless) => Error(stateless.with_phantom_state()),
+                Err(erased) => Error(RawError::new(None, erased, Contextless::new())),
+            },
+            Err(err) => Error(RawError::new(None, err, Contextless::new())),
+        }
     }
 }
 
@@ -564,38 +562,6 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Display::fmt(&self.0, f)
-    }
-}
-
-#[repr(transparent)]
-struct ImplError<S = Stateless>(RawError<S::Repr>)
-where
-    S: State + ?Sized;
-
-impl<S> Debug for ImplError<S>
-where
-    S: State + ?Sized,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Debug::fmt(&self.0, f)
-    }
-}
-
-impl<S> Display for ImplError<S>
-where
-    S: State + ?Sized,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0, f)
-    }
-}
-
-impl<S> error::Error for ImplError<S>
-where
-    S: State + ?Sized,
-{
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        self.0.source().map(|s| s as _)
     }
 }
 

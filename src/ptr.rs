@@ -31,7 +31,9 @@ impl Metadata {
     }
 }
 
-// An inline pointer-sized storage that having a metadata at the first byte.
+/// An inline pointer-sized storage that having a metadata at the first byte.
+///
+/// This type is guaranteed to be the same layout as `usize`.
 // Note: The repr/align attribute is required as it is used to compute the offset
 // that satisfies the alignment of T.
 #[cfg_attr(target_pointer_width = "16", repr(C, align(2)))]
@@ -42,6 +44,17 @@ pub struct Align4PtrCompat<T> {
     store: MaybeUninit<[u8; usize::BITS as usize / 8 - 1]>,
     _marker: PhantomData<T>,
 }
+
+const _: () = const {
+    assert!(
+        mem::size_of::<Align4PtrCompat::<()>>() == mem::size_of::<usize>(),
+        "`Align4PtrCompat::<T>()` should be the same size as `usize`"
+    );
+    assert!(
+        mem::align_of::<Align4PtrCompat::<()>>() == mem::align_of::<usize>(),
+        "`Align4PtrCompat::<T>()` should be the same alignment as `usize`"
+    );
+};
 
 impl<T> Align4PtrCompat<T> {
     const OFFSET_IN_STORE: Option<isize> = 'ret: {
@@ -69,7 +82,7 @@ impl<T> Align4PtrCompat<T> {
         None
     };
 
-    pub fn new(meta: Metadata, value: T) -> result::Result<Self, T> {
+    pub const fn new(meta: Metadata, value: T) -> result::Result<Self, T> {
         let Some(offset) = Self::OFFSET_IN_STORE else {
             return Err(value);
         };
@@ -129,6 +142,34 @@ impl<T> Align4PtrCompat<T> {
     }
 }
 
+impl<T> Align4PtrCompat<T>
+where
+    T: Debug + Send + Sync + 'static,
+{
+    fn into_parts(self) -> (u8, MaybeUninit<[u8; mem::size_of::<usize>() - 1]>) {
+        let mut this = ManuallyDrop::new(self);
+        (this.meta, unsafe { (&raw mut this.store).read() })
+    }
+
+    unsafe fn debug_erased(this: &Align4PtrCompat<()>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let this = unsafe { &*(this as *const _ as *const Align4PtrCompat<T>) };
+        <T as Debug>::fmt(this.borrow_value(), f)
+    }
+
+    unsafe fn drop_erased(this: Align4PtrCompat<()>) {
+        let (meta, store) = this.into_parts();
+        let _this = Self {
+            meta,
+            store,
+            _marker: PhantomData,
+        };
+    }
+
+    pub fn erase(self) -> ErasedAlign4PtrCompat {
+        ErasedAlign4PtrCompat::from_typed(self)
+    }
+}
+
 impl<T> Drop for Align4PtrCompat<T> {
     fn drop(&mut self) {
         let offset = Self::OFFSET_IN_STORE
@@ -140,6 +181,55 @@ impl<T> Drop for Align4PtrCompat<T> {
         }
     }
 }
+
+pub struct ErasedAlign4PtrCompat {
+    inner: ManuallyDrop<Align4PtrCompat<()>>,
+    vtable: &'static Align4PtrCompatVTable,
+    _marker: PhantomData<*mut ()>,
+}
+
+impl ErasedAlign4PtrCompat {
+    pub fn from_typed<T>(value: Align4PtrCompat<T>) -> Self
+    where
+        T: Debug + Send + Sync + 'static,
+    {
+        let (meta, store) = value.into_parts();
+        ErasedAlign4PtrCompat {
+            inner: ManuallyDrop::new(Align4PtrCompat::<()> {
+                meta,
+                store,
+                _marker: PhantomData,
+            }),
+            vtable: &Align4PtrCompatVTable {
+                debug: Align4PtrCompat::<T>::debug_erased,
+                drop: Align4PtrCompat::<T>::drop_erased,
+            },
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl Debug for ErasedAlign4PtrCompat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        unsafe { (self.vtable.debug)(&self.inner, f) }
+    }
+}
+
+struct Align4PtrCompatVTable {
+    debug: unsafe fn(&Align4PtrCompat<()>, f: &mut fmt::Formatter<'_>) -> fmt::Result,
+    drop: unsafe fn(Align4PtrCompat<()>),
+}
+
+impl Drop for ErasedAlign4PtrCompat {
+    fn drop(&mut self) {
+        unsafe {
+            (self.vtable.drop)(ManuallyDrop::take(&mut self.inner));
+        }
+    }
+}
+
+unsafe impl Send for ErasedAlign4PtrCompat {}
+unsafe impl Sync for ErasedAlign4PtrCompat {}
 
 /// A non-null transformed address with metadata encoded in the low 2 bits of the first byte.
 #[derive(Clone, Copy)]
