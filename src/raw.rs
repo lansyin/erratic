@@ -2,7 +2,7 @@ use alloc::{boxed::Box, format};
 use core::{
     any::TypeId,
     convert::Infallible,
-    error::{self, Error},
+    error::Error,
     fmt::{self, Debug, Display},
     mem::{self, ManuallyDrop, MaybeUninit},
     ops::{Deref, DerefMut},
@@ -180,7 +180,7 @@ impl<S> RawError<S> {
     pub fn new<E, C>(state: Option<S>, source: E, context: C) -> Self
     where
         S: Debug + Send + Sync + 'static,
-        E: error::Error + Send + Sync + 'static,
+        E: Error + Send + Sync + 'static,
         C: context::Context,
     {
         let context = context.try_into_repr();
@@ -226,7 +226,7 @@ impl<S> RawError<S> {
     fn new_boxed<E, C>(state: Option<S>, source: E, context: C) -> Self
     where
         S: Debug + Send + Sync + 'static,
-        E: error::Error + Send + Sync + 'static,
+        E: Error + Send + Sync + 'static,
         C: Display + Send + Sync + 'static,
     {
         let (vtable, state) = DynBody::<S, E, C>::vtable_from_state(state);
@@ -272,7 +272,7 @@ impl<S> RawError<S> {
     }
 
     /// Returns a reference to the wrapped source error, if present.
-    pub fn source(&self) -> Option<&(dyn error::Error + Send + Sync + 'static)> {
+    pub fn source(&self) -> Option<&(dyn Error + Send + Sync + 'static)> {
         match self.select_ref() {
             SelectRef::Const(_body) => None,
             SelectRef::Inline(_body) => None,
@@ -285,7 +285,7 @@ impl<S> RawError<S> {
     }
 
     /// Returns a mutable reference to the wrapped source error, if present.
-    pub fn source_mut(&mut self) -> Option<&mut (dyn error::Error + Send + Sync + 'static)> {
+    pub fn source_mut(&mut self) -> Option<&mut (dyn Error + Send + Sync + 'static)> {
         match self.select_mut() {
             SelectMut::Const(_body) => None,
             SelectMut::Inline(_body) => None,
@@ -302,7 +302,7 @@ impl<S> RawError<S> {
     /// Returns `None` if the source is not of type `E` or does not exist.
     pub fn downcast_source_ref<E>(&self) -> Option<&E>
     where
-        E: error::Error + 'static,
+        E: Error + 'static,
     {
         self.source()?.downcast_ref::<E>()
     }
@@ -312,7 +312,7 @@ impl<S> RawError<S> {
     /// Returns `None` if the source is not of type `E` or does not exist.
     pub fn downcast_source_mut<E>(&mut self) -> Option<&mut E>
     where
-        E: error::Error + 'static,
+        E: Error + 'static,
     {
         self.source_mut()?.downcast_mut::<E>()
     }
@@ -387,7 +387,7 @@ impl<S> RawError<S> {
     }
 
     /// Consumes `self` and returns the boxed source error, if any.
-    pub fn into_source(self) -> Option<Box<dyn error::Error + Send + Sync + 'static>> {
+    pub fn into_source(self) -> Option<Box<dyn Error + Send + Sync + 'static>> {
         match self.select_own() {
             SelectOwn::Const(_body) => None,
             SelectOwn::Inline(_body) => None,
@@ -503,11 +503,11 @@ impl<S> RawError<S> {
     }
 
     /// Iterates over the source error chain, starting from the immediate source.
-    pub fn chain(&self) -> impl Iterator<Item = &(dyn error::Error + 'static)> {
-        struct Chain<'a>(Option<&'a (dyn error::Error + 'static)>);
+    pub fn chain(&self) -> impl Iterator<Item = &(dyn Error + 'static)> {
+        struct Chain<'a>(Option<&'a (dyn Error + 'static)>);
 
         impl<'a> Iterator for Chain<'a> {
-            type Item = &'a (dyn error::Error + 'static);
+            type Item = &'a (dyn Error + 'static);
 
             fn next(&mut self) -> Option<Self::Item> {
                 let next = self.0.and_then(|err| err.source());
@@ -516,14 +516,11 @@ impl<S> RawError<S> {
             }
         }
 
-        Chain(
-            self.source()
-                .map(|err| err as &(dyn error::Error + 'static)),
-        )
+        Chain(self.source().map(|err| err as &(dyn Error + 'static)))
     }
 
     /// Convert into a boxed error without reallocation if already boxed, otherwise box the error.
-    pub fn into_boxed_error(self) -> Box<dyn error::Error + Send + Sync + 'static>
+    pub fn into_boxed_error(self) -> Box<dyn Error + Send + Sync + 'static>
     where
         S: Debug,
     {
@@ -616,13 +613,12 @@ where
     }
 }
 
-impl<S> error::Error for RawError<S>
+impl<S> Error for RawError<S>
 where
     S: Debug,
 {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        self.source()
-            .map(|err| err as &(dyn error::Error + 'static))
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.source().map(|err| err as &(dyn Error + 'static))
     }
 }
 
@@ -668,7 +664,7 @@ struct DynBodyVTable {
     /// See [DynBody::drop].
     drop: unsafe fn(ManuallyDrop<Align4Own<DynBody>>),
     /// See [DynBody::into_source].
-    into_source: unsafe fn(ErasedDynBody) -> Option<Box<dyn error::Error + Send + Sync + 'static>>,
+    into_source: unsafe fn(ErasedDynBody) -> Option<Box<dyn Error + Send + Sync + 'static>>,
     /// See [DynBody::into_backtrace].
     into_backtrace: unsafe fn(ErasedDynBody) -> Option<WithBacktrace>,
     /// See [DynBody::into_parts].
@@ -678,7 +674,7 @@ struct DynBodyVTable {
     extract_state:
         unsafe fn(ErasedDynBody, TypeId, NonNull<()>) -> result::Result<RawVacant, ErasedDynBody>,
     /// See [DynBody::into_boxed_error].
-    into_boxed_error: unsafe fn(ErasedDynBody) -> Box<dyn error::Error + Send + Sync + 'static>,
+    into_boxed_error: unsafe fn(ErasedDynBody) -> Box<dyn Error + Send + Sync + 'static>,
     /// See [DynBody::debug].
     debug: unsafe fn(Ref<'_, DynBody>, &mut fmt::Formatter<'_>) -> fmt::Result,
     /// See [DynBody::display].
@@ -686,10 +682,9 @@ struct DynBodyVTable {
     /// See [DynBody::try_set_state].
     try_set_state: unsafe fn(Mut<DynBody>, TypeId, NonNull<()>) -> bool,
     /// See [DynBody::source].
-    source: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn error::Error + Send + Sync + 'static)>,
+    source: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn Error + Send + Sync + 'static)>,
     /// See [DynBody::source_mut].
-    source_mut:
-        unsafe fn(Mut<'_, DynBody>) -> Option<&mut (dyn error::Error + Send + Sync + 'static)>,
+    source_mut: unsafe fn(Mut<'_, DynBody>) -> Option<&mut (dyn Error + Send + Sync + 'static)>,
     /// See [DynBody::state].
     state: unsafe fn(Ref<'_, DynBody>, TypeId, NonNull<()>),
     /// See [DynBody::context].
@@ -704,7 +699,7 @@ impl DynBodyVTable {
     const fn new<S, E, C>() -> Self
     where
         S: Debug + Send + Sync + 'static,
-        E: error::Error + Send + Sync + 'static,
+        E: Error + Send + Sync + 'static,
         C: Display + Send + Sync + 'static,
     {
         DynBodyVTable {
@@ -745,7 +740,7 @@ impl<S, E, C> DynBody<S, E, C> {
 impl<S, E, C> DynBody<S, E, C>
 where
     S: Debug + Send + Sync + 'static,
-    E: error::Error + Send + Sync + 'static,
+    E: Error + Send + Sync + 'static,
     C: Display + Send + Sync + 'static,
 {
     fn vtable_from_state(state: Option<S>) -> (Align4Ref<'static, DynBodyVTable>, MaybeUninit<S>) {
@@ -829,7 +824,7 @@ where
 impl<S, E, C> DynBody<S, E, C>
 where
     S: Debug + Send + Sync + 'static,
-    E: error::Error + Send + Sync + 'static,
+    E: Error + Send + Sync + 'static,
     C: Display + Send + Sync + 'static,
 {
     /// Drops the boxed body.
@@ -850,9 +845,7 @@ where
     /// # Safety
     ///
     /// Same as [`into_state`](DynBody::into_state). Returns `None` if `E` is [`Nae`].
-    unsafe fn into_source(
-        this: ErasedDynBody,
-    ) -> Option<Box<dyn error::Error + Send + Sync + 'static>> {
+    unsafe fn into_source(this: ErasedDynBody) -> Option<Box<dyn Error + Send + Sync + 'static>> {
         let Align4(this) = unsafe { *ErasedDynBody::into_inner::<S, E, C>(this).into_boxed() };
 
         if rtti::is_same_ty::<E, Nae>() {
@@ -959,9 +952,7 @@ where
     /// # Safety
     ///
     /// Same as [`into_parts`](DynBody::into_parts).
-    unsafe fn into_boxed_error(
-        this: ErasedDynBody,
-    ) -> Box<dyn error::Error + Send + Sync + 'static> {
+    unsafe fn into_boxed_error(this: ErasedDynBody) -> Box<dyn Error + Send + Sync + 'static> {
         unsafe { ErasedDynBody::into_inner::<S, E, C>(this).into_boxed() }
     }
 
@@ -1019,9 +1010,7 @@ where
     /// # Safety
     ///
     /// - `this` must point to a valid `DynBody<S, E, C>`.
-    unsafe fn source(
-        this: Ref<'_, DynBody>,
-    ) -> Option<&(dyn error::Error + Send + Sync + 'static)> {
+    unsafe fn source(this: Ref<'_, DynBody>) -> Option<&(dyn Error + Send + Sync + 'static)> {
         let this = unsafe { this.cast::<Self>().deref() };
 
         if rtti::is_same_ty::<E, Nae>() {
@@ -1043,7 +1032,7 @@ where
     /// - `this` must point to a valid `DynBody<S, E, C>`.
     unsafe fn source_mut(
         this: Mut<'_, DynBody>,
-    ) -> Option<&mut (dyn error::Error + Send + Sync + 'static)> {
+    ) -> Option<&mut (dyn Error + Send + Sync + 'static)> {
         let this = unsafe { this.cast::<Self>().deref_mut() };
 
         if rtti::is_same_ty::<E, Nae>() {
@@ -1148,7 +1137,7 @@ impl<S, E, C> Drop for DynBody<S, E, C> {
 impl<S, E, C> fmt::Debug for DynBody<S, E, C>
 where
     S: Debug + Send + Sync + 'static,
-    E: error::Error + Send + Sync + 'static,
+    E: Error + Send + Sync + 'static,
     C: Display + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1165,7 +1154,7 @@ where
 impl<S, E, C> fmt::Display for DynBody<S, E, C>
 where
     S: Debug + Send + Sync + 'static,
-    E: error::Error + Send + Sync + 'static,
+    E: Error + Send + Sync + 'static,
     C: Display + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1179,13 +1168,13 @@ where
     }
 }
 
-impl<S, E, C> error::Error for DynBody<S, E, C>
+impl<S, E, C> Error for DynBody<S, E, C>
 where
     S: Debug + Send + Sync + 'static,
-    E: error::Error + Send + Sync + 'static,
+    E: Error + Send + Sync + 'static,
     C: Display + Send + Sync + 'static,
 {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
         if rtti::is_same_ty::<E, Nae>() {
             return None;
         }
@@ -1276,7 +1265,7 @@ impl Debug for RawVacant {
             let backtrace = (!f.sign_minus())
                 .then(|| {
                     WithBacktrace::search_debug(|| {
-                        (vt.source)(body_ref).map(|v| v as &(dyn error::Error + 'static))
+                        (vt.source)(body_ref).map(|v| v as &(dyn Error + 'static))
                     })
                 })
                 .flatten();
@@ -1439,7 +1428,6 @@ mod tests {
     use core::{
         assert_matches,
         convert::Infallible,
-        error,
         fmt::{self, Display},
         mem,
     };
@@ -1459,7 +1447,7 @@ mod tests {
         }
     }
 
-    impl error::Error for TestError {}
+    impl Error for TestError {}
 
     /// A typed literal for testing.
     #[derive(Debug)]
@@ -1654,7 +1642,7 @@ mod tests {
             }
         }
 
-        impl error::Error for DropWatch {}
+        impl Error for DropWatch {}
 
         {
             let _err = RawError::new_boxed(None::<Infallible>, DropWatch, Empty::new());
