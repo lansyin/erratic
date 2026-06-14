@@ -4,11 +4,12 @@
 //! # Quick Start
 //!
 //! In most cases, `Error` can serve as a drop-in replacement for `Box<dyn Error>`.
-//! Compared to the latter, it occupies only 1 usize, making the happy path faster.
+//! Compared to the latter, it occupies only 1 usize and eliminates allocations
+//! altogether when constructed from a literal string or a small state.
 //!
 //! ```
 //! # use std::{fs::File, io::Write};
-//! fn say_hi(filename: &str) -> erratic::Result<()> {
+//! fn say_hello(filename: &str) -> erratic::Result<()> {
 //!     File::open(filename)?.write_all(b"Hello, World!")?;
 //!     Ok(())
 //! }
@@ -16,8 +17,8 @@
 //!
 //! # Attaching Context
 //!
-//! When constructing an error, you can optionally attach a context. If the context is a literal string
-//! and it's the only component of the error, no heap allocation occurs.
+//! When constructing an error, you can optionally attach a context. A literal string context
+//! with no other components incurs no heap allocation.
 //!
 //! ```
 //! # use std::sync::Weak;
@@ -35,16 +36,15 @@
 //!     let r = r.upgrade()
 //!         .with_context("stream expired")?; // Accepts any value implementing `Display`.
 //!     let n = r.read(buf)
-//!         .with_context(mkctx!("cannot read {}", r.id()))?; // `mkctx!` evaluates lazily.
+//!         .with_context(mkctx!("failed to read from {}", r.id()))?; // `mkctx!` evaluates lazily.
 //!     Ok(n)
 //! }
 //! ```
 //!
 //! # Binding State
 //!
-//! When propagating an error that requires special handling, you can optionally attach a state to it.
-//! If the state is small enough and it's the only component of the error, the state is inlined
-//! without any heap allocation.
+//! When propagating domain errors, you can optionally attach a state to it. A small state
+//! with no other components incurs no heap allocation.
 //!
 //! ```
 //! # use std::{result::Result};
@@ -57,7 +57,7 @@
 //! use erratic::*;
 //!
 //! #[derive(Debug)]
-//! enum State { RetryLater }
+//! enum State { RetryLater } // Smaller than 1 usize.
 //!
 //! fn try_write(w: &mut Writer, data: &[u8; 64]) -> Result<(), Error<State>> {
 //!     w.reserve_chunk(64)
@@ -92,20 +92,22 @@
 //! }
 //! ```
 //!
-//! The `?` operator covers the most common cases, notably including conversion from `Error` to `Error<S>`:
+//! The `?` operator covers the most common cases, notably including transitions to any state:
 //!
-//! - `impl Error`  -> `Error`
-//! - `impl Error`  -> `Error<S>`
-//! - `Builder<..>`  -> `Error`
-//! - `Builder<..>`  -> `Error<S>`
-//! - `Error`       -> `Error<S>`
+//! | Source        | Target     | Explanation                                     |
+//! | :------------ | :--------- | :---------------------------------------------- |
+//! | `Builder<..>` | `Error<_>` | Build an error from state, context, and source. |
+//! | `impl Error`  | `Error<_>` | Wrap any standard error type.                   |
+//! | `Error`       | `Error<S>` | Propagate an error regardless of state types.   |
 //!
 //! Stateful errors are meant to be handled explicitly. Several utility methods are provided:
 //!
-//!   - `erase_error()?`:    Propagate the error.
-//!   - `extract_state()?`:  Take the state out, or propagate the error.
-//!   - `map_state()?`:      Transform the state with a closure.
-//!   - `lift_state()?`:     Transform via `From<S>`.
+//! | Method          | Explanation                                 |
+//! | :-------------- | :------------------------------------------ |
+//! | `erase_error`   | Propagate the error.                        |
+//! | `extract_state` | Take the state out, or propagate the error. |
+//! | `map_state`     | Transform the state with a closure.         |
+//! | `lift_state`    | Transform via `From<S>`.                    |
 //!
 //! # Backtrace
 //!
