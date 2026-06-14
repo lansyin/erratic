@@ -7,8 +7,10 @@ use core::{
 };
 
 use crate::{
-    ptr::{Align4Ref, ErasedAlign4PtrCompat},
-    raw::{ConstBody, DynBody, ErasedDynBody, RawError, SelectOwn},
+    raw::{
+        ConstBody, DynBody, ErasedDynBody, RawError, SelectOwn,
+        ptr::{Align4Ref, ErasedAlign4PtrCompat},
+    },
     render,
 };
 

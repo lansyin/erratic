@@ -174,7 +174,6 @@ extern crate alloc;
 #[cfg(feature = "backtrace")]
 extern crate std;
 
-mod ptr;
 mod raw;
 mod render;
 mod rtti;

@@ -1,5 +1,6 @@
 mod backtrace;
 mod erased;
+mod ptr;
 mod source;
 
 use alloc::{boxed::Box, format};
@@ -17,9 +18,9 @@ use core::{
 use crate::{
     context::{self, Context, Empty},
     match_else,
-    ptr::{Align4, Align4Own, Align4PtrCompat, Align4Ref, Metadata, Mut, Ref},
     raw::{
         erased::ErasedRawError,
+        ptr::{Align4, Align4Own, Align4PtrCompat, Align4Ref, Metadata, Mut, Ref},
         source::{IndirectSource, NoSource, Source, WithBacktraceSource},
     },
     render, rtti,
