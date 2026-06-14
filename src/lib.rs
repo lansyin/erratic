@@ -243,25 +243,6 @@ where
         self.0.state().is_some()
     }
 
-    /// Converts to a stateless error. Returns `Err` when no extra details remain after dropping the state.
-    pub fn try_into_stateless(self) -> result::Result<Error, Self> {
-        match self.0.extract_state() {
-            Err(err) => Ok(Error(err)),
-            Ok((state, Some(vac))) => match vac.try_into_stateless() {
-                Ok(err) => Ok(Error(err)),
-                Err(vac) => Err(Error(
-                    vac.try_with_state(state)
-                        .expect("try_with_state will not fail with correct state"),
-                )),
-            },
-            Ok((state, None)) => Err(Error(RawError::new(
-                Some(state),
-                None::<Infallible>,
-                Contextless::new(),
-            ))),
-        }
-    }
-
     /// Returns an opaque [`Error`][error::Error].
     pub fn erase(self) -> impl error::Error + Send + Sync + 'static {
         self.0.erase()
