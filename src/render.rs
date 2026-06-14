@@ -1,20 +1,8 @@
 use core::{
     error::{self},
-    fmt::{self, Debug, Display, Write},
+    fmt::{self, Debug, Display},
     result,
 };
-
-use alloc::string::String;
-
-use crate::backtrace::Backtrace;
-
-struct DisplayAsDebug<'a>(pub &'a dyn Display);
-
-impl<'a> Debug for DisplayAsDebug<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, r#""{}""#, self.0)
-    }
-}
 
 fn format_state_context(
     f: &mut fmt::Formatter<'_>,
@@ -40,9 +28,9 @@ pub fn format_debug_struct<S>(
     f: &mut fmt::Formatter<'_>,
     container_name: &'static str,
     state: Option<&S>,
-    context: Option<&dyn Display>,
+    context: Option<impl Debug>,
     source: Option<&(dyn error::Error + 'static)>,
-    backtrace: Option<&dyn Backtrace>,
+    backtrace: Option<impl Debug + Display>,
 ) -> fmt::Result
 where
     S: Debug + 'static,
@@ -54,11 +42,11 @@ where
     }
 
     if let Some(context) = context {
-        ds.field("context", &DisplayAsDebug(context));
+        ds.field("context", &context);
     }
 
     if let Some(source) = source {
-        ds.field("source", source);
+        ds.field("source", &source);
     }
 
     if let Some(backtrace) = backtrace {
@@ -71,7 +59,7 @@ where
 pub fn format_chain<S>(
     f: &mut fmt::Formatter<'_>,
     state: Option<&S>,
-    context: Option<&dyn Display>,
+    context: Option<impl Display>,
     source: Option<&(dyn error::Error + 'static)>,
 ) -> fmt::Result
 where
@@ -81,19 +69,19 @@ where
 
     let mut source = source;
     let has_additional_info = format_state_context(f, state, context.as_ref())?;
-    let mut dedup = DedupLast::new();
 
     if !has_additional_info {
         let Some(err) = source else {
             unreachable!();
         };
-        dedup.format_one(&mut Blackhole, |w| write!(w, "{SOURCE_PREFIX}{err}"))?;
+        // dedup.format_one(&mut Blackhole, |w| write!(w, "{SOURCE_PREFIX}{err}"))?;
         write!(f, "{err}")?;
         source = err.source();
     }
 
     while let Some(err) = source {
-        dedup.format_one(f, |w| write!(w, "{SOURCE_PREFIX}{err}"))?;
+        // dedup.format_one(f, |w| write!(w, "{SOURCE_PREFIX}{err}"))?;
+        write!(f, "{SOURCE_PREFIX}{err}")?;
         source = err.source();
     }
 
@@ -103,9 +91,9 @@ where
 pub fn format_debug<S>(
     f: &mut fmt::Formatter<'_>,
     state: Option<&S>,
-    context: Option<&dyn Display>,
+    context: Option<impl Debug + Display>,
     source: Option<&(dyn error::Error + 'static)>,
-    backtrace: Option<&dyn Backtrace>,
+    backtrace: Option<impl Debug + Display>,
 ) -> fmt::Result
 where
     S: Debug + 'static,
@@ -137,7 +125,7 @@ pub fn format_display<S>(
     state: Option<&S>,
     context: Option<&dyn Display>,
     source: Option<&(dyn error::Error + 'static)>,
-    _backtrace: Option<&dyn Backtrace>,
+    _backtrace: Option<impl Debug + Display>,
 ) -> fmt::Result
 where
     S: Debug + 'static,
@@ -156,93 +144,4 @@ where
     }
 
     Ok(())
-}
-
-struct DedupLast {
-    last: String,
-}
-
-impl DedupLast {
-    fn new() -> Self {
-        Self {
-            last: String::new(),
-        }
-    }
-
-    fn format_one<'a, W>(
-        &'a mut self,
-        w: &'a mut W,
-        f: impl FnOnce(&mut FormatOne<'a, W>) -> fmt::Result,
-    ) -> fmt::Result
-    where
-        W: Write,
-    {
-        let mut w = FormatOne {
-            writer: w,
-            last: &mut self.last,
-            index: Some(0),
-        };
-
-        f(&mut w)?;
-
-        w.finish()
-    }
-}
-
-struct FormatOne<'a, W>
-where
-    W: Write,
-{
-    writer: &'a mut W,
-    last: &'a mut String,
-    index: Option<usize>,
-}
-
-impl<'a, W> Write for FormatOne<'a, W>
-where
-    W: Write,
-{
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        let Some(index) = self.index.as_mut() else {
-            self.last.push_str(s);
-            return Ok(());
-        };
-
-        if self.last[(*index)..].starts_with(s) {
-            *index += s.len();
-            return Ok(());
-        }
-
-        self.last.truncate(*index);
-        self.index = None;
-        self.last.push_str(s);
-        Ok(())
-    }
-}
-
-impl<'a, W> FormatOne<'a, W>
-where
-    W: Write,
-{
-    fn finish(self) -> fmt::Result {
-        match self.index {
-            Some(index) => {
-                if index < self.last.len() {
-                    self.writer.write_str(&self.last[..index])?;
-                }
-            }
-            None => {
-                self.writer.write_str(self.last)?;
-            }
-        }
-        Ok(())
-    }
-}
-
-struct Blackhole;
-
-impl Write for Blackhole {
-    fn write_str(&mut self, _: &str) -> fmt::Result {
-        Ok(())
-    }
 }

@@ -174,7 +174,6 @@ extern crate alloc;
 #[cfg(feature = "backtrace")]
 extern crate std;
 
-mod backtrace;
 mod ptr;
 mod raw;
 mod render;
@@ -185,11 +184,11 @@ pub mod macros;
 
 pub mod builder;
 pub mod context;
-pub mod nae;
 pub mod state;
 
 use alloc::boxed::Box;
 use core::{
+    convert::Infallible,
     error,
     fmt::{self, Debug, Display},
     ops::{Deref, DerefMut},
@@ -199,8 +198,7 @@ use core::{
 use crate::{
     builder::Builder,
     context::{Context, ContextFn, Contextless, Identity},
-    nae::Nae,
-    raw::{ErasedRawError, RawError},
+    raw::{BoxedSource, RawError},
     state::{State, Stateless, Vacant},
 };
 
@@ -221,7 +219,7 @@ where
     where
         C: Context,
     {
-        Self(RawError::new(None, Nae::new(), ctx))
+        Self(RawError::new(None, None::<Infallible>, ctx))
     }
 
     /// Creates an `Error` from any [`Error`][core::error::Error].
@@ -233,30 +231,10 @@ where
     }
 
     /// Creates an `Error` from a boxed error.
-    pub fn from_boxed(value: Box<dyn error::Error + Send + Sync + 'static>) -> Self {
-        struct BoxError(Box<dyn error::Error + Send + Sync + 'static>);
-
-        impl Debug for BoxError {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                Debug::fmt(&*self.0, f)
-            }
-        }
-
-        impl Display for BoxError {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                Display::fmt(&*self.0, f)
-            }
-        }
-
-        impl error::Error for BoxError {
-            fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-                self.0.source()
-            }
-        }
-
+    pub fn from_boxed(boxed: Box<dyn error::Error + Send + Sync + 'static>) -> Self {
         Self(RawError::new::<_, _>(
             None,
-            BoxError(value),
+            Some(BoxedSource(boxed)),
             Contextless::new(),
         ))
     }
@@ -279,7 +257,7 @@ where
             },
             Ok((state, None)) => Err(Error(RawError::new(
                 Some(state),
-                Nae::new(),
+                None::<Infallible>,
                 Contextless::new(),
             ))),
         }
@@ -334,7 +312,8 @@ where
         self.0.source().map(|v| v as _)
     }
 
-    /// Iterates over the source error chain, starting from the immediate source.
+    /// Iterates over the error chain. If this error has its own context or state, it appears first;
+    /// otherwise the chain starts from the source.
     pub fn chain(&self) -> impl Iterator<Item = &(dyn error::Error + 'static)> {
         self.0.chain()
     }
@@ -384,7 +363,7 @@ where
     pub fn from_state(state: S) -> Self {
         Error(RawError::new(
             Some(S::into_repr(state)),
-            Nae::new(),
+            None::<Infallible>,
             Contextless::new(),
         ))
     }
@@ -492,13 +471,7 @@ where
     S: State + ?Sized,
 {
     fn from(err: E) -> Self {
-        match rtti::concretize::<E, ErasedRawError>(err) {
-            Ok(erased) => match erased.try_into_stateless() {
-                Ok(stateless) => Error(stateless.with_phantom_state()),
-                Err(erased) => Error(RawError::new(None, erased, Contextless::new())),
-            },
-            Err(err) => Error(RawError::new(None, err, Contextless::new())),
-        }
+        Error(RawError::new(None, Some(err), Contextless::new()))
     }
 }
 
@@ -708,7 +681,7 @@ where
         S: State,
     {
         self.map_err(|err| Builder {
-            err,
+            err: Some(err),
             state: Some(state.into_repr()),
             context_fn: Identity(Contextless::new()),
         })
@@ -719,7 +692,7 @@ where
         F: ContextFn,
     {
         self.map_err(|err| Builder {
-            err,
+            err: Some(err),
             state: None,
             context_fn,
         })

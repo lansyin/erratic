@@ -12,16 +12,18 @@ extern crate std;
 
 #[cfg(feature = "backtrace")]
 use core::{
+    any::Any,
     cell::Cell,
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use crate::nae::Nae;
+use crate::raw::source::{Source, WithBacktraceSource};
 
 // TODO: Remove this workaround once Error::provide gets stabilized.
 pub(crate) struct WithBacktrace {
-    err: Box<dyn error::Error + Send + Sync + 'static>,
-    take_err: unsafe fn(Self, TypeId, NonNull<()>) -> Option<Self>,
+    err: Box<dyn Source>,
+    take_err: unsafe fn(Self, TypeId, NonNull<()>) -> Result<(), Self>,
+    into_source: fn(Self) -> Option<Box<dyn error::Error + Send + Sync + 'static>>,
     #[cfg(feature = "backtrace")]
     backtrace: std::backtrace::Backtrace,
 }
@@ -35,27 +37,28 @@ std::thread_local! {
 static DISABLED: AtomicBool = AtomicBool::new(false);
 
 impl WithBacktrace {
-    pub fn try_attach<E>(err: E) -> result::Result<Self, E>
+    pub fn try_attach<E>(err: E) -> result::Result<impl Source, E>
     where
-        E: error::Error + Send + Sync + 'static,
+        E: Source,
     {
         #[cfg(feature = "backtrace")]
         {
             if DISABLED.load(Ordering::Relaxed) {
                 return Err(err);
             }
-            match Self::search(|| err.source()) {
+            match Self::search(|| err.error_ref().map(|e| e as _)) {
                 Some(_) => Err(err),
                 None => {
                     use std::backtrace::{Backtrace, BacktraceStatus};
 
                     let backtrace = Backtrace::capture();
                     match backtrace.status() {
-                        BacktraceStatus::Captured => Ok(WithBacktrace {
+                        BacktraceStatus::Captured => Ok(WithBacktraceSource(WithBacktrace {
                             err: Box::new(err),
                             take_err: Self::take_source_::<E>,
+                            into_source: Self::into_source_::<E>,
                             backtrace,
-                        }),
+                        })),
                         _ => {
                             DISABLED.store(true, Ordering::Relaxed);
                             Err(err)
@@ -65,7 +68,7 @@ impl WithBacktrace {
             }
         }
         #[cfg(not(feature = "backtrace"))]
-        Err::<Self, _>(err)
+        Err::<WithBacktraceSource, _>(err)
     }
 
     #[cfg(feature = "backtrace")]
@@ -106,27 +109,27 @@ impl WithBacktrace {
 
     pub fn search_debug<'a>(
         #[allow(unused_variables)] f: impl FnOnce() -> Option<&'a (dyn error::Error + 'static)>,
-    ) -> Option<&'a dyn Backtrace> {
+    ) -> Option<impl Debug + Display> {
         #[cfg(feature = "backtrace")]
         {
-            Self::search(f).map(|b| b as _)
+            Self::search(f)
         }
         #[cfg(not(feature = "backtrace"))]
         {
-            None
+            None::<&i32>
         }
     }
 
     pub fn search_display<'a>(
         #[allow(unused_variables)] f: impl FnOnce() -> Option<&'a (dyn error::Error + 'static)>,
-    ) -> Option<&'a dyn Backtrace> {
+    ) -> Option<impl Debug + Display> {
         #[cfg(feature = "backtrace")]
         {
-            Self::search(f).map(|b| b as _)
+            Self::search(f)
         }
         #[cfg(not(feature = "backtrace"))]
         {
-            None
+            None::<i32>
         }
     }
 
@@ -136,23 +139,34 @@ impl WithBacktrace {
     ///
     /// The dst pointer must be valid and point to a valid Option<Ty>.
     #[cfg(feature = "backtrace")]
-    unsafe fn take_source_<E>(self, ty: TypeId, dst: NonNull<()>) -> Option<Self>
+    unsafe fn take_source_<E>(self, ty: TypeId, dst: NonNull<()>) -> Result<(), Self>
     where
-        E: error::Error + 'static,
+        E: Source,
     {
-        if crate::rtti::is_same_ty::<E, Nae>() {
-            return None;
-        }
-        if TypeId::of::<E>() != ty {
-            return Some(self);
-        }
-        let this = self
-            .err
+        let this = (self.err as Box<dyn Any>)
             .downcast::<E>()
             .expect("WithBacktrace provides correct type");
-        let dst = unsafe { dst.cast::<Option<E>>().as_mut() };
-        dst.replace(*this);
-        None
+
+        if let Err(err) = unsafe { this.downcast_container(ty, dst) } {
+            return Err(Self {
+                err: Box::new(err),
+                ..self
+            });
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "backtrace")]
+    fn into_source_<E>(self) -> Option<Box<dyn error::Error + Send + Sync + 'static>>
+    where
+        E: Source,
+    {
+        let this = (self.err as Box<dyn Any>)
+            .downcast::<E>()
+            .expect("WithBacktrace provides correct type");
+
+        this.into_boxed()
     }
 
     /// Take the error from this backtrace and put it in the dst pointer.
@@ -160,29 +174,20 @@ impl WithBacktrace {
     /// # Safety
     ///
     /// The dst pointer must be valid and point to a valid Option<Ty>.
-    pub unsafe fn take_source(self, ty: TypeId, dst: NonNull<()>) -> Option<Self> {
+    pub unsafe fn take_source(self, ty: TypeId, dst: NonNull<()>) -> Result<(), Self> {
         unsafe { (self.take_err)(self, ty, dst) }
     }
 
     pub fn into_source(self) -> Option<Box<dyn error::Error + Send + Sync + 'static>> {
-        if self.err.is::<Nae>() {
-            return None;
-        }
-        Some(self.err)
+        (self.into_source)(self)
     }
 
     pub fn source(&self) -> Option<&(dyn error::Error + Send + Sync + 'static)> {
-        if self.err.is::<Nae>() {
-            return None;
-        }
-        Some(&*self.err)
+        self.err.error_ref()
     }
 
     pub fn source_mut(&mut self) -> Option<&mut (dyn error::Error + Send + Sync + 'static)> {
-        if self.err.is::<Nae>() {
-            return None;
-        }
-        Some(&mut *self.err)
+        self.err.error_mut()
     }
 }
 
@@ -200,14 +205,6 @@ impl Display for WithBacktrace {
 
 impl error::Error for WithBacktrace {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        if self.err.is::<Nae>() {
-            return None;
-        }
-        Some(&*self.err)
+        self.err.error_ref().map(|e| e as _)
     }
 }
-
-pub(crate) trait Backtrace: Debug + Display {}
-
-#[cfg(feature = "backtrace")]
-impl Backtrace for std::backtrace::Backtrace {}

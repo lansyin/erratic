@@ -4,7 +4,6 @@ use core::{convert::Infallible, fmt::Debug, marker::PhantomData, result};
 use crate::{
     Error,
     context::Context,
-    nae::Nae,
     raw::{RawError, RawVacant},
 };
 
@@ -120,7 +119,7 @@ where
         let Some(vacant) = self.inner else {
             return Error(RawError::new(
                 Some(S2::into_repr(state)),
-                Nae::new(),
+                None::<Infallible>,
                 context,
             ));
         };
@@ -133,7 +132,7 @@ where
         C: Context,
     {
         let Some(vacant) = self.inner else {
-            return Error(RawError::new(None, Nae::new(), context));
+            return Error(RawError::new(None, None::<Infallible>, context));
         };
         Error(vacant.derive(None, context))
     }

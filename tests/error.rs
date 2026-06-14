@@ -2,7 +2,7 @@ mod common;
 
 use common::{TestError, TestMessage, TestState};
 use core::error;
-use erratic::{builder::Builder, nae::Nae, *};
+use erratic::{builder::Builder, *};
 use std::{mem, result};
 
 #[test]
@@ -101,7 +101,7 @@ fn builder_case4() {
         let inner: Error<TestState> =
             mkerr!(error = TestError("inner"), state = TestState::FileNotFound);
         let outer: Error<TestState> = Builder::with_error(inner).into();
-        assert_eq!(outer.chain().count(), 1);
+        assert_eq!(outer.chain().count(), 2);
         let (state, context, source) = outer.into_parts::<TestMessage, TestError>();
         assert_eq!(state, Some(TestState::FileNotFound));
         assert!(context.is_none());
@@ -164,7 +164,7 @@ fn downcast_source_ok() {
 #[test]
 fn downcast_source_wrong_type() {
     let err = mkerr!(error = TestError("oops")).stateless();
-    assert!(!err.has_source_of::<Nae>());
+    assert!(!err.has_source_of::<std::io::Error>());
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn downcast_source_mut_ok() {
 #[test]
 fn downcast_source_mut_wrong_type() {
     let mut err = mkerr!(error = TestError("oops")).stateless();
-    assert!(err.downcast_source_mut::<Nae>().is_none());
+    assert!(err.downcast_source_mut::<std::io::Error>().is_none());
 }
 
 #[test]
@@ -316,7 +316,7 @@ fn eliminate_alloc() {
         let inner = TestError("inner");
         let mid = mkerr!(error = inner, state = TestState::FileNotFound);
         let outer = mkerr!(error = mid) as Error<TestState>;
-        assert_eq!(outer.chain().count(), 1);
+        assert_eq!(outer.chain().count(), 2);
     }
     {
         let inner = TestError("inner");
@@ -328,7 +328,7 @@ fn eliminate_alloc() {
         let inner = TestError("inner");
         let mid = mkerr!(error = inner, state = TestState::FileNotFound).erase();
         let outer = mkerr!(error = mid) as Error<TestState>;
-        assert_eq!(outer.chain().count(), 1);
+        assert_eq!(outer.chain().count(), 2);
     }
     {
         let inner = TestError("inner");
@@ -349,4 +349,33 @@ fn deref_and_deref_mut() {
     let mut err = mkerr!("oops").stateless();
     let _: &dyn error::Error = &*err;
     let _: &mut dyn error::Error = &mut *err;
+}
+
+#[cfg(feature = "backtrace")]
+#[test]
+fn backtrace_captures_from_first_layer() {
+    fn inner_most() -> Error {
+        mkerr!(error = TestError("root cause")).stateless()
+    }
+    fn middle() -> Error {
+        mkerr!(error = inner_most(), "middle layer").stateless()
+    }
+    fn outer_most() -> Error {
+        mkerr!(error = middle(), "outer layer").stateless()
+    }
+
+    let err = outer_most();
+    let Some(bt) = err.backtrace() else {
+        return;
+    };
+    let bt_str = format!("{bt:#?}");
+
+    assert!(
+        bt_str.contains("outer_most"),
+        "backtrace should contain the outermost function name 'outer_most', got: {bt_str}"
+    );
+    assert!(
+        bt_str.contains("inner_most"),
+        "backtrace should contain the outermost function name 'inner_most', got: {bt_str}"
+    );
 }

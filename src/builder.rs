@@ -1,13 +1,11 @@
 //! Builder for constructing an [`Error`].
-use core::{error, fmt::Debug, result};
+use core::{convert::Infallible, error, fmt::Debug, result};
 
 use crate::{
     BuilderExt, Error, ErrorExt,
-    context::{Context, ContextFn, Contextless, Empty, Identity},
+    context::{Context, ContextFn, Contextless, Identity},
     match_else,
-    nae::Nae,
     raw::RawError,
-    rtti,
     state::{State, Stateless},
 };
 
@@ -18,40 +16,40 @@ where
     F: ContextFn,
     S: State + ?Sized,
 {
-    pub err: E,
+    pub err: Option<E>,
     pub state: Option<S::Repr>,
     pub context_fn: F,
 }
 
-impl Builder<Nae, Stateless, Identity<Contextless>> {
+impl Builder<Infallible, Stateless, Identity<Contextless>> {
     /// Starts building an `Error` from a source error.
     pub fn with_error<E>(err: E) -> Builder<E, Stateless, Identity<Contextless>> {
         Builder {
-            err,
+            err: Some(err),
             state: None,
             context_fn: Identity(Contextless::new()),
         }
     }
 
     /// Starts building an `Error` with a state.
-    pub fn with_state<S>(state: S) -> Builder<Nae, S, Identity<Contextless>>
+    pub fn with_state<S>(state: S) -> Builder<Infallible, S, Identity<Contextless>>
     where
         S: State,
     {
         Builder {
-            err: Nae::new(),
+            err: None,
             state: Some(state.into_repr()),
             context_fn: Identity(Contextless::new()),
         }
     }
 
     /// Starts building an `Error` with a context.
-    pub fn with_context<C>(context: C) -> Builder<Nae, Stateless, Identity<C>>
+    pub fn with_context<C>(context: C) -> Builder<Infallible, Stateless, Identity<C>>
     where
         C: Context,
     {
         Builder {
-            err: Nae::new(),
+            err: None,
             state: None,
             context_fn: Identity(context),
         }
@@ -60,12 +58,12 @@ impl Builder<Nae, Stateless, Identity<Contextless>> {
     /// Starts building an `Error` with a lazily evaluated context.
     ///
     /// The closure `context_fn` is called only when the error is materialized.
-    pub fn with_context_fn<F>(context_fn: F) -> Builder<Nae, Stateless, F>
+    pub fn with_context_fn<F>(context_fn: F) -> Builder<Infallible, Stateless, F>
     where
         F: ContextFn,
     {
         Builder {
-            err: Nae::new(),
+            err: None,
             state: None,
             context_fn,
         }
@@ -80,18 +78,10 @@ where
     S: State + ?Sized,
 {
     fn from(value: Builder<E, S, F>) -> Self {
-        let has_state = !rtti::is_same_ty::<S, Stateless>();
-        let has_error = !rtti::is_same_ty::<E, Nae>();
-        let has_context = !rtti::is_same_ty::<<F::Output as Context>::Repr, Empty>();
-
-        match (has_state, has_error, has_context) {
-            (false, false, false) => unreachable!(),
-            (false, true, false) => value.err.into(),
-            _ => Error::<S>(RawError::new(
-                value.state,
-                value.err,
-                value.context_fn.call(),
-            )),
+        match (value.state, value.err, F::Output::is_contextless()) {
+            (None, None, true) => unreachable!(),
+            (None, Some(err), true) => err.into(),
+            (state, err, _) => Error::<S>(RawError::new(state, err, value.context_fn.call())),
         }
     }
 }
@@ -108,13 +98,10 @@ where
     S: State,
 {
     fn from(value: Builder<E, Stateless, F>) -> Self {
-        let has_error = !rtti::is_same_ty::<E, Nae>();
-        let has_context = !rtti::is_same_ty::<<F::Output as Context>::Repr, Empty>();
-
-        match (has_error, has_context) {
-            (false, false) => unreachable!(),
-            (true, false) => value.err.into(),
-            _ => Error(RawError::new(None, value.err, value.context_fn.call())),
+        match (value.err, F::Output::is_contextless()) {
+            (None, true) => unreachable!(),
+            (Some(err), true) => err.into(),
+            (err, _) => Error(RawError::new(None, err, value.context_fn.call())),
         }
     }
 }
@@ -126,17 +113,21 @@ where
     S: State,
 {
     fn from(value: Builder<Error<S>, Stateless, F>) -> Self {
-        let has_context = !rtti::is_same_ty::<<F::Output as Context>::Repr, Empty>();
-
-        if !has_context {
-            return value.err;
+        match (value.err, F::Output::is_contextless()) {
+            (None, true) => unreachable!(),
+            (Some(err), true) => err,
+            (None, false) => Error(RawError::new(
+                None,
+                None::<Infallible>,
+                value.context_fn.call(),
+            )),
+            (Some(err), _) => {
+                let Ok((state, vacant)) = match_else!(err.extract_state(), Err(err) => {
+                    return err.with_phantom_state();
+                });
+                vacant.derive(state, value.context_fn.call())
+            }
         }
-
-        let Ok((state, vacant)) = match_else!(value.err.extract_state(), Err(err) => {
-            return err.with_phantom_state();
-        });
-
-        vacant.derive(state, value.context_fn.call())
     }
 }
 
@@ -151,13 +142,17 @@ where
     S: State + ?Sized,
 {
     fn from(value: Builder<Error<Stateless>, Stateless, F>) -> Self {
-        let has_context = !rtti::is_same_ty::<<F::Output as Context>::Repr, Empty>();
-
-        match has_context {
-            false => value.err.with_phantom_state(),
-            _ => Error(RawError::new(
+        match (value.err, F::Output::is_contextless()) {
+            (None, true) => unreachable!(),
+            (Some(err), true) => err.with_phantom_state(),
+            (None, false) => Error(RawError::new(
                 None,
-                value.err.erase(),
+                None::<Infallible>,
+                value.context_fn.call(),
+            )),
+            (Some(err), false) => Error(RawError::new(
+                None,
+                Some(err.erase()),
                 value.context_fn.call(),
             )),
         }
@@ -179,7 +174,7 @@ where
         S: State + Sized,
     {
         self.map_err(|err| Builder {
-            err,
+            err: Some(err),
             state: Some(state.into_repr()),
             context_fn: Identity(Contextless::new()),
         })
@@ -190,7 +185,7 @@ where
         F: ContextFn,
     {
         self.map_err(|err| Builder {
-            err,
+            err: Some(err),
             state: None,
             context_fn,
         })
@@ -268,7 +263,7 @@ where
 impl<T> BuilderExt for Option<T> {
     type Result<E> = result::Result<T, E>;
 
-    type E = Nae;
+    type E = Infallible;
     type S = Stateless;
     type F = Identity<Contextless>;
 
@@ -278,7 +273,7 @@ impl<T> BuilderExt for Option<T> {
     {
         self.ok_or(Builder {
             state: Some(state.into_repr()),
-            err: Nae::new(),
+            err: None,
             context_fn: Identity(Contextless::new()),
         })
     }
@@ -288,7 +283,7 @@ impl<T> BuilderExt for Option<T> {
         F: ContextFn,
     {
         self.ok_or(Builder {
-            err: Nae::new(),
+            err: None,
             state: None,
             context_fn,
         })
@@ -324,7 +319,7 @@ where
 
     fn build_error(self) -> Self::Result<Error<Self::S>> {
         Builder {
-            err: self.err.erase(),
+            err: self.err.map(|e| e.erase()),
             state: self.state,
             context_fn: self.context_fn,
         }
@@ -366,7 +361,7 @@ where
     fn build_error(self) -> Self::Result<Error<Self::S>> {
         self.map_err(|err| {
             Builder {
-                err: err.err.erase(),
+                err: err.err.map(|err| err.erase()),
                 state: err.state,
                 context_fn: err.context_fn,
             }

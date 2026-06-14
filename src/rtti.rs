@@ -51,6 +51,7 @@ where
 /// Attempts to concretize `ref_mut` into type `&mut U` if `T == U` at the type-id level.
 ///
 /// Returns `Ok(ref_mut as &mut U)` on match, or `Err(ref_mut)` otherwise.
+#[allow(dead_code)]
 pub fn concretize_mut<T, U>(ref_mut: &mut T) -> result::Result<&mut U, &mut T>
 where
     T: 'static,

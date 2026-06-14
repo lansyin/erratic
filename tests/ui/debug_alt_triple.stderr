@@ -1,6 +1,8 @@
 Error {
     state: FileNotFound,
-    context: "hello.txt",
+    context: TestMessage(
+        "hello.txt",
+    ),
     source: Error {
         context: "while invoking copy_context",
         source: Error {

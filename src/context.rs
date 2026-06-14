@@ -3,20 +3,30 @@ use core::fmt::{self, Debug, Display};
 
 use alloc::string::String;
 
+use crate::rtti;
+
 /// A trait for types that can be used as an error context.
 ///
 /// Most types implement `Context::Repr = Self` via blanket impl.
 pub trait Context: Sized {
     const FALLBACK: Option<&'static str> = None;
 
-    type Repr: Display + Send + Sync + 'static;
+    type Repr: Debug + Display + Send + Sync + 'static;
 
     fn try_into_repr(self) -> Option<Self::Repr>;
+
+    #[doc(hidden)]
+    fn is_contextless() -> bool
+    where
+        Self: Sized,
+    {
+        rtti::is_same_ty::<Self::Repr, Empty>()
+    }
 }
 
 impl<C> Context for C
 where
-    C: Display + Send + Sync + 'static,
+    C: Debug + Display + Send + Sync + 'static,
 {
     const FALLBACK: Option<&'static str> = None;
 
