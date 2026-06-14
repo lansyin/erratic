@@ -1,7 +1,6 @@
 use alloc::boxed::Box;
 use core::{
     any::{Any, TypeId},
-    convert::Infallible,
     error::Error,
     ptr::NonNull,
     result,
@@ -149,8 +148,8 @@ impl Source for IndirectSource {
     where
         Self: Sized,
     {
-        if ty == TypeId::of::<RawError<Infallible>>() {
-            let dst = unsafe { dst.cast::<Option<RawError<Infallible>>>().as_mut() };
+        if ty == TypeId::of::<RawError>() {
+            let dst = unsafe { dst.cast::<Option<RawError>>().as_mut() };
             dst.replace(self.0);
             Ok(())
         } else {
