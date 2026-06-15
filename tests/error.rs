@@ -376,7 +376,7 @@ fn backtrace_captures_from_first_layer() {
     );
     assert!(
         bt_str.contains("inner_most"),
-        "backtrace should contain the outermost function name 'inner_most', got: {bt_str}"
+        "backtrace should contain the innermost function name 'inner_most', got: {bt_str}"
     );
 }
 
