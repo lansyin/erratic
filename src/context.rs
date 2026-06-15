@@ -5,17 +5,20 @@ use alloc::string::String;
 
 use crate::rtti;
 
+mod sealed {
+    pub trait Sealed {}
+}
+
 /// A trait for types that can be used as an error context.
 ///
 /// Most types implement `Context::Repr = Self` via blanket impl.
-pub trait Context: Sized {
+pub trait Context: sealed::Sealed + Sized {
     const FALLBACK: Option<&'static str> = None;
 
     type Repr: Debug + Display + Send + Sync + 'static;
 
     fn try_into_repr(self) -> Option<Self::Repr>;
 
-    #[doc(hidden)]
     fn is_contextless() -> bool
     where
         Self: Sized,
@@ -23,6 +26,8 @@ pub trait Context: Sized {
         rtti::is_same_ty::<Self::Repr, Empty>()
     }
 }
+
+impl<C> sealed::Sealed for C where C: Debug + Display + Send + Sync + 'static {}
 
 impl<C> Context for C
 where
@@ -48,6 +53,8 @@ impl Contextless {
         Self { _priv: () }
     }
 }
+
+impl sealed::Sealed for Contextless {}
 
 impl Context for Contextless {
     type Repr = Empty;
@@ -97,6 +104,13 @@ where
     pub const fn __priv_new(format: F, _literal: L) -> Self {
         Self { format, _literal }
     }
+}
+
+impl<F, L> sealed::Sealed for Mkctx<F, L>
+where
+    F: FnOnce() -> Option<String>,
+    L: Literal,
+{
 }
 
 impl<F, L> Context for Mkctx<F, L>

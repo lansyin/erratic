@@ -1493,7 +1493,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::context::Contextless;
+    use crate::context::{Contextless, Literal, Mkctx};
 
     // --- Test helpers ---
 
@@ -1511,17 +1511,13 @@ mod tests {
 
     /// A typed literal for testing.
     #[derive(Debug)]
-    struct TestContext;
+    struct TestContextLiteral;
 
-    impl Context for TestContext {
-        type Repr = Infallible;
-
-        fn try_into_repr(self) -> Option<Self::Repr> {
-            None
-        }
-
-        const FALLBACK: Option<&'static str> = Some("test context");
+    impl Literal for TestContextLiteral {
+        const LITERAL: &'static str = "test context";
     }
+
+    type TestContext = Mkctx<fn() -> Option<String>, TestContextLiteral>;
 
     // --- RawError kind() discrimination ---
 
@@ -1556,7 +1552,7 @@ mod tests {
     fn const_variant_context() {
         let err = RawError::try_new_const::<TestContext>().unwrap();
         let ctx = err.context();
-        assert_eq!(ctx.unwrap().to_string(), "test context");
+        assert_eq!(ctx.unwrap().to_string(), TestContextLiteral::LITERAL);
     }
 
     #[test]
@@ -1625,10 +1621,10 @@ mod tests {
         let err = RawError::new(
             None::<Infallible>,
             Some(TestError("oops")),
-            TestContext::FALLBACK.unwrap(),
+            TestContextLiteral::LITERAL,
         );
         let ctx = err.context();
-        assert_eq!(ctx.unwrap().to_string(), "test context");
+        assert_eq!(ctx.unwrap().to_string(), TestContextLiteral::LITERAL);
     }
 
     #[test]
@@ -1665,7 +1661,7 @@ mod tests {
         let err = RawError::new(
             Some("state"),
             Some(TestError("oops")),
-            TestContext::FALLBACK.unwrap(),
+            TestContextLiteral::LITERAL,
         );
         let (state, context, source) = err.into_parts::<&str, TestError>();
         assert_matches!(state, Some("state"));
