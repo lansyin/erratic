@@ -61,7 +61,6 @@ macro_rules! match_else {
 /// # fn foo() -> Result<()> {
 /// # let foo = || -> std::result::Result<(), std::io::Error> { unimplemented!() };
 /// # let stream_id = 1;
-/// # let stream_id = 1;
 /// // A plain literal, no allocation.
 /// foo().with_context(mkctx!("file not found"))?;
 /// // A runtime value, one allocation for the error.
@@ -114,7 +113,7 @@ macro_rules! mkctx {
 /// let _: Error = mkerr!("{} not found", filename);
 /// let _: _            = mkerr!(state = State::NotFound);
 /// let _: Error<State> = mkerr!(state = State::NotFound);
-/// let _: Error<State> = mkerr!(
+/// let _:              = mkerr!(
 ///     state = State::NotFound,
 ///     error = err,
 ///     context = mkctx!("failed to open {filename}"),
