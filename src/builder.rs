@@ -135,27 +135,33 @@ where
 // Removed as it has no meaningful use case.
 // Signature: impl<S1, S, F, L> From<Builder<Error<S1>, S, F, L>> for Error
 
-// Builder Case #6: erratic error; stateless+stateless -> state
+// Builder Case #6: erratic error; stateless+stateless -> state; stateless+stateless -> stateless
 impl<S, F> From<Builder<Error<Stateless>, Stateless, F>> for Error<S>
 where
     F: ContextFn,
     S: State + ?Sized,
 {
     fn from(value: Builder<Error<Stateless>, Stateless, F>) -> Self {
-        match (value.err, F::Output::is_contextless()) {
-            (None, true) => unreachable!(),
-            (Some(err), true) => err.with_phantom_state(),
-            (None, false) => Error(RawError::new(
-                None,
-                None::<Infallible>,
-                value.context_fn.call(),
-            )),
-            (Some(err), false) => Error(RawError::new(
-                None,
-                Some(err.erase()),
-                value.context_fn.call(),
-            )),
-        }
+        Error(RawError::new(
+            None,
+            value.err.map(|e| e.erase()),
+            value.context_fn.call(),
+        ))
+    }
+}
+
+// Builder Case #7: generic error; stateless+state -> state
+impl<S, F> From<Builder<Error<Stateless>, S, F>> for Error<S>
+where
+    F: ContextFn,
+    S: State,
+{
+    fn from(value: Builder<Error<Stateless>, S, F>) -> Self {
+        Error(RawError::new(
+            value.state,
+            value.err.map(|e| e.erase()),
+            value.context_fn.call(),
+        ))
     }
 }
 
