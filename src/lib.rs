@@ -92,22 +92,22 @@
 //! }
 //! ```
 //!
-//! The `?` operator covers the most common cases, notably including transitions to any state:
+//! The `?` operator covers the most common cases, regardless of whether the return type carries state:
 //!
-//! | Source        | Target     | Explanation                                     |
-//! | :------------ | :--------- | :---------------------------------------------- |
-//! | `Builder<..>` | `Error<_>` | Build an error from state, context, and source. |
-//! | `impl Error`  | `Error<_>` | Wrap any standard error type.                   |
-//! | `Error`       | `Error<S>` | Propagate an error regardless of state types.   |
+//! | Source             | Target     | Explanation                                        |
+//! | :----------------- | :--------- | :------------------------------------------------- |
+//! | `impl Error`       | `Error<_>` | Wrap any standard error type.                      |
+//! | `Builder<..>`      | `Error<_>` | Build an error from state, context, and/or source. |
+//! | `Error<Stateless>` | `Error<S>` | Propagate a stateless error cheaply.               |
 //!
-//! Stateful errors are meant to be handled explicitly. Several utility methods are provided:
+//! States are meant to be handled explicitly. Several utility methods are provided:
 //!
 //! | Method          | Explanation                                 |
 //! | :-------------- | :------------------------------------------ |
-//! | `erase_error`   | Propagate the error.                        |
 //! | `extract_state` | Take the state out, or propagate the error. |
-//! | `map_state`     | Transform the state with a closure.         |
+//! | `erase_error`   | Discard the state.                          |
 //! | `lift_state`    | Transform via `From<S>`.                    |
+//! | `map_state`     | Transform the state with a closure.         |
 //!
 //! # Backtrace
 //!
@@ -133,10 +133,12 @@
 //! By default, only the top-level error is shown during formatting. To display the full error chain,
 //! format with alternate or debug specifiers.
 //!
-//! - `{}`:       Displays only the top-level error.
-//! - `{:#}`:     Displays the full error chain.
-//! - `{:?}`:     Displays the full error chain with backtrace (if captured).
-//! - `{:#?}`:    Displays all information in a struct-like format.
+//! | Specifier | Explanation                                                 |
+//! | :-------- | :---------------------------------------------------------- |
+//! | `{}`      | Display only the top-level error.                           |
+//! | `{:#}`    | Display the full error chain.                               |
+//! | `{:?}`    | Display the full error chain with backtrace (if captured).  |
+//! | `{:#?}`   | Display all information in a struct-like format.            |
 //!
 //! The error chain is defined as follows:
 //!
@@ -154,7 +156,7 @@
 //! [strict_provenance]: https://doc.rust-lang.org/std/ptr/index.html#strict-provenance
 //!
 //! ```plaintext
-//! (32-bit platform, little-endian)
+//! (32-bit platform, little-endian, backtrace disabled)
 //! (Context Only)
 //! [......00|........|........|........]
 //!                                     \
