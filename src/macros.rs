@@ -113,7 +113,7 @@ macro_rules! mkctx {
 /// let _: Error = mkerr!("{} not found", filename);
 /// let _: _            = mkerr!(state = State::NotFound);
 /// let _: Error<State> = mkerr!(state = State::NotFound);
-/// let _:              = mkerr!(
+/// let _: _            = mkerr!(
 ///     state = State::NotFound,
 ///     error = err,
 ///     context = mkctx!("failed to open {filename}"),
