@@ -297,12 +297,6 @@ where
         self.0.source().map(|v| v as _)
     }
 
-    /// Iterates over the error chain. If this error has its own context or state, it appears first;
-    /// otherwise the chain starts from the source.
-    pub fn chain(&self) -> impl Iterator<Item = &(dyn error::Error + 'static)> {
-        self.0.chain()
-    }
-
     /// Consumes `self` and returns the boxed source error, if any.
     pub fn into_source(self) -> Option<Box<dyn error::Error + Send + Sync + 'static>> {
         self.0.into_source()
@@ -330,6 +324,30 @@ where
         E: error::Error + 'static,
     {
         self.0.downcast_source_mut::<E>()
+    }
+
+    /// Returns the root cause of the error.
+    pub fn root(&self) -> Option<&(dyn error::Error + 'static)> {
+        self.chain().last()
+    }
+
+    /// Attempts to find the first error of the given type in the error chain.
+    pub fn find<E>(&self) -> Option<&E>
+    where
+        E: error::Error + 'static,
+    {
+        for err in self.chain() {
+            if let Some(err) = err.downcast_ref::<E>() {
+                return Some(err);
+            }
+        }
+        None
+    }
+
+    /// Iterates over the error chain. If this error has its own context or state, it appears first;
+    /// otherwise the chain starts from the source.
+    pub fn chain(&self) -> impl Iterator<Item = &(dyn error::Error + 'static)> {
+        self.0.chain()
     }
 
     /// Returns the backtrace, if any.

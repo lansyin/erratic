@@ -379,3 +379,44 @@ fn backtrace_captures_from_first_layer() {
         "backtrace should contain the outermost function name 'inner_most', got: {bt_str}"
     );
 }
+
+#[test]
+fn root_finds_deepest_source() {
+    fn inner_most() -> Error {
+        mkerr!(error = TestError("root cause")).stateless()
+    }
+    fn middle() -> Error {
+        mkerr!(error = inner_most(), "middle layer").stateless()
+    }
+    fn outer_most() -> Error {
+        mkerr!(error = middle(), "outer layer").stateless()
+    }
+
+    let err = outer_most();
+    let root = err.root().expect("root should be found");
+    assert_eq!(root.to_string(), "root cause");
+    assert!(root.downcast_ref::<TestError>().is_some());
+}
+
+#[test]
+fn find_looks_up_error_chain() {
+    fn inner_most() -> Error {
+        mkerr!(error = TestError("root cause")).stateless()
+    }
+    fn middle() -> Error {
+        mkerr!(error = inner_most(), "middle layer").stateless()
+    }
+    fn outer_most() -> Error {
+        mkerr!(error = middle(), "outer layer").stateless()
+    }
+
+    let err = outer_most();
+
+    // Should find TestError (deepest)
+    let found = err.find::<TestError>();
+    assert!(found.is_some());
+    assert_eq!(found.unwrap().0, "root cause");
+
+    // Should not find a type not in the chain
+    assert!(err.find::<core::fmt::Error>().is_none());
+}
