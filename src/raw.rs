@@ -178,10 +178,7 @@ impl<S> RawError<S> {
                 let has_context = unsafe { (vt.context_display)(body.borrow()).is_some() };
                 let has_source = unsafe { (vt.source)(body.borrow()).is_some() };
 
-                match (has_state, has_context, has_source) {
-                    (false, false, true) => true,
-                    _ => false,
-                }
+                matches!((has_state, has_context, has_source), (false, false, true))
             }
         }
     }
@@ -319,10 +316,23 @@ impl<S> RawError<S> {
             RawError::new_boxed(state, source, context)
         }
 
-        match source {
-            Some(source) => new_1(state, source, context),
-            _ => new_1(state, NoSource, context),
-        }
+        let Some(source) = source else {
+            return new_1(state, NoSource, context);
+        };
+        let Err(source) = match_else!(rtti::concretize::<_, BoxedSource>(source), Ok(BoxedSource(source)) => {
+            let Err(source) = match_else!(source.downcast::<ErasedRawError>(), Ok(erased) => {
+                return new_1(state, *erased, context);
+            });
+            let Err(source) = match_else!(source.downcast::<Align4<DynBody<Infallible, BoxedSource, Empty>>>(), Ok(boxed) => {
+                let Align4(body) = *boxed;
+                let (_, source, _) = body.destruct();
+                return new_1(state, source, context);
+            });
+
+            return new_1(state, BoxedSource(source), context);
+        });
+
+        new_1(state, source, context)
     }
 
     /// Returns a reference to the displayable context.
@@ -1087,19 +1097,8 @@ where
     ) -> Box<dyn error::Error + Send + Sync + 'static> {
         unsafe {
             let this = ErasedDynBody::into_inner::<S, E, C>(this);
-            let this_ref = this.borrow().deref();
-            let has_state = this_ref.try_get_state().is_some();
-            let has_context = this_ref.context.get().is_some();
 
-            if has_state || has_context {
-                this.into_boxed()
-            } else {
-                let (_, source, _) = this.into_boxed().0.destruct();
-
-                source.into_boxed().unwrap_or_else(|| {
-                    RawError::new(None::<Infallible>, None::<Infallible>, "").into_boxed_error()
-                })
-            }
+            this.into_boxed()
         }
     }
 
@@ -1440,7 +1439,11 @@ impl ErasedDynBody {
     fn from_typed<S, E, C>(body: Align4Own<DynBody<S, E, C>>) -> Self {
         Self(unsafe { body.cast::<DynBody>() })
     }
-
+    /// Restore the original `Align4Own<DynBody<S, E, C>>` from this `ErasedDynBody`.
+    ///
+    /// # Safety
+    ///
+    /// - `this` must be a valid `ErasedDynBody` pointing to `DynBody<S, E, C>`.
     unsafe fn into_inner<S, E, C>(this: Self) -> Align4Own<DynBody<S, E, C>> {
         let mut this = ManuallyDrop::new(this);
         unsafe {
@@ -1778,6 +1781,82 @@ mod tests {
                 }
                 _ => panic!("extract should not fail"),
             }
+        }
+    }
+
+    // --- Layer elimination ---
+
+    #[test]
+    fn new_eliminates_erased_layer() {
+        // Build a source-only RawError: (RawError -> TestError)
+        let inner = RawError::new(
+            None::<Infallible>,
+            Some(TestError("root")),
+            Contextless::new(),
+        );
+        // Erase the type → ErasedRawError -> TestError
+        let erased = ErasedRawError::from_typed(inner);
+        // Re-wrap: this should eliminate the ErasedRawError layer since it carries no extra info
+        let err = RawError::new(None::<Infallible>, Some(erased), Contextless::new());
+        // Chain should still be 1: RawError -> TestError
+        assert_eq!(err.chain().count(), 1);
+        assert!(
+            err.downcast_source_ref::<TestError>().is_some(),
+            "TestError should be reachable directly"
+        );
+    }
+
+    #[test]
+    fn new_eliminates_boxed_erased_layer() {
+        // Build a source-only RawError: (RawError -> TestError)
+        let inner = RawError::new(
+            None::<Infallible>,
+            Some(TestError("root")),
+            Contextless::new(),
+        );
+        // Erase the type → ErasedRawError
+        let erased = ErasedRawError::from_typed(inner);
+        // Box the erased error → Box<dyn Error> -> ErasedRawError -> TestError
+        let boxed: Box<dyn error::Error + Send + Sync + 'static> = Box::new(erased);
+        // Re-wrap: this should eliminate both Box and ErasedRawError layers
+        let err = RawError::new(
+            None::<Infallible>,
+            Some(BoxedSource(boxed)),
+            Contextless::new(),
+        );
+        // Chain should still be 1: RawError -> TestError
+        assert_eq!(err.chain().count(), 1);
+        assert!(
+            err.downcast_source_ref::<TestError>().is_some(),
+            "TestError should be reachable directly"
+        );
+    }
+
+    #[test]
+    fn round_trip_repeatedly_keeps_single_boxed_layer() {
+        // Start with a source-only RawError: (RawError -> TestError)
+        let mut err = RawError::new(
+            None::<Infallible>,
+            Some(TestError("root")),
+            Contextless::new(),
+        );
+        assert_eq!(err.chain().count(), 1);
+
+        // Round-trip through Box<dyn Error> multiple times.
+        // Each `into_boxed_error` extracts the raw TestError,
+        // and `RawError::new` re-wraps it as a single layer.
+        for _ in 0..5 {
+            let boxed: Box<dyn error::Error + Send + Sync + 'static> = err.into_boxed_error();
+            err = RawError::new(
+                None::<Infallible>,
+                Some(BoxedSource(boxed)),
+                Contextless::new(),
+            );
+            assert_eq!(err.chain().count(), 2, "chain length should always be 2.");
+            assert!(
+                err.chain().last().unwrap().is::<TestError>(),
+                "TestError should always be reachable"
+            );
         }
     }
 }

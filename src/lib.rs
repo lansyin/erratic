@@ -169,6 +169,7 @@
 //!
 #![no_std]
 #![allow(clippy::type_complexity)]
+#![allow(clippy::collapsible_if)] // Suggested by Rust 1.96 clippy, but our MSRV is 1.89.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 extern crate alloc;

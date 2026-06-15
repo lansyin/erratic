@@ -39,13 +39,18 @@ impl ErasedRawError {
             ErasedRawErrorInner::Const(body) => Ok(RawError {
                 const_body: ManuallyDrop::new(body),
             }),
-            ErasedRawErrorInner::Boxed(body) => Ok(RawError {
-                // Note: This erases the generic type `S` to `Infallible`, even though the body may still
-                // contain a state. It doesn't affect `Debug` / `Display` since they use dynamic dispatch, but users
-                // might be surprised to see a stateless error here and later retrieve a concrete state after using
-                // `with_phantom_state` and `state`.
-                boxed_body: ManuallyDrop::new(body),
-            }),
+            ErasedRawErrorInner::Boxed(body) => {
+                let body_ref = body.borrow();
+                let vt = DynBody::vtable(body_ref);
+                let has_state = unsafe { (vt.has_state)(body_ref) };
+                if has_state {
+                    Err(ErasedRawError(ErasedRawErrorInner::Boxed(body)))
+                } else {
+                    Ok(RawError {
+                        boxed_body: ManuallyDrop::new(body),
+                    })
+                }
+            }
             this @ ErasedRawErrorInner::Inline(_) => Err(ErasedRawError(this)),
         }
     }
