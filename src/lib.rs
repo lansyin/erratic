@@ -105,47 +105,43 @@
 //! | Method          | Explanation                                 |
 //! | :-------------- | :------------------------------------------ |
 //! | `extract_state` | Take the state out, or propagate the error. |
-//! | `erase_error`   | Discard the state.                          |
-//! | `lift_state`    | Transform via `From<S>`.                    |
+//! | `erase_error`   | Erase the error regardless of its state.    |
 //! | `map_state`     | Transform the state with a closure.         |
+//! | `lift_state`    | Transform the state via `From<S>`.          |
 //!
 //! # Backtrace
 //!
 //! When the `backtrace` feature is enabled and backtrace capture is configured via
 //! [environment variables][backtrace-conf], `Error<S>` automatically captures a backtrace if there isn't
 //! one already in the source chain. The backtrace will be appended after the error chain during debug
-//! formatting, unless the minus flag, e.g. `{:-?}`, is specified to suppress it.
+//! formatting, unless the minus sign, e.g. `{:-?}`, is specified to suppress it.
 //!
 //! [backtrace-conf]: https://doc.rust-lang.org/std/backtrace/index.html#environment-variables
 //!
 //! # Representation
 //!
-//! If the error contains only a source, the error message is inherited from the source. Otherwise, the
-//! error message is constructed from other attached components.
+//! If the error has a state and/or context, it builds its message from them. Otherwise, it acts as an error container,
+//! inheriting the message from its source. When wrapped, the container itself will not be added as another source layer,
+//! preventing duplicate messages in the chain.
 //!
 //! ```text
 //! <error> ::= <source>
 //!           | <state>": "<context>
 //!           | <context>
 //!           | <state>
+//! <chain> ::= <error>
+//!           | <error>"\n  -> "<chain>
 //! ```
 //!
 //! By default, only the top-level error is shown during formatting. To display the full error chain,
 //! format with alternate or debug specifiers.
 //!
-//! | Specifier | Explanation                                                 |
-//! | :-------- | :---------------------------------------------------------- |
-//! | `{}`      | Display only the top-level error.                           |
-//! | `{:#}`    | Display the full error chain.                               |
-//! | `{:?}`    | Display the full error chain with backtrace (if captured).  |
-//! | `{:#?}`   | Display all information in a struct-like format.            |
-//!
-//! The error chain is defined as follows:
-//!
-//! ```text
-//! <chain> ::= <error>
-//!           | <error>"\n  -> "<chain>
-//! ```
+//! | Specifier | Explanation                                               |
+//! | :-------- | :-------------------------------------------------------- |
+//! | `{}`      | Display only the top-level error.                         |
+//! | `{:#}`    | Display the full error chain.                             |
+//! | `{:?}`    | Display the full error chain with backtrace, if captured. |
+//! | `{:#?}`   | Display all information in a struct-like format.          |
 //!
 //! # Layout
 //!
@@ -155,18 +151,20 @@
 //!
 //! [strict_provenance]: https://doc.rust-lang.org/std/ptr/index.html#strict-provenance
 //!
+//! The error has three possible layouts. When constructed from a literal, it stores a pointer to the literal.
+//! When constructed from a small state, it stores the state inline. Otherwise, it points to a heap-allocated Object
+//! containing a vtable and potentially a state, source, and/or context.
+//!
 //! ```plaintext
-//! (32-bit platform, little-endian, backtrace disabled)
-//! (Context Only)
-//! [......00|........|........|........]
-//!                                     \
-//!                                      `rodata-> [Context]
-//! (Allocation Required)
-//! [......01|........|........|........]
-//!                                     \
-//!                                      `heap-> [VTable|State|Error|Context]
-//! (Small State Only)
-//! [00000010|     ~    State     ~     ]
+//! ┌Error<S>─────────────╎───┐   ┌ConstBody─────┐   ┌str──────┐
+//! │ Align4Ref<ConstBody>╎00 ├───┤ ConstContext ├───┤ Literal │
+//! └─────────────────────╎───┘   └──────────────┘   └─────────┘
+//! ┌Error<S>─────────────╎───┐   ┌BoxedBody─────────────┬────────────────────┬────────┬─────────┐
+//! │ Align4Own<BoxedBody>╎01 ├───┤ Align4Ref<VTable>╎0X │ MaybeUninit<State> │ Source │ Context │
+//! └─────────────────────╎───┘   └────────────────────┼─┴───────────────┼────┴────────┴─────────┘
+//! ┌Error<S>─────┬───────╎───┐                        └──X=0:extracted──┘
+//! │    State    │ 000000╎10 │
+//! └─────────────┴───────╎───┘
 //! ```
 //!
 #![no_std]

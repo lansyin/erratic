@@ -1,4 +1,4 @@
-//! Builder for constructing an [`Error`].
+//! Builder for constructing errors.
 use core::{convert::Infallible, error, fmt::Debug, result};
 
 use crate::{
