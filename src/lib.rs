@@ -94,31 +94,22 @@
 //!
 //! The `?` operator covers the most common cases, regardless of whether the return type carries state:
 //!
-//! | Source             | Target     | Explanation                                        |
-//! | :----------------- | :--------- | :------------------------------------------------- |
-//! | `impl Error`       | `Error<_>` | Wrap any standard error type.                      |
-//! | `Builder<..>`      | `Error<_>` | Build an error from state, context, and/or source. |
-//! | `Error<Stateless>` | `Error<S>` | Propagate a stateless error cheaply.               |
+//! | Source Type        | Return Type   | Explanation                                          |
+//! | :----------------- | :------------ | :--------------------------------------------------- |
+//! | `impl Error`       | `Error<_>`    | Wrap any standard error type.                        |
+//! | `Builder<..>`      | `Error<_>`    | Build an error from state, context, and/or source.   |
+//! | `Error<Stateless>` | `Error<S>`    | Cheaply convert a stateless error to a stateful one. |
 //!
 //! States are meant to be handled explicitly. Several utility methods are provided:
 //!
-//! | Method          | Explanation                                 |
-//! | :-------------- | :------------------------------------------ |
-//! | `extract_state` | Take the state out, or propagate the error. |
-//! | `erase_error`   | Erase the error regardless of its state.    |
-//! | `map_state`     | Transform the state with a closure.         |
-//! | `lift_state`    | Transform the state via `From<S>`.          |
+//! | Method          | Conversion                                    | Explanation                                 |
+//! | :-------------- | :-------------------------------------------- | :------------------------------------------ |
+//! | `extract_state` | `Error<S>` -> `Result<(S, Vacant<S>), Error>` | Take the state out, or propagate the error. |
+//! | `erase_error`   | `Error<S>` -> `impl Error`                    | Erase the error along with its state.       |
+//! | `map_state`     | `Error<S>` -> `Error<S2>`                     | Transform the state with a closure.         |
+//! | `lift_state`    | `Error<S>` -> `Error<S2>` where `S2: From<S>` | Transform the state via `From<S>`.          |
 //!
-//! # Backtrace
-//!
-//! When the `backtrace` feature is enabled and backtrace capture is configured via
-//! [environment variables][backtrace-conf], `Error<S>` automatically captures a backtrace if there isn't
-//! one already in the source chain. The backtrace will be appended after the error chain during debug
-//! formatting, unless the minus sign, e.g. `{:-?}`, is specified to suppress it.
-//!
-//! [backtrace-conf]: https://doc.rust-lang.org/std/backtrace/index.html#environment-variables
-//!
-//! # Representation
+//! # Formatting
 //!
 //! If the error has a state and/or context, it builds its message from them. Otherwise, it acts as an error container,
 //! inheriting the message from its source. When wrapped, the container itself will not be added as another source layer,
@@ -143,7 +134,46 @@
 //! | `{:?}`    | Display the full error chain with backtrace, if captured. |
 //! | `{:#?}`   | Display all information in a struct-like format.          |
 //!
-//! # Layout
+//! # Custom Formatting
+//!
+//! To customize the error message, use `FormatWith<F>` at the point of printing. Since the formatter is tied
+//! to type rather than value, the rest of the program can use the error as usual, without thinking about
+//! how it will be displayed.
+//!
+//! For example:
+//!
+//! ```rust
+//! # use erratic::{Error, BuilderExt, state::FormatWith, fmt::Formatter};
+//! # struct Arrow;
+//! # impl Formatter for Arrow {}
+//! # mod executor { pub fn block_on<F>(_: F) -> erratic::Result<()> { Ok(()) } }
+//! fn main() -> Result<(), Error<FormatWith<Arrow>>> {
+//!     executor::block_on(async_main())?;
+//!     Ok(())
+//! }
+//! async fn async_main() -> erratic::Result<()> {
+//!     todo!();
+//! }
+//! ```
+//!
+//! If `async_main` returns a chain of three errors, `Arrow` can format it as follows:
+//!
+//! ```text
+//! FileNotFound: hello.txt
+//! ├─▶ while invoking copy_context
+//! └─▶ no such device
+//! ```
+//!
+//! # Backtrace
+//!
+//! When the `backtrace` feature is enabled and backtrace capture is configured via
+//! [environment variables][backtrace-conf], `Error<S>` automatically captures a backtrace if there isn't
+//! one already in the source chain. The backtrace will be appended after the error chain during debug
+//! formatting, unless the minus sign, e.g. `{:-?}`, is specified to suppress it.
+//!
+//! [backtrace-conf]: https://doc.rust-lang.org/std/backtrace/index.html#environment-variables
+//!
+//! # Representation
 //!
 //! Type-wise, `Error<S>` is an internally tagged union, and it requires pointers to be aligned to 4 bytes,
 //! freeing up the lower 2 bits to encode its discriminant. Pointer tagging in this crate fully follows
@@ -178,7 +208,6 @@ extern crate alloc;
 extern crate std;
 
 mod raw;
-mod render;
 mod rtti;
 
 #[doc(hidden)]
@@ -186,13 +215,14 @@ pub mod macros;
 
 pub mod builder;
 pub mod context;
+pub mod fmt;
 pub mod state;
 
 use alloc::boxed::Box;
 use core::{
     convert::Infallible,
     error,
-    fmt::{self, Debug, Display},
+    fmt::{Debug, Display},
     ops::{Deref, DerefMut},
     result,
 };
@@ -200,8 +230,9 @@ use core::{
 use crate::{
     builder::Builder,
     context::{Context, ContextFn, Contextless, Identity},
+    fmt::Formatter,
     raw::{BoxedSource, RawError},
-    state::{State, Stateless, Vacant},
+    state::{FormatWith, State, Stateless, Vacant},
 };
 
 pub type Result<T> = result::Result<T, Error>;
@@ -258,7 +289,7 @@ where
 
     /// Returns a reference to the context, if present.
     pub fn context(&self) -> Option<&(dyn Display + Send + Sync + 'static)> {
-        self.0.context()
+        self.0.context().map(|v| v as _)
     }
 
     /// Returns `true` if the attached context is of type `C`.
@@ -446,6 +477,16 @@ impl Error {
     }
 }
 
+impl<F> Error<FormatWith<F>>
+where
+    F: Formatter,
+{
+    /// Discards the custom formatter.
+    pub fn into_stateless(self) -> Error {
+        Error(self.0)
+    }
+}
+
 impl<S> Deref for Error<S>
 where
     S: State + ?Sized,
@@ -479,6 +520,15 @@ where
 impl<S> From<Error> for Error<S>
 where
     S: State,
+{
+    fn from(value: Error) -> Self {
+        value.with_phantom_state()
+    }
+}
+
+impl<F> From<Error> for Error<FormatWith<F>>
+where
+    F: Formatter,
 {
     fn from(value: Error) -> Self {
         value.with_phantom_state()
@@ -523,19 +573,59 @@ where
 
 impl<S> Debug for Error<S>
 where
-    S: State + ?Sized,
+    S: State,
 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         Debug::fmt(&self.0, f)
     }
 }
 
 impl<S> Display for Error<S>
 where
-    S: State + ?Sized,
+    S: State,
 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         Display::fmt(&self.0, f)
+    }
+}
+
+impl Debug for Error<Stateless> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        Debug::fmt(&self.0, f)
+    }
+}
+
+impl Display for Error<Stateless> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl<F> Debug for Error<FormatWith<F>>
+where
+    F: Formatter,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        F::format_debug(
+            f,
+            self.0.context(),
+            self.source(),
+            self.0.backtrace_opaque(),
+        )
+    }
+}
+
+impl<F> Display for Error<FormatWith<F>>
+where
+    F: Formatter,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        F::format_display(
+            f,
+            self.0.context(),
+            self.source(),
+            self.0.backtrace_opaque(),
+        )
     }
 }
 

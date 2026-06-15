@@ -1,17 +1,17 @@
 use core::{
     convert::Infallible,
     error::Error,
-    fmt::{self, Debug, Display},
+    fmt::{Debug, Display},
     mem::ManuallyDrop,
     result,
 };
 
 use crate::{
+    fmt,
     raw::{
         ConstBody, DynBody, ErasedDynBody, RawError, SelectOwn,
         ptr::{Align4Ref, ErasedAlign4PtrCompat},
     },
-    render,
 };
 
 pub struct ErasedRawError(ErasedRawErrorInner);
@@ -57,9 +57,9 @@ impl ErasedRawError {
 }
 
 impl Debug for ErasedRawError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match &self.0 {
-            ErasedRawErrorInner::Const(body) => render::format_debug::<()>(
+            ErasedRawErrorInner::Const(body) => fmt::format_debug::<()>(
                 f,
                 None,
                 Some(&body.borrow().deref().context),
@@ -72,16 +72,16 @@ impl Debug for ErasedRawError {
                 unsafe { (vt.debug)(body, f) }
             }
             ErasedRawErrorInner::Inline(body) => {
-                render::format_debug(f, Some(body), None::<Infallible>, None, None::<&Infallible>)
+                fmt::format_debug(f, Some(body), None::<Infallible>, None, None::<&Infallible>)
             }
         }
     }
 }
 
 impl Display for ErasedRawError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match &self.0 {
-            ErasedRawErrorInner::Const(body) => render::format_display::<()>(
+            ErasedRawErrorInner::Const(body) => fmt::format_display::<()>(
                 f,
                 None,
                 Some(&body.borrow().deref().context),
@@ -93,9 +93,13 @@ impl Display for ErasedRawError {
                 let vt = DynBody::vtable(body);
                 unsafe { (vt.display)(body, f) }
             }
-            ErasedRawErrorInner::Inline(body) => {
-                render::format_display(f, Some(body), None, None, None::<&Infallible>)
-            }
+            ErasedRawErrorInner::Inline(body) => fmt::format_display(
+                f,
+                Some(body),
+                None::<&Infallible>,
+                None,
+                None::<&Infallible>,
+            ),
         }
     }
 }

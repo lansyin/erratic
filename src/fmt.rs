@@ -1,13 +1,40 @@
+//! Trait for defining custom formatters.
 use core::{
-    error::{self},
+    convert::Infallible,
+    error,
     fmt::{self, Debug, Display},
     result,
 };
 
+/// A formatter for [`Error`][crate::Error], works with [`FormatWith`][crate::state::FormatWith].
+pub trait Formatter: 'static {
+    fn format_debug(
+        f: &mut fmt::Formatter<'_>,
+        context: Option<impl Debug + Display>,
+        source: Option<&(dyn error::Error + 'static)>,
+        backtrace: Option<impl Debug + Display>,
+    ) -> fmt::Result {
+        format_debug(f, None::<&Infallible>, context, source, backtrace)
+    }
+
+    fn format_display(
+        f: &mut fmt::Formatter<'_>,
+        context: Option<impl Debug + Display>,
+        source: Option<&(dyn error::Error + 'static)>,
+        backtrace: Option<impl Debug + Display>,
+    ) -> fmt::Result {
+        format_display(f, None::<&Infallible>, context, source, backtrace)
+    }
+}
+
+pub(crate) trait DebugDisplay: Debug + Display {}
+
+impl<T> DebugDisplay for T where T: Debug + Display {}
+
 fn format_state_context(
     f: &mut fmt::Formatter<'_>,
-    state: Option<&impl Debug>,
-    context: Option<&impl Display>,
+    state: Option<impl Debug>,
+    context: Option<impl Display>,
 ) -> result::Result<bool, fmt::Error> {
     match (state, context) {
         (None, None) => return Ok(false),
@@ -24,7 +51,7 @@ fn format_state_context(
     Ok(true)
 }
 
-pub fn format_debug_struct<S>(
+pub(crate) fn format_debug_struct<S>(
     f: &mut fmt::Formatter<'_>,
     container_name: &'static str,
     state: Option<&S>,
@@ -56,7 +83,7 @@ where
     ds.finish()
 }
 
-pub fn format_chain<S>(
+fn format_chain<S>(
     f: &mut fmt::Formatter<'_>,
     state: Option<&S>,
     context: Option<impl Display>,
@@ -88,7 +115,7 @@ where
     Ok(())
 }
 
-pub fn format_debug<S>(
+pub(crate) fn format_debug<S>(
     f: &mut fmt::Formatter<'_>,
     state: Option<&S>,
     context: Option<impl Debug + Display>,
@@ -120,12 +147,12 @@ where
     }
 }
 
-pub fn format_display<S>(
+pub(crate) fn format_display<S>(
     f: &mut fmt::Formatter<'_>,
     state: Option<&S>,
-    context: Option<&dyn Display>,
+    context: Option<impl Display>,
     source: Option<&(dyn error::Error + 'static)>,
-    _backtrace: Option<impl Debug + Display>,
+    _backtrace: Option<impl Display>,
 ) -> fmt::Result
 where
     S: Debug + 'static,

@@ -80,31 +80,22 @@ fn write(w: &mut Writer, data: &[u8; 64]) -> Result<()> {
 
 The `?` operator covers the most common cases, regardless of whether the return type carries state:
 
-| Source             | Target     | Explanation                                        |
-| :----------------- | :--------- | :------------------------------------------------- |
-| `impl Error`       | `Error<_>` | Wrap any standard error type.                      |
-| `Builder<..>`      | `Error<_>` | Build an error from state, context, and/or source. |
-| `Error<Stateless>` | `Error<S>` | Propagate a stateless error cheaply.               |
+| Source Type        | Return Type   | Explanation                                          |
+| :----------------- | :------------ | :--------------------------------------------------- |
+| `impl Error`       | `Error<_>`    | Wrap any standard error type.                        |
+| `Builder<..>`      | `Error<_>`    | Build an error from state, context, and/or source.   |
+| `Error<Stateless>` | `Error<S>`    | Cheaply convert a stateless error to a stateful one. |
 
 States are meant to be handled explicitly. Several utility methods are provided:
 
-| Method          | Explanation                                 |
-| :-------------- | :------------------------------------------ |
-| `extract_state` | Take the state out, or propagate the error. |
-| `erase_error`   | Erase the error regardless of its state.    |
-| `map_state`     | Transform the state with a closure.         |
-| `lift_state`    | Transform the state via `From<S>`.          |
+| Method          | Conversion                                    | Explanation                                 |
+| :-------------- | :-------------------------------------------- | :------------------------------------------ |
+| `extract_state` | `Error<S>` -> `Result<(S, Vacant<S>), Error>` | Take the state out, or propagate the error. |
+| `erase_error`   | `Error<S>` -> `impl Error`                    | Erase the error along with its state.       |
+| `map_state`     | `Error<S>` -> `Error<S2>`                     | Transform the state with a closure.         |
+| `lift_state`    | `Error<S>` -> `Error<S2>` where `S2: From<S>` | Transform the state via `From<S>`.          |
 
-## Backtrace
-
-When the `backtrace` feature is enabled and backtrace capture is configured via
-[environment variables][backtrace-conf], `Error<S>` automatically captures a backtrace if there isn't
-one already in the source chain. The backtrace will be appended after the error chain during debug
-formatting, unless the minus sign, e.g. `{:-?}`, is specified to suppress it.
-
-[backtrace-conf]: https://doc.rust-lang.org/std/backtrace/index.html#environment-variables
-
-## Representation
+## Formatting
 
 If the error has a state and/or context, it builds its message from them. Otherwise, it acts as an error container,
 inheriting the message from its source. When wrapped, the container itself will not be added as another source layer,
@@ -129,7 +120,42 @@ format with alternate or debug specifiers.
 | `{:?}`    | Display the full error chain with backtrace, if captured. |
 | `{:#?}`   | Display all information in a struct-like format.          |
 
-## Layout
+## Custom Formatting
+
+To customize the error message, use `FormatWith<F>` at the point of printing. Since the formatter is tied
+to type rather than value, the rest of the program can use the error as usual, without thinking about
+how it will be displayed.
+
+For example:
+
+```rust
+fn main() -> Result<(), Error<FormatWith<Arrow>>> {
+    executor::block_on(async_main())?;
+    Ok(())
+}
+async fn async_main() -> erratic::Result<()> {
+    todo!();
+}
+```
+
+If `async_main` returns a chain of three errors, `Arrow` can format it as follows:
+
+```
+FileNotFound: hello.txt
+├─▶ while invoking copy_context
+└─▶ no such device
+```
+
+## Backtrace
+
+When the `backtrace` feature is enabled and backtrace capture is configured via
+[environment variables][backtrace-conf], `Error<S>` automatically captures a backtrace if there isn't
+one already in the source chain. The backtrace will be appended after the error chain during debug
+formatting, unless the minus sign, e.g. `{:-?}`, is specified to suppress it.
+
+[backtrace-conf]: https://doc.rust-lang.org/std/backtrace/index.html#environment-variables
+
+## Representation
 
 Type-wise, `Error<S>` is an internally tagged union, and it requires pointers to be aligned to 4 bytes,
 freeing up the lower 2 bits to encode its discriminant. Pointer tagging in this crate fully follows

@@ -8,7 +8,7 @@ use core::{
     any::TypeId,
     convert::Infallible,
     error,
-    fmt::{self, Debug, Display},
+    fmt::{Debug, Display},
     mem::{self, ManuallyDrop, MaybeUninit},
     ops::{Deref, DerefMut},
     ptr::NonNull,
@@ -17,13 +17,14 @@ use core::{
 
 use crate::{
     context::{self, Context, Empty},
+    fmt::{self, DebugDisplay},
     match_else,
     raw::{
         erased::ErasedRawError,
         ptr::{Align4, Align4Own, Align4PtrCompat, Align4Ref, Metadata, Mut, Ref},
         source::{IndirectSource, NoSource, Source, WithBacktraceSource},
     },
-    render, rtti,
+    rtti,
 };
 use backtrace::WithBacktrace;
 
@@ -175,7 +176,7 @@ impl<S> RawError<S> {
             SelectRef::Boxed(body) => {
                 let vt = DynBody::vtable(body.borrow());
                 let has_state = unsafe { (vt.has_state)(body.borrow()) };
-                let has_context = unsafe { (vt.context_display)(body.borrow()).is_some() };
+                let has_context = unsafe { (vt.context)(body.borrow()).is_some() };
                 let has_source = unsafe { (vt.source)(body.borrow()).is_some() };
 
                 matches!((has_state, has_context, has_source), (false, false, true))
@@ -336,7 +337,7 @@ impl<S> RawError<S> {
     }
 
     /// Returns a reference to the displayable context.
-    pub fn context(&self) -> Option<&'_ (dyn Display + Send + Sync + 'static)> {
+    pub fn context(&self) -> Option<&'_ (dyn DebugDisplay + Send + Sync + 'static)> {
         match self.select_ref() {
             // Safety: Projection from `ConstBody` to `ConstBody::context` is safe.
             SelectRef::Const(body) => unsafe {
@@ -349,7 +350,7 @@ impl<S> RawError<S> {
             SelectRef::Boxed(body) => unsafe {
                 let vtable = DynBody::vtable(body.borrow());
                 // Safety: The body pointer is confirmed valid.
-                (vtable.context_display)(body.borrow())
+                (vtable.context)(body.borrow()).map(|c| c as _)
             },
             SelectRef::Inline(_body) => None,
         }
@@ -644,6 +645,15 @@ impl<S> RawError<S> {
         ErasedRawError::from_typed(self)
     }
 
+    pub fn backtrace_opaque(&self) -> Option<&dyn DebugDisplay> {
+        #[cfg(feature = "backtrace")]
+        {
+            WithBacktrace::search(|| self.source().map(|v| v as _)).map(|v| v as _)
+        }
+        #[cfg(not(feature = "backtrace"))]
+        None
+    }
+
     #[cfg(feature = "backtrace")]
     pub fn backtrace(&self) -> Option<&std::backtrace::Backtrace> {
         WithBacktrace::search(|| self.source().map(|v| v as _))
@@ -670,9 +680,9 @@ impl<S> Debug for RawError<S>
 where
     S: Debug,
 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self.select_ref() {
-            SelectRef::Const(body) => render::format_debug(
+            SelectRef::Const(body) => fmt::format_debug(
                 f,
                 None::<&()>,
                 Some(body.borrow().deref().context),
@@ -680,7 +690,7 @@ where
                 None::<&Infallible>,
             ),
             SelectRef::Inline(_) => {
-                render::format_debug(f, self.state(), None::<&str>, None, None::<&Infallible>)
+                fmt::format_debug(f, self.state(), None::<&str>, None, None::<&Infallible>)
             }
             SelectRef::Boxed(body) => {
                 let vtable = DynBody::vtable(body.borrow());
@@ -694,15 +704,11 @@ impl<S> Display for RawError<S>
 where
     S: Debug,
 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self.select_ref() {
-            SelectRef::Const(_) | SelectRef::Inline(_) => render::format_display(
-                f,
-                self.state(),
-                self.context().map(|v| v as _),
-                None,
-                None::<&Infallible>,
-            ),
+            SelectRef::Const(_) | SelectRef::Inline(_) => {
+                fmt::format_display(f, self.state(), self.context(), None, None::<&Infallible>)
+            }
             SelectRef::Boxed(body) => {
                 let vtable = DynBody::vtable(body.borrow());
                 unsafe { (vtable.display)(body.borrow(), f) }
@@ -823,9 +829,9 @@ struct DynBodyVTable {
     /// See [DynBody::into_boxed_error].
     into_boxed_error: unsafe fn(ErasedDynBody) -> Box<dyn error::Error + Send + Sync + 'static>,
     /// See [DynBody::debug].
-    debug: unsafe fn(Ref<'_, DynBody>, &mut fmt::Formatter<'_>) -> fmt::Result,
+    debug: unsafe fn(Ref<'_, DynBody>, &mut core::fmt::Formatter<'_>) -> core::fmt::Result,
     /// See [DynBody::display].
-    display: unsafe fn(Ref<'_, DynBody>, &mut fmt::Formatter<'_>) -> fmt::Result,
+    display: unsafe fn(Ref<'_, DynBody>, &mut core::fmt::Formatter<'_>) -> core::fmt::Result,
     /// See [DynBody::try_set_state].
     try_set_state: unsafe fn(Mut<DynBody>, TypeId, NonNull<()>) -> bool,
     /// See [DynBody::has_state].
@@ -837,10 +843,8 @@ struct DynBodyVTable {
         unsafe fn(Mut<'_, DynBody>) -> Option<&mut (dyn error::Error + Send + Sync + 'static)>,
     /// See [DynBody::state].
     state: unsafe fn(Ref<'_, DynBody>, TypeId, NonNull<()>),
-    /// See [DynBody::context_display].
-    context_display: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn Display + Send + Sync + 'static)>,
-    /// See [DynBody::context_debug].
-    context_debug: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn Debug + Send + Sync + 'static)>,
+    /// See [DynBody::context].
+    context: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn DebugDisplay + Send + Sync + 'static)>,
     /// See [DynBody::downcast_context_ref].
     downcast_context_ref: unsafe fn(Ref<'_, DynBody>, TypeId, NonNull<()>),
     /// See [DynBody::downcast_context_mut].
@@ -868,8 +872,7 @@ impl DynBodyVTable {
             source: DynBody::<S, E, C>::source,
             source_mut: DynBody::<S, E, C>::source_mut,
             state: DynBody::<S, E, C>::state,
-            context_display: DynBody::<S, E, C>::context_display,
-            context_debug: DynBody::<S, E, C>::context_debug,
+            context: DynBody::<S, E, C>::context,
             downcast_context_ref: DynBody::<S, E, C>::downcast_context_ref,
             downcast_context_mut: DynBody::<S, E, C>::downcast_context_mut,
         }
@@ -1107,7 +1110,7 @@ where
     /// # Safety
     ///
     /// - `this` must be a valid `Mut` pointing to `DynBody<S, E, C>`.
-    unsafe fn debug(this: Ref<'_, DynBody>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    unsafe fn debug(this: Ref<'_, DynBody>, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let this = unsafe { this.cast::<Self>().deref() };
         <Self as Debug>::fmt(this, f)
     }
@@ -1117,7 +1120,10 @@ where
     /// # Safety
     ///
     /// - `this` must be a valid `Mut` pointing to `DynBody<S, E, C>`.
-    unsafe fn display(this: Ref<'_, DynBody>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    unsafe fn display(
+        this: Ref<'_, DynBody>,
+        f: &mut core::fmt::Formatter<'_>,
+    ) -> core::fmt::Result {
         let this = unsafe { this.cast::<Self>().deref() };
         <Self as Display>::fmt(this, f)
     }
@@ -1206,27 +1212,14 @@ where
         }
     }
 
-    /// Returns a `&dyn Display` to the context.
+    /// Returns a displayable reference to the context.
     ///
     /// # Safety
     ///
     /// - `this` must point to a valid `DynBody<S, E, C>`.
-    unsafe fn context_display(
+    unsafe fn context(
         this: Ref<'_, DynBody>,
-    ) -> Option<&(dyn Display + Send + Sync + 'static)> {
-        let this = unsafe { this.cast::<Self>().deref() };
-
-        this.context.get().map(|c| c as _)
-    }
-
-    /// Returns a `&dyn Debug` to the context.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must point to a valid `DynBody<S, E, C>`.
-    unsafe fn context_debug(
-        this: Ref<'_, DynBody>,
-    ) -> Option<&(dyn Debug + Send + Sync + 'static)> {
+    ) -> Option<&(dyn DebugDisplay + Send + Sync + 'static)> {
         let this = unsafe { this.cast::<Self>().deref() };
 
         this.context.get().map(|c| c as _)
@@ -1285,14 +1278,14 @@ impl<S, E, C> Drop for DynBody<S, E, C> {
     }
 }
 
-impl<S, E, C> fmt::Debug for DynBody<S, E, C>
+impl<S, E, C> core::fmt::Debug for DynBody<S, E, C>
 where
     S: Debug + Send + Sync + 'static,
     E: Source + Send + Sync + 'static,
     C: Debug + Display + Send + Sync + 'static,
 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        render::format_debug(
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        fmt::format_debug(
             f,
             self.try_get_state(),
             self.context.get(),
@@ -1302,17 +1295,17 @@ where
     }
 }
 
-impl<S, E, C> fmt::Display for DynBody<S, E, C>
+impl<S, E, C> core::fmt::Display for DynBody<S, E, C>
 where
     S: Debug + Send + Sync + 'static,
     E: Source + Send + Sync + 'static,
     C: Debug + Display + Send + Sync + 'static,
 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        render::format_display(
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        fmt::format_display(
             f,
             self.try_get_state(),
-            self.context.get().map(|c| c as _),
+            self.context.get(),
             self.source.error_ref().map(|e| e as _),
             WithBacktrace::search_display(|| self.source.error_ref().map(|e| e as _)),
         )
@@ -1359,7 +1352,7 @@ impl RawVacant {
 
         unsafe {
             let body_ref = self.0.borrow();
-            let has_context = (vt.context_display)(body_ref);
+            let has_context = (vt.context)(body_ref);
             let has_source = (vt.source)(body_ref);
             match (has_context, has_source) {
                 (None, None) => Err(self),
@@ -1381,7 +1374,7 @@ impl RawVacant {
 
         unsafe {
             let body_ref = self.0.borrow();
-            let has_context = (vt.context_display)(body_ref).is_some();
+            let has_context = (vt.context)(body_ref).is_some();
             let has_source = (vt.source)(body_ref).is_some();
             match (has_context, has_source) {
                 (false, false) => match (vt.into_backtrace)(self.0) {
@@ -1406,12 +1399,12 @@ impl RawVacant {
 }
 
 impl Debug for RawVacant {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let body_ref = self.0.borrow();
         let vt = DynBody::vtable(body_ref);
 
         unsafe {
-            let context = (vt.context_debug)(body_ref);
+            let context = (vt.context)(body_ref);
             let source = (vt.source)(body_ref);
             let backtrace = (!f.sign_minus())
                 .then(|| {
@@ -1421,7 +1414,7 @@ impl Debug for RawVacant {
                 })
                 .flatten();
 
-            render::format_debug_struct::<Infallible>(
+            fmt::format_debug_struct::<Infallible>(
                 f,
                 "Vacant",
                 None,
@@ -1485,12 +1478,7 @@ mod tests {
         format,
         string::{String, ToString},
     };
-    use core::{
-        assert_matches,
-        convert::Infallible,
-        fmt::{self, Display},
-        mem,
-    };
+    use core::{assert_matches, convert::Infallible, fmt::Display, mem};
 
     use super::*;
     use crate::context::{Contextless, Literal, Mkctx};
@@ -1502,7 +1490,7 @@ mod tests {
     struct TestError(&'static str);
 
     impl Display for TestError {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
             write!(f, "{}", self.0)
         }
     }
@@ -1717,7 +1705,7 @@ mod tests {
         }
 
         impl Display for DropWatch {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 write!(f, "")
             }
         }
