@@ -771,22 +771,14 @@ where
     where
         S: State,
     {
-        self.map_err(|err| Builder {
-            err: Some(err),
-            state: Some(state.into_repr()),
-            context_fn: Identity(Contextless::new()),
-        })
+        self.map_err(|err| Builder::with_error(err).with_state(state))
     }
 
     fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
     where
         F: ContextFn,
     {
-        self.map_err(|err| Builder {
-            err: Some(err),
-            state: None,
-            context_fn,
-        })
+        self.map_err(|err| Builder::with_error(err).with_context_fn(context_fn))
     }
 }
 
