@@ -16,9 +16,9 @@ where
     F: ContextFn,
     S: State + ?Sized,
 {
-    pub err: Option<E>,
-    pub state: Option<S::Repr>,
-    pub context_fn: F,
+    err: Option<E>,
+    state: Option<S::Repr>,
+    context_fn: F,
 }
 
 impl Builder<Infallible, Stateless, Identity<Contextless>> {
