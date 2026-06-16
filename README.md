@@ -51,11 +51,11 @@ use erratic::*;
 #[derive(Debug)]
 enum State { RetryLater } // Smaller than 1 usize.
 
-fn try_write(w: &mut Writer, data: &[u8; 64]) -> Result<(), Error<State>> {
+fn try_write(w: &mut Writer, block: &[u8; 64]) -> Result<(), Error<State>> {
     w.reserve_chunk(64)
         .ok()
         .with_state(State::RetryLater)?; // No alloc.
-    w.write(data)
+    w.write(block)
         .with_context(mkctx!("failed to write to {}", w.id()))?;
     Ok(())
 }
@@ -66,9 +66,9 @@ This allows infrastructure errors to cross any number of layers with no extra al
 avoid the heap entirely, and both share the same `Error<S>` type. All compose orthogonally.
 
 ```rust
-fn write(w: &mut Writer, data: &[u8; 64]) -> Result<()> {
-    while let Err((state, _)) = try_write(w, data).extract_state()? {
-        match state {
+fn write(w: &mut Writer, block: &[u8; 64]) -> Result<()> {
+    while let Err((state, _)) = try_write(w, block).extract_state()? { // Propagate infra errors.
+        match state { // Handle domain errors.
             State::RetryLater => {
                 thread::yield_now();
             }
@@ -93,7 +93,7 @@ States are meant to be handled explicitly. Several utility methods are provided:
 | `extract_state` | `Error<S>` -> `Result<(S, Vacant<S>), Error>` | Take the state out, or propagate the error. |
 | `erase_error`   | `Error<S>` -> `impl Error`                    | Erase the error along with its state.       |
 | `map_state`     | `Error<S>` -> `Error<S2>`                     | Transform the state with a closure.         |
-| `lift_state`    | `Error<S>` -> `Error<S2>` where `S2: From<S>` | Transform the state via `From<S>`.          |
+| `lift_state`    | `Error<S>` -> `Error<S2>` where `S2: From<S>` | Transform the state via `From`.             |
 
 ## Formatting
 
@@ -172,9 +172,9 @@ containing a vtable and potentially a state, source, and/or context.
 │ Align4Ref<ConstBody>╎00 ├───┤ ConstContext ├───┤ Literal │
 └─────────────────────╎───┘   └──────────────┘   └─────────┘
 ┌Error<S>─────────────╎───┐   ┌BoxedBody─────────────┬────────────────────┬────────┬─────────┐
-│ Align4Own<BoxedBody>╎01 ├───┤ Align4Ref<VTable>╎0X │ MaybeUninit<State> │ Source │ Context │
+│ Align4Own<BoxedBody>╎01 ├───┤ Align4Ref<VTable>╎0H │ MaybeUninit<State> │ Source │ Context │
 └─────────────────────╎───┘   └────────────────────┼─┴───────────────┼────┴────────┴─────────┘
-┌Error<S>─────┬───────╎───┐                        └──X=0:Extracted──┘
+┌Error<S>─────┬───────╎───┐                        └──H=1:HasState───┘
 │    State    │ 000000╎10 │
 └─────────────┴───────╎───┘
 ```
