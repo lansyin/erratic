@@ -97,7 +97,7 @@ States are meant to be handled explicitly. Several utility methods are provided:
 
 ## Formatting
 
-If the error has a state and/or context, it builds its message from them. Otherwise, it acts as an error container,
+If the error has a state and/or a context, it builds its message from them. Otherwise, it acts as an error container,
 inheriting the message from its source. When wrapped, the container itself will not be added as another source layer,
 preventing duplicate messages in the chain.
 
