@@ -1,9 +1,8 @@
 use alloc::boxed::Box;
 use core::{
-    any::TypeId,
+    any::Any,
     error::{self},
     fmt::{self, Debug, Display},
-    ptr::NonNull,
     result,
 };
 
@@ -12,7 +11,6 @@ extern crate std;
 
 #[cfg(feature = "backtrace")]
 use core::{
-    any::Any,
     cell::Cell,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -22,7 +20,7 @@ use crate::raw::source::{Source, WithBacktraceSource};
 // TODO: Remove this workaround once Error::provide gets stabilized.
 pub(crate) struct WithBacktrace {
     err: Box<dyn Source>,
-    take_err: unsafe fn(Self, TypeId, NonNull<()>) -> Result<(), Self>,
+    take_err: fn(Self, &mut dyn Any) -> Result<(), Self>,
     into_source: fn(Self) -> Option<Box<dyn error::Error + Send + Sync + 'static>>,
     #[cfg(feature = "backtrace")]
     backtrace: std::backtrace::Backtrace,
@@ -133,13 +131,9 @@ impl WithBacktrace {
         }
     }
 
-    /// Take the error from this backtrace and put it in the dst pointer.
-    ///
-    /// # Safety
-    ///
-    /// The dst pointer must be valid and point to a valid Option<Ty>.
+    /// Take the error from this backtrace and put it in the dst.
     #[cfg(feature = "backtrace")]
-    unsafe fn take_source_<E>(self, ty: TypeId, dst: NonNull<()>) -> Result<(), Self>
+    fn take_source_<E>(self, dst: &mut dyn Any) -> Result<(), Self>
     where
         E: Source,
     {
@@ -147,7 +141,7 @@ impl WithBacktrace {
             .downcast::<E>()
             .expect("WithBacktrace provides correct type");
 
-        if let Err(err) = unsafe { this.downcast_container(ty, dst) } {
+        if let Err(err) = this.downcast_container(dst) {
             return Err(Self {
                 err: Box::new(err),
                 ..self
@@ -169,13 +163,9 @@ impl WithBacktrace {
         this.into_boxed()
     }
 
-    /// Take the error from this backtrace and put it in the dst pointer.
-    ///
-    /// # Safety
-    ///
-    /// The dst pointer must be valid and point to a valid Option<Ty>.
-    pub unsafe fn take_source(self, ty: TypeId, dst: NonNull<()>) -> Result<(), Self> {
-        unsafe { (self.take_err)(self, ty, dst) }
+    /// Take the error from this backtrace and put it in the dst.
+    pub fn take_source(self, dst: &mut dyn Any) -> Result<(), Self> {
+        (self.take_err)(self, dst)
     }
 
     pub fn into_source(self) -> Option<Box<dyn error::Error + Send + Sync + 'static>> {

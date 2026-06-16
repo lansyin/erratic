@@ -1,10 +1,5 @@
 use alloc::boxed::Box;
-use core::{
-    any::{Any, TypeId},
-    error::Error,
-    ptr::NonNull,
-    result,
-};
+use core::{any::Any, error::Error, result};
 
 use crate::raw::RawError;
 
@@ -18,11 +13,7 @@ pub trait Source: Any + Send + Sync + 'static {
 
     /// Downcasts the source to its container type, e.g. `std::io::Error`, `ErasedRawError`,
     /// or `Box<dyn Error + Send + Sync + 'static>`.
-    ///
-    /// # Safety
-    ///
-    /// `dst` must be a valid pointer to a `Option<Ty>`.
-    unsafe fn downcast_container(self, ty: TypeId, dst: NonNull<()>) -> Result<(), Self>
+    fn downcast_container(self, dst: &mut dyn Any) -> Result<(), Self>
     where
         Self: Sized;
 
@@ -50,12 +41,11 @@ where
         Some(Box::new(self))
     }
 
-    unsafe fn downcast_container(self, ty: TypeId, dst: NonNull<()>) -> Result<(), Self>
+    fn downcast_container(self, dst: &mut dyn Any) -> Result<(), Self>
     where
         Self: Sized,
     {
-        if ty == TypeId::of::<Self>() {
-            let dst = unsafe { dst.cast::<Option<Self>>().as_mut() };
+        if let Some(dst) = dst.downcast_mut::<Option<Self>>() {
             dst.replace(self);
             Ok(())
         } else {
@@ -79,7 +69,7 @@ impl Source for NoSource {
         None
     }
 
-    unsafe fn downcast_container(self, _ty: TypeId, _dst: NonNull<()>) -> Result<(), Self>
+    fn downcast_container(self, _dst: &mut dyn Any) -> Result<(), Self>
     where
         Self: Sized,
     {
@@ -102,15 +92,11 @@ impl Source for BoxedSource {
         Some(self.0)
     }
 
-    unsafe fn downcast_container(self, ty: TypeId, dst: NonNull<()>) -> Result<(), Self>
+    fn downcast_container(self, dst: &mut dyn Any) -> Result<(), Self>
     where
         Self: Sized,
     {
-        if ty == TypeId::of::<Box<dyn Error + Send + Sync + 'static>>() {
-            let dst = unsafe {
-                dst.cast::<Option<Box<dyn Error + Send + Sync + 'static>>>()
-                    .as_mut()
-            };
+        if let Some(dst) = dst.downcast_mut::<Option<Box<dyn Error + Send + Sync + 'static>>>() {
             dst.replace(self.0);
             Ok(())
         } else {
@@ -144,12 +130,11 @@ impl Source for IndirectSource {
         self.0.into_source()
     }
 
-    unsafe fn downcast_container(self, ty: TypeId, dst: NonNull<()>) -> Result<(), Self>
+    fn downcast_container(self, dst: &mut dyn Any) -> Result<(), Self>
     where
         Self: Sized,
     {
-        if ty == TypeId::of::<RawError>() {
-            let dst = unsafe { dst.cast::<Option<RawError>>().as_mut() };
+        if let Some(dst) = dst.downcast_mut::<Option<RawError>>() {
             dst.replace(self.0);
             Ok(())
         } else {
@@ -177,11 +162,11 @@ impl Source for WithBacktraceSource {
         self.0.into_source()
     }
 
-    unsafe fn downcast_container(self, ty: TypeId, dst: NonNull<()>) -> Result<(), Self>
+    fn downcast_container(self, dst: &mut dyn Any) -> Result<(), Self>
     where
         Self: Sized,
     {
-        unsafe { self.0.take_source(ty, dst).map_err(Self) }
+        self.0.take_source(dst).map_err(Self)
     }
 
     fn into_backtrace(self) -> Option<WithBacktrace>

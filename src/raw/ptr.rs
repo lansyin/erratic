@@ -443,10 +443,6 @@ impl<'a, T> Align4Ref<'a, T> {
     }
 
     /// Returns a shared reference to the pointee.
-    ///
-    /// # Safety
-    ///
-    /// The stored address must point to a valid, initialized `T`.
     pub fn borrow(&self) -> Ref<'a, T> {
         let (addr, _) = self.ptr.into_parts();
         let ptr = addr.cast::<Align4<T>>().as_ptr();
@@ -458,6 +454,7 @@ impl<'a, T> Align4Ref<'a, T> {
         }
     }
 
+    /// Returns a shared reference to the pointee, with the `Align4` wrapper.
     pub fn borrow_raw(&self) -> Ref<'a, Align4<T>> {
         let (addr, _) = self.ptr.into_parts();
         let ptr = addr.cast::<Align4<T>>();
@@ -507,11 +504,6 @@ impl<'a, T> Ref<'a, T> {
     }
 
     /// Dereferences to a shared reference.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure the pointer is valid, properly aligned, and dereferenceable
-    /// for the lifetime `'a`.
     pub fn deref(&self) -> &'a T {
         unsafe { self.ptr.as_ref() }
     }
@@ -522,10 +514,6 @@ where
     T: Copy,
 {
     /// Reads the value by copy.
-    ///
-    /// # Safety
-    ///
-    /// The pointer must be valid, properly aligned, and dereferenceable.
     pub fn copied(&self) -> T {
         unsafe { self.ptr.read() }
     }

@@ -5,7 +5,7 @@ mod source;
 
 use alloc::{boxed::Box, format};
 use core::{
-    any::TypeId,
+    any::{Any, TypeId},
     convert::Infallible,
     error,
     fmt::{Debug, Display},
@@ -513,12 +513,9 @@ impl<S> RawError<S> {
                 // Safety: The body, state, context, and error pointers are confirmed valid.
                 (vtable.into_parts)(
                     body,
-                    TypeId::of::<E>(),
-                    NonNull::from(&mut err).cast(),
-                    TypeId::of::<C>(),
-                    NonNull::from(&mut context).cast(),
-                    TypeId::of::<S>(),
-                    NonNull::from(&mut state).cast(),
+                    &mut err as &mut dyn Any,
+                    &mut context as &mut dyn Any,
+                    &mut state as &mut dyn Any,
                 );
 
                 (state, context, err)
@@ -537,11 +534,7 @@ impl<S> RawError<S> {
                     let vt = DynBody::vtable(body.borrow());
                     let mut state_dst = None::<S>;
                     // Safety: The body, state pointers are confirmed valid.
-                    let re = (vt.extract_state)(
-                        body,
-                        TypeId::of::<S>(),
-                        NonNull::from(&mut state_dst).cast(),
-                    );
+                    let re = (vt.extract_state)(body, &mut state_dst as &mut dyn Any);
 
                     match (state_dst, re) {
                         (Some(state), Ok(vacant)) => Ok((state, Some(vacant))),
@@ -571,18 +564,12 @@ impl<S> RawError<S> {
                 let mut state = Some(state);
 
                 unsafe {
-                    (vtable.try_set_state)(
-                        body.borrow_mut(),
-                        TypeId::of::<S>(),
-                        NonNull::from(&mut state).cast(),
-                    )
-                };
-
-                if let Some(state) = state {
-                    Err(state)
-                } else {
-                    Ok(())
+                    if (vtable.try_set_state)(body.borrow_mut(), &mut state as &mut dyn Any) {
+                        return Ok(());
+                    }
                 }
+
+                Err(state.unwrap())
             }
         }
     }
@@ -821,11 +808,10 @@ struct DynBodyVTable {
     /// See [DynBody::into_backtrace].
     into_backtrace: unsafe fn(ErasedDynBody) -> Option<WithBacktrace>,
     /// See [DynBody::into_parts].
-    into_parts:
-        unsafe fn(ErasedDynBody, TypeId, NonNull<()>, TypeId, NonNull<()>, TypeId, NonNull<()>),
+    into_parts: unsafe fn(ErasedDynBody, &mut dyn Any, &mut dyn Any, &mut dyn Any),
     /// See [DynBody::extract_state].
     extract_state:
-        unsafe fn(ErasedDynBody, TypeId, NonNull<()>) -> result::Result<RawVacant, ErasedDynBody>,
+        unsafe fn(ErasedDynBody, &mut dyn Any) -> result::Result<RawVacant, ErasedDynBody>,
     /// See [DynBody::into_boxed_error].
     into_boxed_error: unsafe fn(ErasedDynBody) -> Box<dyn error::Error + Send + Sync + 'static>,
     /// See [DynBody::debug].
@@ -833,7 +819,7 @@ struct DynBodyVTable {
     /// See [DynBody::display].
     display: unsafe fn(Ref<'_, DynBody>, &mut core::fmt::Formatter<'_>) -> core::fmt::Result,
     /// See [DynBody::try_set_state].
-    try_set_state: unsafe fn(Mut<DynBody>, TypeId, NonNull<()>) -> bool,
+    try_set_state: unsafe fn(Mut<DynBody>, &mut dyn Any) -> bool,
     /// See [DynBody::has_state].
     has_state: unsafe fn(Ref<'_, DynBody>) -> bool,
     /// See [DynBody::source].
@@ -1036,33 +1022,25 @@ where
     #[allow(clippy::too_many_arguments)]
     unsafe fn into_parts(
         this: ErasedDynBody,
-        source_ty: TypeId,
-        source_dst: NonNull<()>,
-        context_ty: TypeId,
-        context_dst: NonNull<()>,
-        state_ty: TypeId,
-        state_dst: NonNull<()>,
+        source_dst: &mut dyn Any,
+        context_dst: &mut dyn Any,
+        state_dst: &mut dyn Any,
     ) {
         let Align4(this) = unsafe { *ErasedDynBody::into_inner::<S, E, C>(this).into_boxed() };
         let (state, source, context) = this.destruct();
 
         if let Some(state) = state {
-            if TypeId::of::<S>() == state_ty {
-                let dst = unsafe { state_dst.cast::<Option<S>>().as_mut() };
+            if let Some(dst) = state_dst.downcast_mut::<Option<S>>() {
                 dst.replace(state);
             }
         }
         if let Some(context) = context {
-            if TypeId::of::<C>() == context_ty {
-                // Safety: The caller guarantees `context_dst` points to a valid `Option<C>`.
-                let dst = unsafe { context_dst.cast::<Option<C>>().as_mut() };
+            if let Some(dst) = context_dst.downcast_mut::<Option<C>>() {
                 dst.replace(context);
             }
         }
 
-        unsafe {
-            source.downcast_container(source_ty, source_dst).ok();
-        }
+        source.downcast_container(source_dst).ok();
     }
 
     /// Extracts the state from the boxed body, `state_dst` becomes `Some` iff it succeeds and returns `Ok`.
@@ -1073,13 +1051,11 @@ where
     /// - `state_dst` must be a valid, aligned, mutable pointer to `Option<StateTy>`.
     unsafe fn extract_state(
         this: ErasedDynBody,
-        state_ty: TypeId,
-        state_dst: NonNull<()>,
+        state_dst: &mut dyn Any,
     ) -> result::Result<RawVacant, ErasedDynBody> {
         let mut this = unsafe { ErasedDynBody::into_inner::<S, E, C>(this) };
 
-        if TypeId::of::<S>() == state_ty {
-            let dst = unsafe { state_dst.cast::<Option<S>>().as_mut() };
+        if let Some(dst) = state_dst.downcast_mut::<Option<S>>() {
             *dst = this.borrow_mut().deref_mut().replace_state(None);
 
             if dst.is_some() {
@@ -1138,15 +1114,10 @@ where
     ///
     /// - `this` must be a valid `Mut` pointing to `DynBody<S, E, C>`.
     /// - `state_src` must be a valid, aligned, mutable pointer to `Option<S>`.
-    unsafe fn try_set_state(
-        this: Mut<'_, DynBody>,
-        state_ty: TypeId,
-        state_src: NonNull<()>,
-    ) -> bool {
+    unsafe fn try_set_state(this: Mut<'_, DynBody>, state_src: &mut dyn Any) -> bool {
         let this = unsafe { this.cast::<Self>().deref_mut() };
 
-        if TypeId::of::<S>() == state_ty {
-            let state_src = unsafe { state_src.cast::<Option<S>>().as_mut() };
+        if let Some(state_src) = state_src.downcast_mut::<Option<S>>() {
             let Some(state_src) = state_src.take() else {
                 panic!("try_set_state: state_src must be `Some`");
             };
@@ -1331,18 +1302,13 @@ impl RawVacant {
             let vt = DynBody::vtable(self.0.borrow());
             let mut state_src = Some(state);
 
-            (vt.try_set_state)(
-                self.0.borrow_mut(),
-                TypeId::of::<S>(),
-                NonNull::from(&mut state_src).cast(),
-            );
-
-            if let Some(state) = state_src {
-                Err((self, state))
-            } else {
+            if (vt.try_set_state)(self.0.borrow_mut(), &mut state_src as &mut dyn Any) {
                 Ok(RawError {
                     boxed_body: ManuallyDrop::new(self.0),
                 })
+            } else {
+                // Note: This `unwrap` will not panic as `state_src` is `None` iff try_set_state returns true.
+                Err((self, state_src.unwrap()))
             }
         }
     }

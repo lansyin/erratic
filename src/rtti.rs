@@ -37,15 +37,7 @@ where
     T: 'static,
     U: 'static,
 {
-    if TypeId::of::<T>() == TypeId::of::<U>() {
-        // # Safety
-        //
-        // It is sound only when `TypeId::of::<T>() == TypeId::of::<U>()`, which guarantees
-        // that `&T` and `&U` have the same layout.
-        unsafe { Ok(&*(ref_ as *const T as *const U)) }
-    } else {
-        Err(ref_)
-    }
+    (ref_ as &dyn Any).downcast_ref().ok_or(ref_)
 }
 
 /// Attempts to concretize `ref_mut` into type `&mut U` if `T == U` at the type-id level.
@@ -57,6 +49,7 @@ where
     T: 'static,
     U: 'static,
 {
+    // Note: We don't use `downcast_mut` here because it triggers NLL problem case #3.
     if TypeId::of::<T>() == TypeId::of::<U>() {
         // # Safety
         //
