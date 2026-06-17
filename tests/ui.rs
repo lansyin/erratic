@@ -3,30 +3,27 @@ use std::fmt;
 
 use erratic::fmt::Formatter;
 use erratic::state::FormatWith;
+use erratic::test_artifacts::*;
 use erratic::*;
-
-use common::*;
-
-mod common;
 
 fn generate_simple() -> Error<TestState> {
     mkerr!(
-        error = TestError("no such device"),
-        state = TestState::FileNotFound,
-        context = TestMessage("hello.txt"),
+        error = TestError::FOO,
+        state = TestState::AppleNotFound,
+        context = TestMessage::HOGE,
     )
 }
 
 fn generate_triple() -> Error<TestState> {
-    let source_1 = mkerr!("no such device").stateless().erase();
+    let source_1 = mkerr!("no such fruit").stateless().erase();
     let source_2 = mkerr!(error = source_1).stateless().erase();
-    let source_3 = mkerr!(error = source_2, "while invoking copy_context")
+    let source_3 = mkerr!(error = source_2, "failed to forage for food")
         .stateless()
         .erase();
     mkerr!(
         error = source_3,
-        state = TestState::FileNotFound,
-        context = TestMessage("hello.txt"),
+        state = TestState::AppleNotFound,
+        context = TestMessage::HOGE,
     )
 }
 

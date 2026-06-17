@@ -325,12 +325,6 @@ where
 }
 
 /// Owned pointer with metadata stored in the low 2 bits of the first byte of the pointer.
-///
-/// # Safety invariants
-///
-/// - The stored address was originally obtained from [`Box::into_raw`],
-///   so it must only be freed once via [`into_boxed`](Align4Own::into_boxed).
-/// - The address must be 4-byte-aligned to leave the low 2 bits for metadata.
 #[repr(C)]
 pub struct Align4Own<T> {
     ptr: Align4Ptr,
@@ -391,11 +385,6 @@ impl<T> Align4Own<T> {
     }
 
     /// Returns a mutable pointer-like reference to the pointee.
-    ///
-    /// # Safety
-    ///
-    /// Same as [`borrow`](Align4Own::borrow).
-    /// The caller must ensure no other mutable aliases exist.
     pub fn borrow_mut(&mut self) -> Mut<'_, T> {
         let (addr, _) = self.ptr.into_parts();
         let ptr = addr.cast::<Align4<T>>().as_ptr();
@@ -420,10 +409,6 @@ unsafe impl<T> Send for Align4Own<T> where T: Send {}
 unsafe impl<T> Sync for Align4Own<T> where T: Sync {}
 
 /// Shared reference with metadata stored in the low 2 bits of the first byte of the pointer.
-///
-/// # Safety invariants
-///
-/// Same as [`Align4Own`]: the address must be 4-byte-aligned and point to a valid `T`.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Align4Ref<'a, T> {
@@ -469,8 +454,6 @@ unsafe impl<'a, T> Send for Align4Ref<'a, T> where T: Send {}
 unsafe impl<'a, T> Sync for Align4Ref<'a, T> where T: Sync {}
 
 /// Typed shared reference wrapping a [`NonNull`] pointer.
-///
-/// Designed for safe field projection via [`Ref::deref`] and [`Ref::project`].
 pub struct Ref<'a, T> {
     ptr: NonNull<T>,
     _marker: PhantomData<&'a Align4<T>>,
@@ -528,8 +511,6 @@ impl<'a, T> Clone for Ref<'a, T> {
 impl<'a, T> Copy for Ref<'a, T> {}
 
 /// Typed mutable reference wrapping a [`NonNull`] pointer.
-///
-/// Designed for safe field projection via [`Mut::deref_mut`] and [`Mut::project`].
 pub struct Mut<'a, T> {
     ptr: NonNull<T>,
     _marker: PhantomData<&'a mut Align4<T>>,
@@ -580,11 +561,6 @@ impl<'a, T> Mut<'a, T> {
     }
 
     /// Dereferences to a mutable reference.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure the pointer is valid, properly aligned, and dereferenceable
-    /// for the lifetime `'a`.
     pub fn deref_mut(mut self) -> &'a mut T {
         unsafe { self.ptr.as_mut() }
     }
@@ -595,7 +571,6 @@ mod tests {
     use super::*;
     use core::mem;
 
-    /// Verifies that `Align4Ptr::from_parts` / `into_parts` round-trips address and metadata.
     #[test]
     fn align4_ptr_round_trip() {
         let value = Align4(0u32); // 4-byte-aligned, low 2 bits are 00
@@ -608,7 +583,6 @@ mod tests {
         }
     }
 
-    /// Verifies that Align4Ptr panics when the address has non-zero low bits.
     #[test]
     #[should_panic]
     fn align4_ptr_panics_on_unaligned() {
@@ -619,7 +593,6 @@ mod tests {
         }
     }
 
-    /// Verifies that `Align4Own` round-trips a boxed value.
     #[test]
     fn align4_own_boxed_round_trip() {
         let value = Box::new(Align4(42u32));
@@ -628,7 +601,6 @@ mod tests {
         assert_eq!(restored.0, 42);
     }
 
-    /// Verifies that `Align4Own::cast` only changes the type parameter without data loss.
     #[test]
     fn align4_own_cast_preserves_data() {
         let value = Box::new(Align4(0xABCD_EF01u32));
@@ -640,7 +612,6 @@ mod tests {
         ManuallyDrop::into_inner(unsafe { (ManuallyDrop::into_inner(casted)).cast::<u32>() });
     }
 
-    /// Verifies that `Ref::deref` returns a valid reference.
     #[test]
     fn ref_deref_valid() {
         let value = Box::new(Align4(99u64));
@@ -649,7 +620,6 @@ mod tests {
         assert_eq!(*r.deref(), 99);
     }
 
-    /// Verifies that `Ref::project` correctly accesses a struct field.
     #[test]
     fn ref_project_field() {
         #[repr(C)]
@@ -664,19 +634,12 @@ mod tests {
         assert_eq!(*y_ref.deref(), 20);
     }
 
-    /// `Align4<T>` ensures 4-byte alignment.
     #[test]
     fn align4_guarantees_alignment() {
         assert!(mem::align_of::<Align4<u8>>() >= 4);
         assert!(mem::align_of::<Align4<u64>>() >= 4);
     }
 
-    // ------------------------------------------------------------------
-    // Align4PtrCompat extreme layout tests
-    // ------------------------------------------------------------------
-
-    /// Maximum byte array (`[u8; store_size]`, align 1) fits in the store
-    /// and can be read back safely (no alignment issues for byte-slices).
     #[test]
     fn align4_ptr_compat_max_u8_array() {
         const N: usize = (usize::BITS / 8 - 1) as _;
@@ -686,36 +649,32 @@ mod tests {
         assert_eq!(v.borrow_value(), &[0xAB; N]);
     }
 
-    /// One byte past the limit — `[u8; store_size + 1]` (align 1) is too large.
     #[test]
     fn align4_ptr_compat_u8_array_one_too_many() {
         const N: usize = (usize::BITS / 8) as _;
         assert!(Align4PtrCompat::<[u8; N]>::OFFSET_IN_STORE.is_none());
     }
 
-    /// `u8` — alignment 1, can be stored (store_offset is Some).
     #[test]
     fn align4_ptr_compat_u8_store_offset() {
         assert!(Align4PtrCompat::<u8>::OFFSET_IN_STORE.is_some());
     }
 
-    /// `u32` — alignment 4, can be stored on 64 bit platforms only.
     #[test]
     fn align4_ptr_compat_u32_store_offset() {
         if cfg!(target_pointer_width = "64") {
             assert!(Align4PtrCompat::<u32>::OFFSET_IN_STORE.is_some());
         } else {
+            // 16/32 bit platforms
             assert!(Align4PtrCompat::<u32>::OFFSET_IN_STORE.is_none());
         }
     }
 
-    /// `u64` — alignment 8, too large for the store buffer on all platforms.
     #[test]
     fn align4_ptr_compat_u64_is_oversized() {
         assert!(Align4PtrCompat::<u64>::OFFSET_IN_STORE.is_none());
     }
 
-    /// Verify that `new()` succeeds and the metadata byte is preserved.
     #[test]
     fn align4_ptr_compat_new_preserves_meta() {
         // Use [u8; 1] (align 1, no alignment issue) to verify meta round-trip.
@@ -725,7 +684,6 @@ mod tests {
         assert_eq!(*v.borrow_value(), [0x42]);
     }
 
-    /// Creating a type that is too large returns Err with the value.
     #[test]
     fn align4_ptr_compat_new_returns_err_for_oversized() {
         const N: usize = (usize::BITS / 8) as _;

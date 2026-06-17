@@ -1,9 +1,9 @@
 Error {
-    state: FileNotFound,
+    state: AppleNotFound,
     context: TestMessage(
-        "hello.txt",
+        "hoge",
     ),
     source: TestError(
-        "no such device",
+        "foo",
     ),
 }

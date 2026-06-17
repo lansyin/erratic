@@ -192,13 +192,6 @@ impl<S> RawError<S> {
     {
         let (vtable, state) = DynBody::<S, E, C>::vtable_from_state(state);
 
-        // # Safety
-        //
-        // The `Align4Own` pointer is cast to `DynBody<Infallible, (), ()>` for uniform storage.
-        // This is valid because all monomorphizations of `DynBody<S, E, C::Repr>` share
-        // the same vtable pointer, and the concrete `S`, `E`, `C` are erased.
-        // The cast only changes the type parameter defaults — it does not violate the layout
-        // because `()` is a ZST.
         RawError::<S> {
             boxed_body: ManuallyDrop::new(ErasedDynBody::from_typed(Align4Own::from_boxed(
                 Box::new(Align4(DynBody::<S, E, C> {
@@ -1447,21 +1440,12 @@ mod tests {
     use core::{assert_matches, convert::Infallible, fmt::Display, mem};
 
     use super::*;
-    use crate::context::{Contextless, Literal, Mkctx};
+    use crate::{
+        context::{Contextless, Literal, Mkctx},
+        test_artifacts::TestError,
+    };
 
     // --- Test helpers ---
-
-    /// A custom source error for testing.
-    #[derive(Debug)]
-    struct TestError(&'static str);
-
-    impl Display for TestError {
-        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-            write!(f, "{}", self.0)
-        }
-    }
-
-    impl error::Error for TestError {}
 
     /// A typed literal for testing.
     #[derive(Debug)]
@@ -1492,11 +1476,7 @@ mod tests {
     #[cfg(not(feature = "backtrace"))]
     #[test]
     fn kind_discriminates_boxed() {
-        let err = RawError::new(
-            None::<Infallible>,
-            Some(TestError("oops")),
-            Contextless::new(),
-        );
+        let err = RawError::new(None::<Infallible>, Some(TestError::FOO), Contextless::new());
         assert_eq!(err.kind(), RawError::<()>::KIND_BOXED);
     }
 
@@ -1539,33 +1519,21 @@ mod tests {
 
     #[test]
     fn boxed_variant_source() {
-        let err = RawError::new(
-            None::<Infallible>,
-            Some(TestError("oops")),
-            Contextless::new(),
-        );
+        let err = RawError::new(None::<Infallible>, Some(TestError::FOO), Contextless::new());
         let src = err.source();
-        assert_eq!(src.unwrap().to_string(), "oops");
+        assert_eq!(src.unwrap().to_string(), "foo");
     }
 
     #[test]
     fn boxed_variant_downcast_source() {
-        let err = RawError::new(
-            None::<Infallible>,
-            Some(TestError("oops")),
-            Contextless::new(),
-        );
+        let err = RawError::new(None::<Infallible>, Some(TestError::FOO), Contextless::new());
         let downcasted = err.downcast_source_ref::<TestError>();
-        assert_matches!(downcasted, Some(TestError("oops")));
+        assert_matches!(downcasted, Some(TestError("foo")));
     }
 
     #[test]
     fn boxed_variant_downcast_source_wrong_type() {
-        let err = RawError::new(
-            None::<Infallible>,
-            Some(TestError("oops")),
-            Contextless::new(),
-        );
+        let err = RawError::new(None::<Infallible>, Some(TestError::FOO), Contextless::new());
         let downcasted = err.downcast_source_ref::<core::fmt::Error>();
         assert!(downcasted.is_none());
     }
@@ -1574,7 +1542,7 @@ mod tests {
     fn boxed_variant_context() {
         let err = RawError::new(
             None::<Infallible>,
-            Some(TestError("oops")),
+            Some(TestError::FOO),
             TestContextLiteral::LITERAL,
         );
         let ctx = err.context();
@@ -1593,13 +1561,9 @@ mod tests {
 
     #[test]
     fn boxed_variant_into_source_returns_boxed_error() {
-        let err = RawError::new(
-            None::<Infallible>,
-            Some(TestError("oops")),
-            Contextless::new(),
-        );
+        let err = RawError::new(None::<Infallible>, Some(TestError::FOO), Contextless::new());
         let src = err.into_source();
-        assert_eq!(src.unwrap().to_string(), "oops");
+        assert_eq!(src.unwrap().to_string(), "foo");
     }
 
     #[test]
@@ -1614,22 +1578,18 @@ mod tests {
     fn boxed_variant_into_parts_matches_types() {
         let err = RawError::new(
             Some("state"),
-            Some(TestError("oops")),
+            Some(TestError::FOO),
             TestContextLiteral::LITERAL,
         );
         let (state, context, source) = err.into_parts::<&str, TestError>();
         assert_matches!(state, Some("state"));
-        assert_matches!(source, Some(TestError("oops")));
+        assert_matches!(source, Some(TestError("foo")));
         assert_eq!(context, TestContext::FALLBACK);
     }
 
     #[test]
     fn boxed_variant_into_parts_context_downcasts() {
-        let err = RawError::new(
-            None::<Infallible>,
-            Some(TestError("oops")),
-            Contextless::new(),
-        );
+        let err = RawError::new(None::<Infallible>, Some(TestError::FOO), Contextless::new());
         let (_, context, _) = err.into_parts::<Empty, String>();
         assert!(context.is_none());
     }
@@ -1739,11 +1699,7 @@ mod tests {
     #[test]
     fn new_eliminates_erased_layer() {
         // Build a source-only RawError: (RawError -> TestError)
-        let inner = RawError::new(
-            None::<Infallible>,
-            Some(TestError("root")),
-            Contextless::new(),
-        );
+        let inner = RawError::new(None::<Infallible>, Some(TestError::BAR), Contextless::new());
         // Erase the type → ErasedRawError -> TestError
         let erased = ErasedRawError::from_typed(inner);
         // Re-wrap: this should eliminate the ErasedRawError layer since it carries no extra info
@@ -1759,11 +1715,7 @@ mod tests {
     #[test]
     fn new_eliminates_boxed_erased_layer() {
         // Build a source-only RawError: (RawError -> TestError)
-        let inner = RawError::new(
-            None::<Infallible>,
-            Some(TestError("root")),
-            Contextless::new(),
-        );
+        let inner = RawError::new(None::<Infallible>, Some(TestError::BAR), Contextless::new());
         // Erase the type → ErasedRawError
         let erased = ErasedRawError::from_typed(inner);
         // Box the erased error → Box<dyn Error> -> ErasedRawError -> TestError
@@ -1785,11 +1737,7 @@ mod tests {
     #[test]
     fn round_trip_repeatedly_keeps_single_boxed_layer() {
         // Start with a source-only RawError: (RawError -> TestError)
-        let mut err = RawError::new(
-            None::<Infallible>,
-            Some(TestError("root")),
-            Contextless::new(),
-        );
+        let mut err = RawError::new(None::<Infallible>, Some(TestError::BAR), Contextless::new());
         assert_eq!(err.chain().count(), 1);
 
         // Round-trip through Box<dyn Error> multiple times.

@@ -1,12 +1,12 @@
 Error {
-    state: FileNotFound,
+    state: AppleNotFound,
     context: TestMessage(
-        "hello.txt",
+        "hoge",
     ),
     source: Error {
-        context: "while invoking copy_context",
+        context: "failed to forage for food",
         source: Error {
-            context: "no such device",
+            context: "no such fruit",
         },
     },
 }

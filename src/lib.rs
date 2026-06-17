@@ -59,11 +59,11 @@
 //! #[derive(Debug)]
 //! enum State { RetryLater } // Smaller than 1 usize.
 //!
-//! fn try_write(w: &mut Writer, block: &[u8; 64]) -> Result<(), Error<State>> {
+//! fn try_write(w: &mut Writer, blk: &[u8; 64]) -> Result<(), Error<State>> {
 //!     w.reserve_chunk(64)
 //!         .ok()
 //!         .with_state(State::RetryLater)?; // No alloc.
-//!     w.write(block)
+//!     w.write(blk)
 //!         .with_context(mkctx!("failed to write to {}", w.id()))?;
 //!     Ok(())
 //! }
@@ -79,13 +79,12 @@
 //! # #[derive(Debug)]
 //! # enum State { RetryLater }
 //! # struct Writer;
-//! # fn try_write(_: &mut Writer, block: &[u8; 64]) -> result::Result<(), Error<State>> { unimplemented!() }
-//! fn write(w: &mut Writer, block: &[u8; 64]) -> Result<()> {
-//!     while let Err((state, _)) = try_write(w, block).extract_state()? { // Propagate infra errors.
+//! # fn try_write(_: &mut Writer, blk: &[u8; 64]) -> result::Result<(), Error<State>> { unimplemented!() }
+//! fn write(w: &mut Writer, blk: &[u8; 64]) -> Result<()> {
+//!     while let Err((state, _)) = try_write(w, blk).extract_state()? { // Bubble up infra errors.
 //!         match state { // Handle domain errors.
-//!             State::RetryLater => {
-//!                 thread::yield_now();
-//!             }
+//!             State::RetryLater => thread::yield_now(),
+//!             // ..
 //!         }
 //!     }
 //!     Ok(())
@@ -159,9 +158,9 @@
 //! If `async_main` returns a chain of three errors, `Arrow` can format it as follows:
 //!
 //! ```text
-//! FileNotFound: hello.txt
-//! ├─▶ while invoking copy_context
-//! └─▶ no such device
+//! AppleNotFound: hoge
+//! ├─▶ failed to forage for food
+//! └─▶ no such fruit
 //! ```
 //!
 //! # Backtrace
@@ -212,6 +211,8 @@ mod rtti;
 
 #[doc(hidden)]
 pub mod macros;
+#[doc(hidden)]
+pub mod test_artifacts;
 
 pub mod builder;
 pub mod context;

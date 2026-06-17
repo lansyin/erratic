@@ -356,7 +356,7 @@ mod tests {
             "mkctx should not execute the closure before materialization"
         );
 
-        // Materialize the error — this calls into_display which runs the closure
+        // Materialize the error, which runs the closure
         let _err: Error = builder.build_error();
 
         assert!(
@@ -367,14 +367,12 @@ mod tests {
 
     #[test]
     fn mkctx_plain_literal_does_not_allocate() {
-        // A plain literal returns None from into_display — no String allocation
         let ctx = mkctx!("hello");
         assert!(
             ctx.try_into_repr().is_none(),
             "mkctx with a plain literal should not allocate"
         );
 
-        // A format string with args returns Some — allocation occurs
         let name = "world";
         let ctx = mkctx!("hello {}", name);
         assert_eq!(
