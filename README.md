@@ -1,6 +1,7 @@
 # Erratic /ɪˈrætɪk/
 
 [![license](https://img.shields.io/badge/license-MIT-hotpink)](https://github.com/lansyin/erratic)
+[![msrv](https://img.shields.io/badge/msrv-1.89.0-bisque)](https://github.com/lansyin/erratic)
 [![crates.io](https://img.shields.io/crates/v/erratic)](https://crates.io/crates/erratic)
 [![docs.rs](https://img.shields.io/docsrs/erratic)](https://docs.rs/erratic/latest/erratic/)
 
@@ -51,11 +52,11 @@ use erratic::*;
 #[derive(Debug)]
 enum State { RetryLater } // Smaller than 1 usize.
 
-fn try_write(w: &mut Writer, block: &[u8; 64]) -> Result<(), Error<State>> {
+fn try_write(w: &mut Writer, blk: &[u8; 64]) -> Result<(), Error<State>> {
     w.reserve_chunk(64)
         .ok()
         .with_state(State::RetryLater)?; // No alloc.
-    w.write(block)
+    w.write(blk)
         .with_context(mkctx!("failed to write to {}", w.id()))?;
     Ok(())
 }
@@ -66,12 +67,11 @@ This allows infrastructure errors to cross any number of layers with no extra al
 avoid the heap entirely, and both share the same `Error<S>` type. All compose orthogonally.
 
 ```rust
-fn write(w: &mut Writer, block: &[u8; 64]) -> Result<()> {
-    while let Err((state, _)) = try_write(w, block).extract_state()? { // Propagate infra errors.
+fn write(w: &mut Writer, blk: &[u8; 64]) -> Result<()> {
+    while let Err((state, _)) = try_write(w, blk).extract_state()? { // Bubble up infra errors.
         match state { // Handle domain errors.
-            State::RetryLater => {
-                thread::yield_now();
-            }
+            State::RetryLater => thread::yield_now(),
+            // ..
         }
     }
     Ok(())
@@ -141,9 +141,9 @@ async fn async_main() -> erratic::Result<()> {
 If `async_main` returns a chain of three errors, `Arrow` can format it as follows:
 
 ```
-FileNotFound: hello.txt
-├─▶ while invoking copy_context
-└─▶ no such device
+AppleNotFound: hoge
+├─▶ failed to forage for food
+└─▶ no such fruit
 ```
 
 ## Backtrace
