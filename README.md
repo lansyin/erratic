@@ -138,7 +138,6 @@ fn main() -> Result<(), Error<FormatWith<Arrow>>> {
 }
 async fn async_main() -> erratic::Result<()> {
     /* .. */
-    # todo!();
 }
 ```
 

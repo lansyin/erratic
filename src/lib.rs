@@ -153,7 +153,7 @@
 //! }
 //! async fn async_main() -> erratic::Result<()> {
 //!     /* .. */
-//!     # todo!();
+//! # todo!();
 //! }
 //! ```
 //!
