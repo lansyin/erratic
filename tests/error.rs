@@ -40,10 +40,10 @@ fn builder_case1() {
     }
     // context only (fast path)
     {
-        let err: Error = Builder::with_context(mkctx!("context only")).into();
+        let err: Error = Builder::with_context(TestMessage::HOGE).into();
         assert_eq!(err.chain().count(), 1);
-        let (context, source) = err.into_parts::<&'static str, TestError>();
-        assert_matches!(context, Some("context only"));
+        let (context, source) = err.into_parts::<TestMessage, TestError>();
+        assert_matches!(context, Some(TestMessage::HOGE));
         assert!(source.is_none());
     }
     // all present (no data loss)
@@ -78,10 +78,10 @@ fn builder_case3() {
     }
     // context only -> state (fast path)
     {
-        let err: Error<TestState> = Builder::with_context("context only").into();
-        let (state, context, source) = err.into_parts::<&str, TestError>();
+        let err: Error<TestState> = Builder::with_context(TestMessage::HOGE).into();
+        let (state, context, source) = err.into_parts::<TestMessage, TestError>();
         assert!(state.is_none());
-        assert_eq!(context, Some("context only"));
+        assert_eq!(context, Some(TestMessage::HOGE));
         assert!(source.is_none());
     }
     // error + context -> state (no fast path)
@@ -164,7 +164,10 @@ fn builder_case7() {
 fn downcast_source_ok() {
     let err = mkerr!(error = TestError::FOO).stateless();
     assert!(err.has_source_of::<TestError>());
-    assert_eq!(err.downcast_source_ref::<TestError>().unwrap().0, "foo");
+    assert_matches!(
+        err.downcast_source_ref::<TestError>(),
+        Some(&TestError::FOO)
+    );
 }
 
 #[test]
@@ -177,11 +180,11 @@ fn downcast_source_wrong_type() {
 fn downcast_source_mut_ok() {
     let mut err = mkerr!(error = TestError::FOO).stateless();
     let source = err.downcast_source_mut::<TestError>().unwrap();
-    assert_eq!(source.0, "foo");
-    source.0 = "modified";
+    assert_matches!(*source, TestError::FOO);
+    *source = TestError::BAR;
     assert_eq!(
-        err.downcast_source_ref::<TestError>().unwrap().0,
-        "modified"
+        err.downcast_source_ref::<TestError>().unwrap(),
+        &TestError::BAR
     );
 }
 
@@ -194,14 +197,14 @@ fn downcast_source_mut_wrong_type() {
 #[test]
 fn erase_makes_opaque() {
     let err = mkerr!(error = TestError::FOO).stateless();
-    assert_eq!(format!("{}", err.erase()), "foo");
+    assert_eq!(err.erase().to_string(), "foo");
 }
 
 #[test]
 fn erase_ref_lifetime() {
     let err = mkerr!(error = TestError::FOO).stateless();
     let opaque: &(dyn std::error::Error + Send + Sync + 'static) = err.erase_ref();
-    assert_eq!(format!("{opaque}"), "foo");
+    assert_eq!(opaque.to_string(), "foo");
 }
 
 #[test]
@@ -212,7 +215,7 @@ fn into_source_returns_boxed_source() {
 
 #[test]
 fn into_source_const_is_none() {
-    let err = mkerr!(context = "test").stateless();
+    let err = mkerr!("test").stateless();
     assert!(err.into_source().is_none());
 }
 
@@ -236,7 +239,7 @@ fn from_std_error_via_into() {
 fn from_same_type_id_does_not_double_wrap() {
     let inner = mkerr!(error = TestError::BAR).stateless();
     let outer: Error = inner.erase().into();
-    assert_eq!(outer.into_source().unwrap().to_string(), "bar");
+    assert_eq!(outer.into_source().unwrap().to_string(), "bar",);
 }
 
 #[test]
@@ -259,7 +262,7 @@ fn error_is_send_sync() {
 fn into_boxed_error() {
     let err = mkerr!(error = TestError::FOO).stateless();
     let boxed: Box<dyn std::error::Error + Send + Sync + 'static> = err.into();
-    assert_eq!(format!("{boxed}"), "foo");
+    assert_eq!(boxed.to_string(), "foo");
 }
 
 #[test]
@@ -287,8 +290,8 @@ fn dedup_repeated_message_in_chain() {
     {
         let inner = TestError::BAR;
         let outer: Error = Error::from_error(inner);
-        assert_eq!(format!("{}", outer), "bar");
-        assert_eq!(format!("{}", outer.source().unwrap()), "bar");
+        assert_eq!(outer.to_string(), "bar");
+        assert_eq!(outer.source().unwrap().to_string(), "bar");
         assert_eq!(format!("{:#}", outer), "bar");
     }
 

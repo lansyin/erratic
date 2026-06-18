@@ -1433,16 +1433,13 @@ impl Drop for ErasedDynBody {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{
-        format,
-        string::{String, ToString},
-    };
+    use alloc::string::{String, ToString};
     use core::{assert_matches, convert::Infallible, fmt::Display, mem};
 
     use super::*;
     use crate::{
         context::{Contextless, Literal, Mkctx},
-        test_artifacts::TestError,
+        test_artifacts::{TestError, TestMessage},
     };
 
     // --- Test helpers ---
@@ -1583,7 +1580,7 @@ mod tests {
         );
         let (state, context, source) = err.into_parts::<&str, TestError>();
         assert_matches!(state, Some("state"));
-        assert_matches!(source, Some(TestError("foo")));
+        assert_matches!(source, Some(TestError::FOO));
         assert_eq!(context, TestContext::FALLBACK);
     }
 
@@ -1678,16 +1675,16 @@ mod tests {
             assert_matches!(err.extract_state(), Ok((42, Some(_))));
         }
         {
-            let err = RawError::new(None::<Infallible>, None::<Infallible>, format!("oops"));
-            assert_matches!(err.extract_state(), Err(err) if format!("{err}") == "oops");
+            let err = RawError::new(None::<Infallible>, None::<Infallible>, TestMessage::HOGE);
+            assert_matches!(err.extract_state(), Err(err) if err.to_string() == "hoge");
         }
         {
-            let err = RawError::new(Some(42i32), None::<Infallible>, format!("oops"));
+            let err = RawError::new(Some(42i32), None::<Infallible>, TestMessage::HOGE);
             match err.extract_state() {
                 Ok((state, Some(vacant))) if state == 42 => {
                     let err = vacant.try_with_state(state).unwrap();
                     assert_eq!(err.state(), Some(&42));
-                    assert_eq!(err.context().unwrap().to_string(), "oops");
+                    assert_eq!(err.context().unwrap().to_string(), "hoge");
                 }
                 _ => panic!("extract should not fail"),
             }
