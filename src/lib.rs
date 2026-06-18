@@ -108,7 +108,7 @@
 //! | `map_state`     | `Error<S>` -> `Error<S2>`                     | Transform the state with a closure.         |
 //! | `lift_state`    | `Error<S>` -> `Error<S2>` where `S2: From<S>` | Transform the state via `From`.             |
 //!
-//! # Formatting
+//! # Default Formatting
 //!
 //! If the error has a state and/or a context, it builds its message from them. Otherwise, it acts as an error container,
 //! inheriting the message from its source. When wrapped, the container itself will not be added as another source layer,
@@ -143,15 +143,17 @@
 //!
 //! ```rust
 //! # use erratic::{Error, BuilderExt, state::FormatWith, fmt::Formatter};
-//! # struct Arrow;
-//! # impl Formatter for Arrow {}
 //! # mod executor { pub fn block_on<F>(_: F) -> erratic::Result<()> { Ok(()) } }
+//! struct Arrow;
+//! impl Formatter for Arrow { /* .. */ }
+//!
 //! fn main() -> Result<(), Error<FormatWith<Arrow>>> {
 //!     executor::block_on(async_main())?;
 //!     Ok(())
 //! }
 //! async fn async_main() -> erratic::Result<()> {
-//!     todo!();
+//!     /* .. */
+//!     # todo!();
 //! }
 //! ```
 //!
