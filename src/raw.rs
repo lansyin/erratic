@@ -1439,7 +1439,7 @@ mod tests {
     use super::*;
     use crate::{
         context::{Contextless, Literal, Mkctx},
-        test_artifacts::{TestError, TestMessage},
+        test_fixtures::{TestError, TestMessage},
     };
 
     // --- Test helpers ---

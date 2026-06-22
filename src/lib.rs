@@ -214,7 +214,7 @@ mod rtti;
 #[doc(hidden)]
 pub mod macros;
 #[doc(hidden)]
-pub mod test_artifacts;
+pub mod test_fixtures;
 
 pub mod builder;
 pub mod context;

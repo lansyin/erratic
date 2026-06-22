@@ -1,4 +1,4 @@
-use erratic::test_artifacts::*;
+use erratic::test_fixtures::*;
 use erratic::{builder::Builder, *};
 
 use std::assert_matches;

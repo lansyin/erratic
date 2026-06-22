@@ -3,7 +3,7 @@ use std::fmt;
 
 use erratic::fmt::Formatter;
 use erratic::state::FormatWith;
-use erratic::test_artifacts::*;
+use erratic::test_fixtures::*;
 use erratic::*;
 
 fn generate_simple() -> Error<TestState> {
