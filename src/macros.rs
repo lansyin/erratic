@@ -1,7 +1,18 @@
 #[doc(hidden)]
-pub mod __priv_reexport {
-    pub use alloc::{format, string};
-    pub use core;
+pub mod __priv {
+    pub use alloc::{
+        format,
+        string::{String, ToString},
+    };
+    pub use core::{
+        compile_error,
+        convert::{Infallible, Into},
+        fmt::Debug,
+        format_args,
+        option::Option::{self, None, Some},
+        result::Result::{self, Err, Ok},
+        stringify,
+    };
 }
 
 /// Like `let-else`, with access to variant bindings in other branches, for [`Result`][core::result::Result] only.
@@ -24,24 +35,22 @@ macro_rules! match_else {
         match $exp {
             Ok($pat) => {
                 #[allow(clippy::diverging_sub_expression)]
-                let _: $crate::macros::__priv_reexport::core::convert::Infallible = $body;
+                let _: $crate::macros::__priv::Infallible = $body;
             }
-            Err(err) => $crate::macros::__priv_reexport::core::result::Result::<
-                $crate::macros::__priv_reexport::core::convert::Infallible,
-                _,
-            >::Err(err),
+            Err(err) => {
+                $crate::macros::__priv::Result::<$crate::macros::__priv::Infallible, _>::Err(err)
+            }
         }
     };
     ($exp:expr, Err($pat:pat) => $body:expr $(,)?) => {
         match $exp {
             Err($pat) => {
                 #[allow(clippy::diverging_sub_expression)]
-                let _: $crate::macros::__priv_reexport::core::convert::Infallible = $body;
+                let _: $crate::macros::__priv::Infallible = $body;
             }
-            Ok(value) => $crate::macros::__priv_reexport::core::result::Result::<
-                _,
-                $crate::macros::__priv_reexport::core::convert::Infallible,
-            >::Ok(value),
+            Ok(value) => {
+                $crate::macros::__priv::Result::<_, $crate::macros::__priv::Infallible>::Ok(value)
+            }
         }
     };
 }
@@ -79,14 +88,14 @@ macro_rules! mkctx {
             const LITERAL: &'static str = $fmt;
         }
 
-        $crate::context::Mkctx::__priv_new(|| -> $crate::macros::__priv_reexport::core::option::Option<$crate::macros::__priv_reexport::string::String> {
-            let args = $crate::macros::__priv_reexport::core::format_args!($fmt $($args)*);
+        $crate::context::Mkctx::__priv_new(|| -> $crate::macros::__priv::Option<$crate::macros::__priv::String> {
+            let args = $crate::macros::__priv::format_args!($fmt $($args)*);
 
             if args.as_str().is_some() {
-                return $crate::macros::__priv_reexport::core::option::Option::None;
+                return $crate::macros::__priv::None;
             }
 
-            $crate::macros::__priv_reexport::core::option::Option::Some($crate::macros::__priv_reexport::string::ToString::to_string(&args))
+            $crate::macros::__priv::Some($crate::macros::__priv::ToString::to_string(&args))
         }, Literal)
     }};
 }
@@ -137,7 +146,7 @@ macro_rules! mkctx {
 #[macro_export]
 macro_rules! mkerr {
     ($($key:ident=$value:expr),+ $(, $($fmt:literal $($args:tt)*)?)?) => {
-        $crate::__priv_mkerr_kvs!(@sort[,,] $($key=$value,)+ $($(context=$crate::mkctx!($fmt $($args)*),)?)?)
+        $crate::__priv_mkerr!(@sort[,,] $($key=$value,)+ $($(context=$crate::mkctx!($fmt $($args)*),)?)?)
     };
     ($fmt:literal $($args:tt)*) => {{
         $crate::Error::from_context($crate::mkctx!($fmt $($args)*))
@@ -146,28 +155,28 @@ macro_rules! mkerr {
 
 #[macro_export]
 #[doc(hidden)]
-macro_rules! __priv_mkerr_kvs {
+macro_rules! __priv_mkerr {
     (@sort[$($_:expr)?, $($c:expr)?,  $($e:expr)?] state=$s:expr, $($k:ident=$v:expr,)*) => {{
-        $( let _ = $_; $crate::macros::__priv_reexport::core::compile_error!("state can only be set once");)?
-        $crate::__priv_mkerr_kvs!(@sort[$s, $($c)?, $($e)?] $($k=$v,)*)
+        $( let _ = $_; $crate::macros::__priv::compile_error!("state can only be set once");)?
+        $crate::__priv_mkerr!(@sort[$s, $($c)?, $($e)?] $($k=$v,)*)
     }};
     (@sort[$($s:expr)?, $($_:expr)?,  $($e:expr)?] context=$c:expr, $($k:ident=$v:expr,)*) => {{
-        $( let _ = $_; $crate::macros::__priv_reexport::core::compile_error!("context can only be set once. note: the format string counts as a context.");)?
-        $crate::__priv_mkerr_kvs!(@sort[$($s)?, $c, $($e)?] $($k=$v,)*)
+        $( let _ = $_; $crate::macros::__priv::compile_error!("context can only be set once. note: the format string counts as a context.");)?
+        $crate::__priv_mkerr!(@sort[$($s)?, $c, $($e)?] $($k=$v,)*)
     }};
     (@sort[$($s:expr)?, $($c:expr)?,  $($_:expr)?] error=$e:expr, $($k:ident=$v:expr,)*) => {{
-        $( let _ = $_; $crate::macros::__priv_reexport::core::compile_error!("error can only be set once");)?
-        $crate::__priv_mkerr_kvs!(@sort[$($s)?, $($c)?, $e] $($k=$v,)*)
+        $( let _ = $_; $crate::macros::__priv::compile_error!("error can only be set once");)?
+        $crate::__priv_mkerr!(@sort[$($s)?, $($c)?, $e] $($k=$v,)*)
     }};
     (@sort[$($s:expr)?, $($c:expr)?,  $($e:expr)?]) => {{
-        let builder = ($crate::macros::__priv_reexport::core::option::Option::None::<()>);
+        let builder = ($crate::macros::__priv::None::<()>);
         $(let builder = builder.ok_or($e);)?
         $(let builder = $crate::BuilderExt::with_state(builder, $s);)?
         $(let builder = $crate::BuilderExt::with_context(builder, $c);)?
-        $crate::__priv_mkerr_kvs!(@infer[$($s)?] builder.unwrap_err())
+        $crate::__priv_mkerr!(@infer[$($s)?] builder.unwrap_err())
     }};
     (@infer[] $builder:expr) => {
-        $crate::macros::__priv_reexport::core::convert::Into::<$crate::Error::<_>>::into($builder)
+        $crate::macros::__priv::Into::<$crate::Error::<_>>::into($builder)
     };
     (@infer[$state:expr] $builder:expr) => {
         $crate::ErrorExt::build_error($builder)
@@ -178,10 +187,10 @@ macro_rules! __priv_mkerr_kvs {
 #[macro_export]
 macro_rules! mkres {
     ($($key:ident=$value:expr),+ $(, $($fmt:literal $($args:tt)*)?)?) => {
-        $crate::macros::__priv_reexport::core::result::Result::Err($crate::mkerr!($($key=$value),+ $($(, $fmt $($args)*)?)?))
+        $crate::macros::__priv::Err($crate::mkerr!($($key=$value),+ $($(, $fmt $($args)*)?)?))
     };
     ($fmt:literal $($args:tt)*) => {
-        $crate::macros::__priv_reexport::core::result::Result::Err($crate::mkerr!($fmt $($args)*))
+        $crate::macros::__priv::Err($crate::mkerr!($fmt $($args)*))
     };
 }
 
