@@ -3,7 +3,7 @@ use core::{convert::Infallible, fmt::Debug, marker::PhantomData, result};
 
 use crate::{
     Error,
-    context::Context,
+    context::{Context, Contextless},
     fmt::Formatter,
     raw::{RawError, RawVacant},
 };
@@ -138,6 +138,21 @@ where
             ));
         };
         Error(vacant.derive(Some(S2::into_repr(state)), context))
+    }
+
+    /// Derives a contextless error from this vacant.
+    pub fn derive_contextless<S2>(self, state: S2) -> Error<S2>
+    where
+        S2: State,
+    {
+        let Some(vacant) = self.inner else {
+            return Error(RawError::new(
+                Some(S2::into_repr(state)),
+                None::<Infallible>,
+                Contextless::new(),
+            ));
+        };
+        Error(vacant.derive(Some(S2::into_repr(state)), Contextless::new()))
     }
 
     /// Derives a stateless error from this vacant.
