@@ -194,6 +194,175 @@ macro_rules! mkres {
     };
 }
 
+// Autoref specialization for mksure to printf operands.
+// https://github.com/dtolnay/case-studies/tree/056fa5ca3d6cbfa4d8ee12bd37abd8a375029bcd/autoref-specialization
+#[doc(hidden)]
+pub mod __priv_mksure {
+    use core::fmt::Debug;
+
+    pub struct FromAll;
+
+    impl FromAll {
+        pub fn from(self, _value: impl Sized) -> Option<&'static dyn Debug> {
+            None
+        }
+    }
+
+    pub trait SelectAll {
+        fn select(&self) -> FromAll {
+            FromAll
+        }
+    }
+
+    impl<D> SelectAll for &D {}
+
+    pub struct FromDebug;
+
+    impl FromDebug {
+        pub fn from(self, value: &impl Debug) -> Option<&dyn Debug> {
+            Some(value)
+        }
+    }
+
+    pub trait SelectDebug {
+        fn select(&self) -> FromDebug {
+            FromDebug
+        }
+    }
+
+    impl<E: Debug> SelectDebug for E {}
+}
+
+/// Returns an error if the given expression evaluates to false.
+///
+/// For comparison expressions, the default error shows the values of both operands.
+/// If a format string is given, the default message is attached as the source error.
+///
+/// # Examples
+///
+/// ```
+/// # struct Value;
+/// # use erratic::*;
+/// fn read_json(filename: &str, buffer: &mut [u8]) -> Result<Value> {
+///     mksure!(buffer.len() > 0)?;
+///     // assertion failed (0 > 0): buffer.len() > 0
+///     
+///     mksure!(!filename.ends_with(".json"), "expect a JSON file, found `{filename}`")?;
+///     // expect a JSON file, found `foo.txt`
+///     //   -> assertion failed: !filename.ends_with(".json")
+///     
+///     todo!()
+/// }
+/// ```
+#[macro_export]
+macro_rules! mksure {
+    ($($exp:tt)*) => {
+        $crate::__priv_mksure!(@conv [$($exp)*])
+    };
+    ($exp:expr, $fmt:literal $($args:tt)*) => {
+        $crate::macros::__priv::compile_error!("for docs only, an equivalent impl is inside the first branch");
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __priv_mksure {
+    (@conv [$($exp:tt)*]) => {
+        $crate::__priv_mksure!([] $($exp)*)
+    };
+    ([$($lhs:tt)*] > $($rhs:tt)+) => {
+        $crate::__priv_mksure!(@cmp [$($lhs)*] [>] [$($rhs)*])
+    };
+    ([$($lhs:tt)*] < $($rhs:tt)+) => {
+        $crate::__priv_mksure!(@cmp [$($lhs)*] [<] [$($rhs)*])
+    };
+    ([$($lhs:tt)*] >= $($rhs:tt)+) => {
+        $crate::__priv_mksure!(@cmp [$($lhs)*] [>=] [$($rhs)*])
+    };
+    ([$($lhs:tt)*] <= $($rhs:tt)+) => {
+        $crate::__priv_mksure!(@cmp [$($lhs)*] [<=] [$($rhs)*])
+    };
+    ([$($lhs:tt)*] == $($rhs:tt)+) => {
+        $crate::__priv_mksure!(@cmp [$($lhs)*] [==] [$($rhs)*])
+    };
+    ([$($lhs:tt)*] != $($rhs:tt)+) => {
+        $crate::__priv_mksure!(@cmp [$($lhs)*] [!=] [$($rhs)*])
+    };
+    ([$($lhs:tt)*] $token:tt $($rhs:tt)*) => {
+        $crate::__priv_mksure!([$($lhs)* $token] $($rhs)*)
+    };
+    ([$exp:expr $(, $fmt:literal $($args:tt)*)?]) => {'ret: {
+        if $exp {
+            break 'ret $crate::Result::Ok(());
+        }
+
+        struct Literal;
+
+        impl $crate::context::Literal for Literal {
+            const LITERAL: &'static str = $crate::macros::__priv::stringify!(assertion failed: $exp);
+        }
+
+        let ctx = $crate::context::Mkctx::__priv_new(|| -> $crate::macros::__priv::Option<$crate::macros::__priv::String> {
+            None
+        }, Literal);
+
+        let err = $crate::mkerr!(context=ctx);
+
+        $(
+            break 'ret $crate::mkres!(error=err, $fmt, $($args)*);
+        )?
+
+        #[allow(unreachable_code)]
+        $crate::Result::Err(err)
+    }};
+    (@cmp [$($lhs:tt)*] [$op:tt] [$rhs:expr $(, $fmt:literal $($args:tt)*)?]) => {
+        'ret: {
+            #[allow(unused_imports)]
+            use $crate::macros::__priv_mksure::{SelectAll, SelectDebug};
+
+            let lhs = $($lhs)*;
+            let rhs = $rhs;
+
+            if lhs $op rhs {
+                break 'ret $crate::Result::Ok(());
+            }
+
+            let lhs_value = (&lhs).select().from(&lhs);
+            let rhs_value = (&rhs).select().from(&rhs);
+
+            let err = match (lhs_value, rhs_value) {
+                ($crate::macros::__priv::Some(lhs_value), $crate::macros::__priv::Some(rhs_value)) => {
+                    $crate::mkerr!(
+                        "assertion failed ({}): {lhs_value:?} {} {rhs_value:?}",
+                        $crate::macros::__priv::stringify!(assertion failed: $($lhs)* $op $rhs),
+                        $crate::macros::__priv::stringify!($op)
+                    )
+                },
+                _ => {
+                    struct Literal;
+
+                    impl $crate::context::Literal for Literal {
+                        const LITERAL: &'static str = $crate::macros::__priv::stringify!(assertion failed: $($lhs)* $op $rhs);
+                    }
+
+                    let ctx = $crate::context::Mkctx::__priv_new(|| -> $crate::macros::__priv::Option<$crate::macros::__priv::String> {
+                        None
+                    }, Literal);
+
+                    $crate::mkerr!(context=ctx)
+                }
+            };
+
+            $(
+                break 'ret $crate::mkres!(error=err, $fmt, $($args)*);
+            )?
+
+            #[allow(unreachable_code)]
+            $crate::Result::Err(err)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::{
@@ -396,5 +565,80 @@ mod tests {
             Some("hello world".into()),
             "mkctx with format args should allocate"
         );
+    }
+
+    #[test]
+    fn mksure_compare_non_debug() {
+        #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+        struct A;
+
+        mksure!(A > A).unwrap_err();
+    }
+
+    #[test]
+    fn mksure_compare_debug_with_eval() {
+        let magic_number = 123454321;
+        let err_msg = mksure!(magic_number != magic_number)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err_msg.find("123454321").is_some());
+    }
+
+    #[test]
+    fn mksure_assert_with_message() {
+        let magic_number = -123454321i32;
+        let err = mksure!(
+            magic_number.is_positive(),
+            "magic number must be greater than zero"
+        )
+        .unwrap_err();
+
+        assert_eq!(err.chain().count(), 2);
+        assert_eq!(err.to_string(), "magic number must be greater than zero");
+        assert!(
+            err.root()
+                .unwrap()
+                .to_string()
+                .find("magic_number.is_positive()")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn mksure_compare_with_message() {
+        let magic_number = -123454321;
+        let err = mksure!(magic_number > 0, "magic number must be greater than zero").unwrap_err();
+
+        assert_eq!(err.chain().count(), 2);
+        assert_eq!(err.to_string(), "magic number must be greater than zero");
+        assert!(err.root().unwrap().to_string().find("-123454321").is_some());
+    }
+
+    #[test]
+    fn mksure_compare_with_message_args() {
+        let magic_number = -123454321;
+        let lower_bound = 32;
+        let err = mksure!(
+            magic_number > lower_bound,
+            "magic number must be greater than {lower_bound}"
+        )
+        .unwrap_err();
+
+        assert_eq!(err.chain().count(), 2);
+        assert_eq!(
+            err.to_string(),
+            format!("magic number must be greater than {lower_bound}")
+        );
+        assert!(err.root().unwrap().to_string().find("-123454321").is_some());
+    }
+
+    #[test]
+    fn mksure_returns_error() {
+        fn mksure_returns_error_() -> crate::Result<()> {
+            mksure!(false)?;
+            Ok(())
+        }
+        assert!(mksure_returns_error_().is_err());
     }
 }
