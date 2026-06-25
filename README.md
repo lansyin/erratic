@@ -23,21 +23,24 @@ fn say_hello(filename: &str) -> erratic::Result<()> {
 
 ## Attaching Context
 
-When constructing an error, you can optionally attach a context. A literal string context
-with no other components incurs no heap allocation.
+When constructing an error, you can optionally attach a context to it. All helper macros support
+constructing context from a format string.
 
 ```rust
 use erratic::*;
 
-fn read_weak(r: &mut Weak<Reader>, buf: &mut [u8]) -> Result<u64> {
-    if buf.is_empty() {
-        return mkres!("buf must not be empty"); // No alloc so long as no format args.
-    }
-    let r = r.upgrade()
+fn read_weak(r: &Weak<Reader>, sub: usize, blk: &mut [u8]) -> Result<()> {
+    mksure!(blk.len() > 0)?; // Generates an error message showing the values of both operands.
+    mksure!(sub > 0, "substream-{sub} is reserved for internal use")?;
+
+    let mut r = r.upgrade()
         .with_context("stream expired")?; // Accepts any value implementing `Display`.
-    let n = r.read(buf)
-        .with_context(mkctx!("failed to read from {}", r.id()))?; // `mkctx!` evaluates lazily.
-    Ok(n)
+    let mut r = r.substream(sub)
+        .with_context(mkctx!("no such substream"))?; // No alloc so long as no format args.
+
+    r.read_exact(blk)
+        .with_context(mkctx!("failed to read from {sub}"))?; // Evaluates only on the error path.
+    Ok(())
 }
 ```
 
@@ -50,14 +53,14 @@ with no other components incurs no heap allocation.
 use erratic::*;
 
 #[derive(Debug)]
-enum State { RetryLater } // Smaller than 1 usize.
+enum State { RetryLater, Closed } // Smaller than 1 usize.
 
-fn try_write(w: &mut Writer, blk: &[u8; 64]) -> Result<(), Error<State>> {
-    w.reserve_chunk(64)
+fn try_write(w: &mut Sink, blk: &[u8]) -> Result<(), Error<State>> {
+    w.reserve_chunk(blk.len())
         .ok()
         .with_state(State::RetryLater)?; // No alloc.
     w.write(blk)
-        .with_context(mkctx!("failed to write to {}", w.id()))?;
+        .with_context(mkctx!("failed to write to {}", w.id))?;
     Ok(())
 }
 ```
@@ -67,9 +70,10 @@ This allows infrastructure errors to cross any number of layers with no extra al
 avoid the heap entirely, and both share the same `Error<S>` type. All compose orthogonally.
 
 ```rust
-fn write(w: &mut Writer, blk: &[u8; 64]) -> Result<()> {
+fn write(w: &mut Sink, blk: &[u8]) -> Result<()> {
     while let Err((state, _)) = try_write(w, blk).extract_state()? { // Bubble up infra errors.
-        match state { // Handle domain errors.
+        // Handle domain errors.
+        match state {
             State::RetryLater => thread::yield_now(),
             // ..
         }
