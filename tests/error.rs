@@ -7,7 +7,7 @@ use std::{assert_matches, mem, result};
 
 #[test]
 fn from_error_round_trip() {
-    let err = mkerr!(error = TestError::FOO).stateless();
+    let err = mkerr!(error = TestError::FOO);
     let (context, source) = err.into_parts::<TestMessage, TestError>();
     assert_matches!(source, Some(TestError::FOO));
     assert!(context.is_none());
@@ -15,7 +15,7 @@ fn from_error_round_trip() {
 
 #[test]
 fn builder_with_error_builds_correctly() {
-    let err = mkerr!(error = TestError::FOO, context = TestMessage::HOGE,).stateless();
+    let err = mkerr!(error = TestError::FOO, context = TestMessage::HOGE,);
     let (context, source) = err.into_parts::<TestMessage, TestError>();
     assert_matches!(context, Some(TestMessage::HOGE));
     assert_matches!(source, Some(TestError::FOO));
@@ -132,7 +132,7 @@ fn builder_case5() {
 fn builder_case6() {
     // erratic stateless -> state (fast path)
     {
-        let inner = mkerr!(error = TestError::BAR).stateless();
+        let inner = mkerr!(error = TestError::BAR);
         let outer: Error<TestState> = Builder::with_error(inner).into();
         assert_eq!(outer.chain().count(), 1);
         let (state, context, source) = outer.into_parts::<TestMessage, TestError>();
@@ -142,7 +142,7 @@ fn builder_case6() {
     }
     // erratic source + context -> state (no fast path)
     {
-        let inner = mkerr!(error = TestError::BAR).stateless();
+        let inner = mkerr!(error = TestError::BAR);
         let outer: Error<TestState> = Builder::with_error(inner)
             .with_context(TestMessage::FUGA)
             .into();
@@ -154,7 +154,7 @@ fn builder_case6() {
 
 #[test]
 fn builder_case7() {
-    let inner = mkerr!(error = TestError::BAR).stateless();
+    let inner = mkerr!(error = TestError::BAR);
     let _: Error<TestState> = Builder::with_error(inner)
         .with_context(TestMessage::HOGE)
         .into();
@@ -162,7 +162,7 @@ fn builder_case7() {
 
 #[test]
 fn downcast_source_ok() {
-    let err = mkerr!(error = TestError::FOO).stateless();
+    let err = mkerr!(error = TestError::FOO);
     assert!(err.has_source_of::<TestError>());
     assert_matches!(
         err.downcast_source_ref::<TestError>(),
@@ -172,13 +172,13 @@ fn downcast_source_ok() {
 
 #[test]
 fn downcast_source_wrong_type() {
-    let err = mkerr!(error = TestError::FOO).stateless();
+    let err = mkerr!(error = TestError::FOO);
     assert!(!err.has_source_of::<std::io::Error>());
 }
 
 #[test]
 fn downcast_source_mut_ok() {
-    let mut err = mkerr!(error = TestError::FOO).stateless();
+    let mut err = mkerr!(error = TestError::FOO);
     let source = err.downcast_source_mut::<TestError>().unwrap();
     assert_matches!(*source, TestError::FOO);
     *source = TestError::BAR;
@@ -190,39 +190,39 @@ fn downcast_source_mut_ok() {
 
 #[test]
 fn downcast_source_mut_wrong_type() {
-    let mut err = mkerr!(error = TestError::FOO).stateless();
+    let mut err = mkerr!(error = TestError::FOO);
     assert!(err.downcast_source_mut::<std::io::Error>().is_none());
 }
 
 #[test]
 fn erase_makes_opaque() {
-    let err = mkerr!(error = TestError::FOO).stateless();
+    let err = mkerr!(error = TestError::FOO);
     assert_eq!(err.erase().to_string(), "foo");
 }
 
 #[test]
 fn erase_ref_lifetime() {
-    let err = mkerr!(error = TestError::FOO).stateless();
+    let err = mkerr!(error = TestError::FOO);
     let opaque: &(dyn std::error::Error + Send + Sync + 'static) = err.erase_ref();
     assert_eq!(opaque.to_string(), "foo");
 }
 
 #[test]
 fn into_source_returns_boxed_source() {
-    let err = mkerr!(error = TestError::FOO).stateless();
+    let err = mkerr!(error = TestError::FOO);
     assert_eq!(err.into_source().unwrap().to_string(), "foo");
 }
 
 #[test]
 fn into_source_const_is_none() {
-    let err = mkerr!("test").stateless();
+    let err = mkerr!("test");
     assert!(err.into_source().is_none());
 }
 
 #[test]
 fn chain_wraps_source() {
-    let inner = mkerr!(error = TestError::BAR).stateless();
-    let outer = mkerr!(error = inner.erase()).stateless();
+    let inner = mkerr!(error = TestError::BAR);
+    let outer = mkerr!(error = inner.erase());
     let mut chain = outer.chain();
     assert_eq!(chain.next().unwrap().to_string(), "bar");
     assert!(chain.next().is_none());
@@ -237,7 +237,7 @@ fn from_std_error_via_into() {
 
 #[test]
 fn from_same_type_id_does_not_double_wrap() {
-    let inner = mkerr!(error = TestError::BAR).stateless();
+    let inner = mkerr!(error = TestError::BAR);
     let outer: Error = inner.erase().into();
     assert_eq!(outer.into_source().unwrap().to_string(), "bar",);
 }
@@ -260,7 +260,7 @@ fn error_is_send_sync() {
 
 #[test]
 fn into_boxed_error() {
-    let err = mkerr!(error = TestError::FOO).stateless();
+    let err = mkerr!(error = TestError::FOO);
     let boxed: Box<dyn std::error::Error + Send + Sync + 'static> = err.into();
     assert_eq!(boxed.to_string(), "foo");
 }
@@ -270,7 +270,7 @@ fn wrap_self() {
     let _: Error = mkerr!(context = "while testing wrap_self");
     let _: Error = mkerr!(context = "while testing wrap_self");
     let _: Error = mkerr!(
-        error = mkerr!(context = "while testing wrap_self").stateless(),
+        error = mkerr!(context = "while testing wrap_self"),
         context = "while testing wrap_self with nested error",
     );
 }
@@ -297,14 +297,14 @@ fn dedup_repeated_message_in_chain() {
 
     {
         let inner = TestError::BAR;
-        let outer = mkerr!(error = inner, "outer").stateless();
+        let outer = mkerr!(error = inner, "outer");
         assert_eq!(format!("{:#}", outer), "outer\n  -> bar");
     }
 
     {
         let inner = TestError::BAR;
-        let mid = mkerr!(error = inner).stateless();
-        let outer = mkerr!(error = mid, "outer").stateless();
+        let mid = mkerr!(error = inner);
+        let outer = mkerr!(error = mid, "outer");
         assert_eq!(format!("{}", outer), "outer");
         assert_eq!(format!("{}", outer.source().unwrap()), "bar");
         assert_eq!(format!("{}", outer.chain().last().unwrap()), "bar");
@@ -313,8 +313,8 @@ fn dedup_repeated_message_in_chain() {
 
     {
         let inner = TestError::BAR;
-        let mid = mkerr!(error = inner, "mid").stateless();
-        let outer = mkerr!(error = mid, "outer").stateless();
+        let mid = mkerr!(error = inner, "mid");
+        let outer = mkerr!(error = mid, "outer");
         assert_eq!(format!("{:#}", outer), "outer\n  -> mid\n  -> bar");
     }
 }
@@ -324,30 +324,30 @@ fn eliminate_alloc() {
     {
         let inner = TestError::BAR;
         let mid = mkerr!(error = inner, state = TestState::AppleNotFound);
-        let outer = mkerr!(error = mid) as Error<TestState>;
+        let outer = mkerr!(error = mid.erase());
         assert_eq!(outer.chain().count(), 2);
     }
     {
         let inner = TestError::BAR;
-        let mid = mkerr!(error = inner).stateless();
-        let outer = mkerr!(error = mid) as Error<TestState>;
+        let mid = mkerr!(error = inner);
+        let outer = mkerr!(error = mid.erase());
         assert_eq!(outer.chain().count(), 1);
     }
     {
         let inner = TestError::BAR;
         let mid = mkerr!(error = inner, state = TestState::AppleNotFound).erase();
-        let outer = mkerr!(error = mid) as Error<TestState>;
+        let outer = mkerr!(error = mid);
         assert_eq!(outer.chain().count(), 2);
     }
     {
         let inner = TestError::BAR;
-        let mid = mkerr!(error = inner).stateless().erase();
-        let outer = mkerr!(error = mid) as Error<TestState>;
+        let mid = mkerr!(error = inner).erase();
+        let outer = mkerr!(error = mid);
         assert_eq!(outer.chain().count(), 1);
     }
     {
         let inner = TestError::BAR;
-        let mid = mkerr!(error = inner).stateless().erase();
+        let mid = mkerr!(error = inner).erase();
         let outer = Builder::with_error(mid).build_error();
         assert_eq!(outer.chain().count(), 1);
     }
@@ -355,7 +355,7 @@ fn eliminate_alloc() {
 
 #[test]
 fn deref_and_deref_mut() {
-    let mut err = mkerr!("oops").stateless();
+    let mut err = mkerr!("oops");
     let _: &dyn error::Error = &*err;
     let _: &mut dyn error::Error = &mut *err;
 }
@@ -364,13 +364,13 @@ fn deref_and_deref_mut() {
 #[test]
 fn backtrace_captures_from_first_layer() {
     fn inner_most() -> Error {
-        mkerr!(error = TestError::BAZ).stateless()
+        mkerr!(error = TestError::BAZ)
     }
     fn middle() -> Error {
-        mkerr!(error = inner_most(), "middle layer").stateless()
+        mkerr!(error = inner_most(), "middle layer")
     }
     fn outer_most() -> Error {
-        mkerr!(error = middle(), "outer layer").stateless()
+        mkerr!(error = middle(), "outer layer")
     }
 
     let err = outer_most();
@@ -392,13 +392,13 @@ fn backtrace_captures_from_first_layer() {
 #[test]
 fn root_finds_deepest_source() {
     fn inner_most() -> Error {
-        mkerr!(error = TestError::BAZ).stateless()
+        mkerr!(error = TestError::BAZ)
     }
     fn middle() -> Error {
-        mkerr!(error = inner_most(), "middle layer").stateless()
+        mkerr!(error = inner_most(), "middle layer")
     }
     fn outer_most() -> Error {
-        mkerr!(error = middle(), "outer layer").stateless()
+        mkerr!(error = middle(), "outer layer")
     }
 
     let err = outer_most();
@@ -410,13 +410,13 @@ fn root_finds_deepest_source() {
 #[test]
 fn find_looks_up_error_chain() {
     fn inner_most() -> Error {
-        mkerr!(error = TestError::BAZ).stateless()
+        mkerr!(error = TestError::BAZ)
     }
     fn middle() -> Error {
-        mkerr!(error = inner_most(), "middle layer").stateless()
+        mkerr!(error = inner_most(), "middle layer")
     }
     fn outer_most() -> Error {
-        mkerr!(error = middle(), "outer layer").stateless()
+        mkerr!(error = middle(), "outer layer")
     }
 
     let err = outer_most();

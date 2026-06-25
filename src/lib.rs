@@ -456,11 +456,6 @@ where
 }
 
 impl Error {
-    /// Helper for type inference when the state is not needed.
-    pub fn stateless(self) -> Self {
-        self
-    }
-
     /// Converts to an error of another state without providing the state value.
     pub fn with_phantom_state<S>(self) -> Error<S>
     where

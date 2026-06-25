@@ -15,11 +15,9 @@ fn generate_simple() -> Error<TestState> {
 }
 
 fn generate_triple() -> Error<TestState> {
-    let source_1 = mkerr!("no such fruit").stateless().erase();
-    let source_2 = mkerr!(error = source_1).stateless().erase();
-    let source_3 = mkerr!(error = source_2, "failed to forage for food")
-        .stateless()
-        .erase();
+    let source_1 = mkerr!("no such fruit").erase();
+    let source_2 = mkerr!(error = source_1).erase();
+    let source_3 = mkerr!(error = source_2, "failed to forage for food").erase();
     mkerr!(
         error = source_3,
         state = TestState::AppleNotFound,
