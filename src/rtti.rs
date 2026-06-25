@@ -1,13 +1,12 @@
 use core::{
     any::{Any, TypeId},
     mem::ManuallyDrop,
-    result,
 };
 
 /// Attempts to concretize `value` into type `U` if `T == U` at the type-id level.
 ///
 /// Returns `Ok(value as U)` on match, or `Err(value)` otherwise.
-pub fn concretize<T, U>(value: T) -> result::Result<U, T>
+pub fn concretize<T, U>(value: T) -> Result<U, T>
 where
     T: 'static,
     U: 'static,
@@ -32,7 +31,7 @@ where
 /// Attempts to concretize `ref_` into type `&U` if `T == U` at the type-id level.
 ///
 /// Returns `Ok(ref_ as &U)` on match, or `Err(ref_)` otherwise.
-pub fn concretize_ref<T, U>(ref_: &T) -> result::Result<&U, &T>
+pub fn concretize_ref<T, U>(ref_: &T) -> Result<&U, &T>
 where
     T: 'static,
     U: 'static,
@@ -44,7 +43,7 @@ where
 ///
 /// Returns `Ok(ref_mut as &mut U)` on match, or `Err(ref_mut)` otherwise.
 #[allow(dead_code)]
-pub fn concretize_mut<T, U>(ref_mut: &mut T) -> result::Result<&mut U, &mut T>
+pub fn concretize_mut<T, U>(ref_mut: &mut T) -> Result<&mut U, &mut T>
 where
     T: 'static,
     U: 'static,

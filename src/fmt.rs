@@ -3,7 +3,6 @@ use core::{
     convert::Infallible,
     error,
     fmt::{self, Debug, Display},
-    result,
 };
 
 /// A formatter for [`Error`][crate::Error], works with [`FormatWith`][crate::state::FormatWith].
@@ -35,7 +34,7 @@ fn format_state_context(
     f: &mut fmt::Formatter<'_>,
     state: Option<impl Debug>,
     context: Option<impl Display>,
-) -> result::Result<bool, fmt::Error> {
+) -> Result<bool, fmt::Error> {
     match (state, context) {
         (None, None) => return Ok(false),
         (None, Some(context)) => {

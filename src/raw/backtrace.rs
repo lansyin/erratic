@@ -3,7 +3,6 @@ use core::{
     any::Any,
     error::{self},
     fmt::{self, Debug, Display},
-    result,
 };
 
 #[cfg(feature = "backtrace")]
@@ -35,7 +34,7 @@ std::thread_local! {
 static DISABLED: AtomicBool = AtomicBool::new(false);
 
 impl WithBacktrace {
-    pub fn try_attach<E>(err: E) -> result::Result<impl Source, E>
+    pub fn try_attach<E>(err: E) -> Result<impl Source, E>
     where
         E: Source,
     {

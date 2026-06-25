@@ -3,7 +3,6 @@ use core::{
     error::Error,
     fmt::{Debug, Display},
     mem::ManuallyDrop,
-    result,
 };
 
 use crate::{
@@ -34,7 +33,7 @@ impl ErasedRawError {
         }
     }
 
-    pub fn try_into_stateless(self) -> result::Result<RawError, Self> {
+    pub fn try_into_stateless(self) -> Result<RawError, Self> {
         match self.0 {
             ErasedRawErrorInner::Const(body) => Ok(RawError {
                 const_body: ManuallyDrop::new(body),

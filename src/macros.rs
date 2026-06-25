@@ -37,9 +37,7 @@ macro_rules! match_else {
                 #[allow(clippy::diverging_sub_expression)]
                 let _: $crate::macros::__priv::Infallible = $body;
             }
-            Err(err) => {
-                $crate::macros::__priv::Result::<$crate::macros::__priv::Infallible, _>::Err(err)
-            }
+            Err(err) => $crate::Result::<$crate::macros::__priv::Infallible, _>::Err(err),
         }
     };
     ($exp:expr, Err($pat:pat) => $body:expr $(,)?) => {
@@ -48,9 +46,7 @@ macro_rules! match_else {
                 #[allow(clippy::diverging_sub_expression)]
                 let _: $crate::macros::__priv::Infallible = $body;
             }
-            Ok(value) => {
-                $crate::macros::__priv::Result::<_, $crate::macros::__priv::Infallible>::Ok(value)
-            }
+            Ok(value) => $crate::Result::<_, $crate::macros::__priv::Infallible>::Ok(value),
         }
     };
 }
@@ -68,7 +64,7 @@ macro_rules! match_else {
 /// ```
 /// # use erratic::*;
 /// # fn foo() -> Result<()> {
-/// # let foo = || -> std::result::Result<(), std::io::Error> { unimplemented!() };
+/// # let foo = || -> Result<(), std::io::Error> { unimplemented!() };
 /// # let stream_id = 1;
 /// // A plain literal, no allocation.
 /// foo().with_context(mkctx!("file not found"))?;
@@ -240,7 +236,6 @@ pub mod __priv_mksure {
 /// ```
 /// # struct Value;
 /// # use erratic::*;
-/// # use std::result::Result;
 /// const PNG_HEADER_SIZE: usize = 33;
 ///
 /// #[derive(Debug)]
@@ -421,7 +416,7 @@ mod tests {
         let _ = || -> Result<()> {
             return mkres!("test");
         };
-        let _ = || -> result::Result<(), Error<i32>> {
+        let _ = || -> Result<(), Error<i32>> {
             return mkres!("test");
         };
     }
@@ -497,7 +492,7 @@ mod tests {
     #[test]
     fn infer_default_state_if_state_is_not_specified() {
         let _: Error<i32> = mkerr!(context = "test").into();
-        let _ = || -> result::Result<(), Error<i32>> {
+        let _ = || -> Result<(), Error<i32>> {
             return mkres!(context = "test");
         };
     }
@@ -533,7 +528,7 @@ mod tests {
             "hello {world}{}",
             exclamation,
         );
-        let err_from_mkres: result::Result<(), _> = mkres!(
+        let err_from_mkres: Result<(), _> = mkres!(
             error = mkerr!("source").erase(),
             state = 42,
             "hello {world}{}",

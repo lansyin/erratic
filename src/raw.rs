@@ -12,7 +12,6 @@ use core::{
     mem::{self, ManuallyDrop, MaybeUninit},
     ops::{Deref, DerefMut},
     ptr::NonNull,
-    result,
 };
 
 use crate::{
@@ -160,7 +159,7 @@ impl RawError {
 
 impl<S> RawError<S> {
     /// Constructs an inline-variant [`RawError`] with `state` stored directly.
-    fn try_new_inline(state: S) -> result::Result<Self, S>
+    fn try_new_inline(state: S) -> Result<Self, S>
     where
         S: Debug + Send + Sync + 'static,
     {
@@ -516,7 +515,7 @@ impl<S> RawError<S> {
         }
     }
 
-    pub fn extract_state(self) -> result::Result<(S, Option<RawVacant>), RawError> {
+    pub fn extract_state(self) -> Result<(S, Option<RawVacant>), RawError> {
         match self.select_own() {
             SelectOwn::Const(body) => Err(RawError {
                 const_body: ManuallyDrop::new(body),
@@ -545,7 +544,7 @@ impl<S> RawError<S> {
 
     // Sets the state if the underlying storage type is compatible.
     #[allow(dead_code)]
-    pub fn try_set_state(&mut self, state: S) -> result::Result<(), S> {
+    pub fn try_set_state(&mut self, state: S) -> Result<(), S> {
         match self.select_mut() {
             SelectMut::Const(_body) => Err(state),
             SelectMut::Inline(body) => {
@@ -803,8 +802,7 @@ struct DynBodyVTable {
     /// See [DynBody::into_parts].
     into_parts: unsafe fn(ErasedDynBody, &mut dyn Any, &mut dyn Any, &mut dyn Any),
     /// See [DynBody::extract_state].
-    extract_state:
-        unsafe fn(ErasedDynBody, &mut dyn Any) -> result::Result<RawVacant, ErasedDynBody>,
+    extract_state: unsafe fn(ErasedDynBody, &mut dyn Any) -> Result<RawVacant, ErasedDynBody>,
     /// See [DynBody::into_boxed_error].
     into_boxed_error: unsafe fn(ErasedDynBody) -> Box<dyn error::Error + Send + Sync + 'static>,
     /// See [DynBody::debug].
@@ -1045,7 +1043,7 @@ where
     unsafe fn extract_state(
         this: ErasedDynBody,
         state_dst: &mut dyn Any,
-    ) -> result::Result<RawVacant, ErasedDynBody> {
+    ) -> Result<RawVacant, ErasedDynBody> {
         let mut this = unsafe { ErasedDynBody::into_inner::<S, E, C>(this) };
 
         if let Some(dst) = state_dst.downcast_mut::<Option<S>>() {
@@ -1290,7 +1288,7 @@ where
 pub struct RawVacant(ErasedDynBody);
 
 impl RawVacant {
-    pub fn try_with_state<S>(mut self, state: S) -> result::Result<RawError<S>, (Self, S)> {
+    pub fn try_with_state<S>(mut self, state: S) -> Result<RawError<S>, (Self, S)> {
         unsafe {
             let vt = DynBody::vtable(self.0.borrow());
             let mut state_src = Some(state);
@@ -1306,7 +1304,7 @@ impl RawVacant {
         }
     }
 
-    pub fn try_into_stateless(self) -> result::Result<RawError, Self> {
+    pub fn try_into_stateless(self) -> Result<RawError, Self> {
         let vt = DynBody::vtable(self.0.borrow());
 
         unsafe {

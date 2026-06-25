@@ -3,7 +3,7 @@ use core::error;
 #[cfg(test)]
 use erratic::test_fixtures::*;
 use erratic::{builder::Builder, *};
-use std::{assert_matches, mem, result};
+use std::{assert_matches, mem};
 
 #[test]
 fn from_error_round_trip() {
@@ -277,7 +277,7 @@ fn wrap_self() {
 
 #[test]
 fn extract_state() -> Result<()> {
-    let re: result::Result<(), _> = mkres!(state = 12);
+    let re: Result<(), _> = mkres!(state = 12);
     let re = re.extract_state()?;
     match re.unwrap_err() {
         (12, ..) => Ok(()),

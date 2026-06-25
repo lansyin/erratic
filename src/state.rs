@@ -1,5 +1,5 @@
 //! State helpers and traits.
-use core::{convert::Infallible, fmt::Debug, marker::PhantomData, result};
+use core::{convert::Infallible, fmt::Debug, marker::PhantomData};
 
 use crate::{
     Error,
@@ -113,7 +113,7 @@ where
     }
 
     /// Converts into a stateless error. Returns `Err` if no error details remain.
-    pub fn try_into_stateless(self) -> result::Result<Error, Self> {
+    pub fn try_into_stateless(self) -> Result<Error, Self> {
         let Some(vacant) = self.inner else {
             return Err(Self::new(None));
         };

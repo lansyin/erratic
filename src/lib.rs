@@ -49,7 +49,6 @@
 //! with no other components incurs no heap allocation.
 //!
 //! ```
-//! # use std::{result::Result};
 //! # struct Writer { id: usize }
 //! # impl Writer {
 //! #     fn write(&mut self, _: &[u8]) -> erratic::Result<()> { unimplemented!() }
@@ -80,7 +79,7 @@
 //! # #[derive(Debug)]
 //! # enum State { RetryLater }
 //! # struct Writer;
-//! # fn try_write(_: &mut Writer, data: &[u8]) -> result::Result<(), Error<State>> { unimplemented!() }
+//! # fn try_write(_: &mut Writer, data: &[u8]) -> Result<(), Error<State>> { unimplemented!() }
 //! fn write(w: &mut Writer, data: &[u8]) -> Result<()> {
 //!     while let Err((state, _)) = try_write(w, data).extract_state()? {
 //!         // Handle domain errors.                                  ^ Bubble up infra errors.
@@ -229,7 +228,6 @@ use core::{
     error,
     fmt::{Debug, Display},
     ops::{Deref, DerefMut},
-    result,
 };
 
 use crate::{
@@ -240,7 +238,7 @@ use crate::{
     state::{FormatWith, State, Stateless, Vacant},
 };
 
-pub type Result<T> = result::Result<T, Error>;
+pub type Result<T, E = Error> = core::result::Result<T, E>;
 
 /// An error type that can carry optional state, source, and context.
 #[repr(transparent)]
@@ -411,7 +409,7 @@ where
     }
 
     /// Attempts to extract the state.  
-    pub fn extract_state(self) -> result::Result<(S, Vacant<S>), Error> {
+    pub fn extract_state(self) -> Result<(S, Vacant<S>), Error> {
         match self.0.extract_state() {
             Ok((s, o)) => Ok((S::from_repr(s), Vacant::new(o))),
             Err(e) => Err(Error(e)),
@@ -636,9 +634,7 @@ pub trait StateExt {
     type Result<T, E>;
 
     ///  Extracts the state if it has been set.
-    fn extract_state(
-        self,
-    ) -> result::Result<Self::Result<Self::T, (Self::S, Vacant<Self::S>)>, Error>
+    fn extract_state(self) -> Result<Self::Result<Self::T, (Self::S, Vacant<Self::S>)>, Error>
     where
         Self::S: Sized;
 
@@ -667,9 +663,7 @@ where
     type S = S1;
     type Result<T, E> = E;
 
-    fn extract_state(
-        self,
-    ) -> result::Result<Self::Result<Self::T, (Self::S, Vacant<Self::S>)>, Error>
+    fn extract_state(self) -> Result<Self::Result<Self::T, (Self::S, Vacant<Self::S>)>, Error>
     where
         Self::S: Sized,
     {
@@ -685,17 +679,15 @@ where
     }
 }
 
-impl<T1, S> StateExt for result::Result<T1, Error<S>>
+impl<T1, S> StateExt for Result<T1, Error<S>>
 where
     S: State,
 {
     type T = T1;
     type S = S;
-    type Result<T, E> = result::Result<T, E>;
+    type Result<T, E> = Result<T, E>;
 
-    fn extract_state(
-        self,
-    ) -> result::Result<Self::Result<Self::T, (Self::S, Vacant<Self::S>)>, Error>
+    fn extract_state(self) -> Result<Self::Result<Self::T, (Self::S, Vacant<Self::S>)>, Error>
     where
         Self::S: Sized,
     {
@@ -729,7 +721,7 @@ pub trait BuilderExt: Sized {
     /// ```
     /// # use erratic::*;
     /// # fn foo() -> Result<()> {
-    /// # let foo = || -> std::result::Result<(), std::io::Error> { unimplemented!() };
+    /// # let foo = || -> Result<(), std::io::Error> { unimplemented!() };
     /// # let stream_id = 1;
     /// # let filename = "";
     /// foo().with_context("file not found")?;
@@ -757,11 +749,11 @@ pub trait BuilderExt: Sized {
         F: ContextFn;
 }
 
-impl<T, S1> BuilderExt for result::Result<T, Error<S1>>
+impl<T, S1> BuilderExt for Result<T, Error<S1>>
 where
     S1: State + ?Sized,
 {
-    type Result<E> = result::Result<T, E>;
+    type Result<E> = Result<T, E>;
 
     type E = Error<S1>;
     type S = Stateless;
@@ -810,11 +802,11 @@ where
     }
 }
 
-impl<T, E1> ErrorExt for result::Result<T, E1>
+impl<T, E1> ErrorExt for Result<T, E1>
 where
     E1: error::Error + Send + Sync + 'static,
 {
-    type Result<E> = result::Result<T, E>;
+    type Result<E> = Result<T, E>;
     type S = Stateless;
 
     fn build_error(self) -> Self::Result<Error<Self::S>> {
@@ -826,11 +818,11 @@ where
     }
 }
 
-impl<T, S> ErrorExt for result::Result<T, Error<S>>
+impl<T, S> ErrorExt for Result<T, Error<S>>
 where
     S: State + ?Sized,
 {
-    type Result<E> = result::Result<T, E>;
+    type Result<E> = Result<T, E>;
     type S = S;
 
     fn build_error(self) -> Self::Result<Error<Self::S>> {

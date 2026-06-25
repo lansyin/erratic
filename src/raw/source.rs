@@ -1,5 +1,5 @@
 use alloc::boxed::Box;
-use core::{any::Any, error::Error, result};
+use core::{any::Any, error::Error};
 
 use crate::raw::RawError;
 
@@ -108,7 +108,7 @@ impl Source for BoxedSource {
 pub struct IndirectSource(RawError);
 
 impl IndirectSource {
-    pub(crate) fn try_new(raw: super::RawError) -> result::Result<Self, RawError> {
+    pub(crate) fn try_new(raw: super::RawError) -> Result<Self, RawError> {
         if raw.is_source_only() {
             Ok(Self(raw))
         } else {

@@ -5,7 +5,6 @@ use core::{
     marker::PhantomData,
     mem::{self, ManuallyDrop, MaybeUninit, swap},
     ptr::{self, NonNull},
-    result,
 };
 
 /// Only the least significant 2 bits are used.
@@ -82,7 +81,7 @@ impl<T> Align4PtrCompat<T> {
         None
     };
 
-    pub const fn new(meta: Metadata, value: T) -> result::Result<Self, T> {
+    pub const fn new(meta: Metadata, value: T) -> Result<Self, T> {
         let Some(offset) = Self::OFFSET_IN_STORE else {
             return Err(value);
         };

@@ -1,5 +1,5 @@
 //! Builder for constructing errors.
-use core::{convert::Infallible, error, fmt::Debug, result};
+use core::{convert::Infallible, error, fmt::Debug};
 
 use crate::{
     BuilderExt, Error, ErrorExt,
@@ -165,11 +165,11 @@ where
     }
 }
 
-impl<T, E1> BuilderExt for result::Result<T, E1>
+impl<T, E1> BuilderExt for Result<T, E1>
 where
     E1: error::Error + Send + Sync + 'static,
 {
-    type Result<E> = result::Result<T, E>;
+    type Result<E> = Result<T, E>;
 
     type E = E1;
     type S = Stateless;
@@ -232,12 +232,12 @@ where
     }
 }
 
-impl<T, E1, S1, F1> BuilderExt for result::Result<T, Builder<E1, S1, F1>>
+impl<T, E1, S1, F1> BuilderExt for Result<T, Builder<E1, S1, F1>>
 where
     F1: ContextFn,
     S1: State + ?Sized,
 {
-    type Result<E> = result::Result<T, E>;
+    type Result<E> = Result<T, E>;
 
     type E = E1;
     type S = S1;
@@ -267,7 +267,7 @@ where
 }
 
 impl<T> BuilderExt for Option<T> {
-    type Result<E> = result::Result<T, E>;
+    type Result<E> = Result<T, E>;
 
     type E = Infallible;
     type S = Stateless;
@@ -337,13 +337,13 @@ where
     }
 }
 
-impl<T, E1, S, F> ErrorExt for result::Result<T, Builder<E1, S, F>>
+impl<T, E1, S, F> ErrorExt for Result<T, Builder<E1, S, F>>
 where
     E1: error::Error + Send + Sync + 'static,
     F: ContextFn,
     S: State + ?Sized,
 {
-    type Result<E> = result::Result<T, E>;
+    type Result<E> = Result<T, E>;
     type S = S;
 
     fn build_error(self) -> Self::Result<Error<Self::S>> {
@@ -355,13 +355,13 @@ where
     }
 }
 
-impl<T, S1, S, F> ErrorExt for result::Result<T, Builder<Error<S1>, S, F>>
+impl<T, S1, S, F> ErrorExt for Result<T, Builder<Error<S1>, S, F>>
 where
     S1: State + ?Sized,
     F: ContextFn,
     S: State + ?Sized,
 {
-    type Result<E> = result::Result<T, E>;
+    type Result<E> = Result<T, E>;
     type S = S;
 
     fn build_error(self) -> Self::Result<Error<Self::S>> {
