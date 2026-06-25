@@ -31,14 +31,14 @@
 //!
 //! fn read_weak(r: &Weak<Reader>, sub: usize, blk: &mut [u8]) -> Result<()> {
 //!     mksure!(sub > 0, "substream-{sub} is reserved")?;
-//!     mksure!(blk.len() > 0)?; // Displays operand values on failure.
+//!     mksure!(blk.len() > 0)?; // Displays values on failure.
 //!
 //!     let mut r = r.upgrade()
-//!         .with_context("stream expired")?; // Accepts any value implementing `Display`.
+//!         .with_context("stream expired")?; // Accepts any displayable value.
 //!     let mut r = r.substream(sub)
 //!         .with_context(mkctx!("no such substream"))?; // No alloc so long as no format args.
 //!     r.read_exact(blk)
-//!         .with_context(mkctx!("failed to read from {sub}"))?; // Evaluates only on the error path.
+//!         .with_context(mkctx!("failed to read from {sub}"))?; // Evaluates lazily.
 //!     Ok(())
 //! }
 //! ```
