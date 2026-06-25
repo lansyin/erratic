@@ -29,15 +29,15 @@
 //! # }
 //! use erratic::*;
 //!
-//! fn read_weak(r: &Weak<Reader>, sub: usize, blk: &mut [u8]) -> Result<()> {
-//!     mksure!(sub > 0, "substream-{sub} is reserved")?;
-//!     mksure!(blk.len() > 0)?; // Displays values on failure.
+//! fn read_weak(r: &Weak<Reader>, sub: usize, buf: &mut [u8]) -> Result<()> {
+//!     mksure!(sub > 0, "{sub} is reserved")?;
+//!     mksure!(buf.len() > 0)?; // Displays values on failure.
 //!
 //!     let mut r = r.upgrade()
 //!         .with_context("stream expired")?; // Accepts any displayable value.
 //!     let mut r = r.substream(sub)
 //!         .with_context(mkctx!("no such substream"))?; // No alloc so long as no format args.
-//!     r.read_exact(blk)
+//!     r.read_exact(buf)
 //!         .with_context(mkctx!("failed to read from {sub}"))?; // Evaluates lazily.
 //!     Ok(())
 //! }
@@ -50,8 +50,8 @@
 //!
 //! ```
 //! # use std::{result::Result};
-//! # struct Sink { id: usize }
-//! # impl Sink {
+//! # struct Writer { id: usize }
+//! # impl Writer {
 //! #     fn write(&mut self, _: &[u8]) -> erratic::Result<()> { unimplemented!() }
 //! #     fn reserve_chunk(&self, _: usize) -> erratic::Result<()> { unimplemented!() }
 //! # }
@@ -60,11 +60,11 @@
 //! #[derive(Debug)]
 //! enum State { RetryLater } // Smaller than 1 usize.
 //!
-//! fn try_write(w: &mut Sink, blk: &[u8]) -> Result<(), Error<State>> {
-//!     w.reserve_chunk(blk.len())
+//! fn try_write(w: &mut Writer, data: &[u8]) -> Result<(), Error<State>> {
+//!     w.reserve_chunk(data.len())
 //!         .ok()
 //!         .with_state(State::RetryLater)?; // No alloc.
-//!     w.write(blk)
+//!     w.write(data)
 //!         .with_context(mkctx!("failed to write to {}", w.id))?;
 //!     Ok(())
 //! }
@@ -79,12 +79,12 @@
 //! # use erratic::*;
 //! # #[derive(Debug)]
 //! # enum State { RetryLater }
-//! # struct Sink;
-//! # fn try_write(_: &mut Sink, blk: &[u8]) -> result::Result<(), Error<State>> { unimplemented!() }
-//! fn write(w: &mut Sink, blk: &[u8]) -> Result<()> {
-//!     while let Err((state, _)) = try_write(w, blk).extract_state()? { // Bubble up infra errors.
-//!         // Handle domain errors.
-//!         match state {
+//! # struct Writer;
+//! # fn try_write(_: &mut Writer, data: &[u8]) -> result::Result<(), Error<State>> { unimplemented!() }
+//! fn write(w: &mut Writer, data: &[u8]) -> Result<()> {
+//!     while let Err((state, _)) = try_write(w, data).extract_state()? {
+//!         // Handle domain errors.                                  ^ Bubble up infra errors.
+//!         match state { //
 //!             State::RetryLater => thread::yield_now(),
 //!             // ..
 //!         }
@@ -154,7 +154,7 @@
 //!     Ok(())
 //! }
 //! async fn async_main() -> erratic::Result<()> {
-//!     /* .. */
+//!     // ..
 //! # todo!();
 //! }
 //! ```
