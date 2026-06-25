@@ -291,7 +291,7 @@ macro_rules! __priv_mksure {
     ([$($lhs:tt)*] $token:tt $($rhs:tt)*) => {
         $crate::__priv_mksure!([$($lhs)* $token] $($rhs)*)
     };
-    ([$exp:expr $(, $fmt:literal $($args:tt)*)?]) => {'ret: {
+    ([$exp:expr $(, $($fmt:literal $($args:tt)*)?)?]) => {'ret: {
         if $exp {
             break 'ret $crate::Result::Ok(());
         }
@@ -308,14 +308,14 @@ macro_rules! __priv_mksure {
 
         let err = $crate::mkerr!(context=ctx);
 
-        $(
+        $($(
             break 'ret $crate::mkres!(error=err, $fmt, $($args)*);
-        )?
+        )?)?
 
         #[allow(unreachable_code)]
         $crate::Result::Err(err)
     }};
-    (@cmp [$($lhs:tt)*] [$op:tt] [$rhs:expr $(, $fmt:literal $($args:tt)*)?]) => {
+    (@cmp [$($lhs:tt)*] [$op:tt] [$rhs:expr $(, $($fmt:literal $($args:tt)*)?)?]) => {
         'ret: {
             #[allow(unused_imports)]
             use $crate::macros::__priv_mksure::{SelectAll, SelectDebug};
@@ -353,9 +353,9 @@ macro_rules! __priv_mksure {
                 }
             };
 
-            $(
+            $($(
                 break 'ret $crate::mkres!(error=err, $fmt, $($args)*);
-            )?
+            )?)?
 
             #[allow(unreachable_code)]
             $crate::Result::Err(err)
