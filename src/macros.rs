@@ -15,7 +15,7 @@ pub mod __priv {
     };
 }
 
-/// Like `let-else`, with access to variant bindings in other branches, for [`Result`][core::result::Result] only.
+/// Like `let-else`, with access to variant bindings in other branches, for `Result` only.
 ///
 /// # Examples
 ///
