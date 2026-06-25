@@ -30,14 +30,13 @@
 //! use erratic::*;
 //!
 //! fn read_weak(r: &Weak<Reader>, sub: usize, blk: &mut [u8]) -> Result<()> {
-//!     mksure!(blk.len() > 0)?; // Generates an error message showing the values of both operands.
-//!     mksure!(sub > 0, "substream-{sub} is reserved for internal use")?;
+//!     mksure!(sub > 0, "substream-{sub} is reserved")?;
+//!     mksure!(blk.len() > 0)?; // Displays operand values on failure.
 //!
 //!     let mut r = r.upgrade()
 //!         .with_context("stream expired")?; // Accepts any value implementing `Display`.
 //!     let mut r = r.substream(sub)
 //!         .with_context(mkctx!("no such substream"))?; // No alloc so long as no format args.
-//!
 //!     r.read_exact(blk)
 //!         .with_context(mkctx!("failed to read from {sub}"))?; // Evaluates only on the error path.
 //!     Ok(())
@@ -59,7 +58,7 @@
 //! use erratic::*;
 //!
 //! #[derive(Debug)]
-//! enum State { RetryLater, Closed } // Smaller than 1 usize.
+//! enum State { RetryLater } // Smaller than 1 usize.
 //!
 //! fn try_write(w: &mut Sink, blk: &[u8]) -> Result<(), Error<State>> {
 //!     w.reserve_chunk(blk.len())
@@ -73,7 +72,7 @@
 //!
 //! When no runtime state is actually stored, errors can be cheaply converted between different state types.
 //! This allows infrastructure errors to cross any number of layers with no extra allocation, domain errors
-//! avoid the heap entirely, and both share the same `Error<S>` type. All compose orthogonally.
+//! avoid the heap entirely, and both share the same `Error<S>` type.
 //!
 //! ```
 //! # use std::{thread, result};
