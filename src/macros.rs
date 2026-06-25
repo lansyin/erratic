@@ -339,7 +339,7 @@ macro_rules! __priv_mksure {
         let lhs_value = (&lhs).select().from(&lhs);
         let rhs_value = (&rhs).select().from(&rhs);
 
-        let err = match (lhs_value, rhs_value) {
+        let err: $crate::Error = match (lhs_value, rhs_value) {
             ($crate::macros::__priv::Some(lhs_value), $crate::macros::__priv::Some(rhs_value)) => {
                 $crate::mkerr!(
                     "assertion failed ({}): {lhs_value:?} {} {rhs_value:?}",
@@ -354,11 +354,9 @@ macro_rules! __priv_mksure {
                     const LITERAL: &'static str = $crate::macros::__priv::stringify!(assertion failed: $lhs $op $rhs);
                 }
 
-                let ctx = $crate::context::Mkctx::__priv_new(|| -> $crate::macros::__priv::Option<$crate::macros::__priv::String> {
-                    None
-                }, Literal);
-
-                $crate::mkerr!(context=ctx)
+                $crate::Error::from_context($crate::context::Mkctx::__priv_new(|| {
+                    $crate::macros::__priv::None
+                }, Literal))
             }
         };
 
