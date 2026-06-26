@@ -29,16 +29,14 @@ constructing context from a format string.
 ```rust
 use erratic::*;
 
-fn read_weak(r: &Weak<Reader>, sub: usize, buf: &mut [u8]) -> Result<()> {
-    mksure!(sub > 0, "{sub} is reserved")?;
-    mksure!(buf.len() > 0)?; // Displays values on failure.
+fn read_exact(r: &MuxReader, id: usize, buf: &mut [u8]) -> Result<()> {
+    mksure!(buf.len() > 0)?; // Displays operands on failure.
+    mksure!(id > 0, "{id} is reserved")?; // Explicit error message.
 
-    let mut r = r.upgrade()
-        .with_context("stream expired")?; // Accepts any displayable value.
-    let mut r = r.substream(sub)
-        .with_context(mkctx!("no such substream"))?; // No alloc so long as no format args.
+    let mut r = r.substream(id)
+        .with_context("no such substream")?; // Accepts any displayable value.
     r.read_exact(buf)
-        .with_context(mkctx!("failed to read from {sub}"))?; // Evaluates lazily.
+        .with_context(mkctx!("failed to read from {id}"))?; // Evaluates lazily.
     Ok(())
 }
 ```
