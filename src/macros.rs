@@ -96,7 +96,7 @@ macro_rules! mkctx {
     }};
 }
 
-/// Constructs an error from a variety of input types.
+/// Constructs an error from a variety of input types, with its state type inferred.
 ///
 /// If the only component is a string literal or a small state, no allocation occurs. A state is
 /// considered "small" when its size is under a pointer and its alignment is relaxed enough to fit
@@ -110,7 +110,7 @@ macro_rules! mkctx {
 /// # enum State { NotFound }
 /// # fn foo() {
 /// # let filename = "";
-/// # let err = mkerr!("oops").erase();
+/// # let err = mkerr!("oops").stateless().erase();
 /// let _: Error = mkerr!("404 not found");
 /// let _: Error = mkerr!("{filename} not found");
 /// let _: Error = mkerr!("{} not found", filename);
@@ -133,39 +133,39 @@ macro_rules! mkctx {
 #[macro_export]
 macro_rules! mkerr {
     ($($key:ident=$value:expr),+ $(, $($fmt:literal $($args:tt)*)?)?) => {
-        $crate::__priv_mkerr!(@sort [$crate::Error] [,,] $($key=$value,)+ $($(context=$crate::mkctx!($fmt $($args)*),)?)?)
+        $crate::__priv_mkerr!(@sort [,,] $($key=$value,)+ $($(context=$crate::mkctx!($fmt $($args)*),)?)?)
     };
     ($fmt:literal $($args:tt)*) => {{
-        <$crate::Error>::from_context($crate::mkctx!($fmt $($args)*))
+        $crate::Error::from_context($crate::mkctx!($fmt $($args)*))
     }};
 }
 
 #[macro_export]
 #[doc(hidden)]
 macro_rules! __priv_mkerr {
-    (@sort [$fallback:ty] [$($_:expr)?, $($c:expr)?,  $($e:expr)?] state=$s:expr, $($k:ident=$v:expr,)*) => {{
+    (@sort [$($_:expr)?, $($c:expr)?,  $($e:expr)?] state=$s:expr, $($k:ident=$v:expr,)*) => {{
         $( let _ = $_; $crate::macros::__priv::compile_error!("state can only be set once");)?
-        $crate::__priv_mkerr!(@sort [$fallback] [$s, $($c)?, $($e)?] $($k=$v,)*)
+        $crate::__priv_mkerr!(@sort [$s, $($c)?, $($e)?] $($k=$v,)*)
     }};
-    (@sort [$fallback:ty] [$($s:expr)?, $($_:expr)?,  $($e:expr)?] context=$c:expr, $($k:ident=$v:expr,)*) => {{
+    (@sort [$($s:expr)?, $($_:expr)?,  $($e:expr)?] context=$c:expr, $($k:ident=$v:expr,)*) => {{
         $( let _ = $_; $crate::macros::__priv::compile_error!("context can only be set once. note: the format string counts as a context.");)?
-        $crate::__priv_mkerr!(@sort [$fallback] [$($s)?, $c, $($e)?] $($k=$v,)*)
+        $crate::__priv_mkerr!(@sort [$($s)?, $c, $($e)?] $($k=$v,)*)
     }};
-    (@sort [$fallback:ty] [$($s:expr)?, $($c:expr)?,  $($_:expr)?] error=$e:expr, $($k:ident=$v:expr,)*) => {{
+    (@sort [$($s:expr)?, $($c:expr)?,  $($_:expr)?] error=$e:expr, $($k:ident=$v:expr,)*) => {{
         $( let _ = $_; $crate::macros::__priv::compile_error!("error can only be set once");)?
-        $crate::__priv_mkerr!(@sort [$fallback] [$($s)?, $($c)?, $e] $($k=$v,)*)
+        $crate::__priv_mkerr!(@sort [$($s)?, $($c)?, $e] $($k=$v,)*)
     }};
-    (@sort [$fallback:ty] [$($s:expr)?, $($c:expr)?,  $($e:expr)?]) => {{
+    (@sort [$($s:expr)?, $($c:expr)?,  $($e:expr)?]) => {{
         let builder = ($crate::macros::__priv::None::<()>);
         $(let builder = builder.ok_or($e);)?
         $(let builder = $crate::BuilderExt::with_state(builder, $s);)?
         $(let builder = $crate::BuilderExt::with_context(builder, $c);)?
-        $crate::__priv_mkerr!(@infer [$fallback] [$($s)?] builder.unwrap_err())
+        $crate::__priv_mkerr!(@infer [$($s)?] builder.unwrap_err())
     }};
-    (@infer [$fallback:ty] [] $builder:expr) => {
-        $crate::macros::__priv::Into::<$fallback>::into($builder)
+    (@infer [] $builder:expr) => {
+        $crate::macros::__priv::Into::<$crate::Error<_>>::into($builder)
     };
-    (@infer [$fallback:ty] [$state:expr] $builder:expr) => {
+    (@infer [$state:expr] $builder:expr) => {
         $crate::ErrorExt::build_error($builder)
     };
 }
@@ -179,11 +179,11 @@ macro_rules! __priv_mkerr {
 macro_rules! mkres {
     ($($key:ident=$value:expr),+ $(, $($fmt:literal $($args:tt)*)?)?) => {
         $crate::macros::__priv::Err(
-            $crate::__priv_mkerr!(@sort [$crate::Error<_>] [,,] $($key=$value,)+ $($(context=$crate::mkctx!($fmt $($args)*),)?)?)
+            $crate::__priv_mkerr!(@sort [,,] $($key=$value,)+ $($(context=$crate::mkctx!($fmt $($args)*),)?)?)
         )
     };
     ($fmt:literal $($args:tt)*) => {
-        $crate::macros::__priv::Err($crate::mkerr!($fmt $($args)*).with_phantom_state())
+        $crate::macros::__priv::Err($crate::mkerr!($fmt $($args)*))
     };
 }
 
@@ -425,13 +425,13 @@ mod tests {
 
     #[test]
     fn error_from_literal() {
-        let _ = mkerr!("test");
+        let _: Error = mkerr!("test");
     }
 
     #[test]
     fn error_from_format_string() {
         let filename = "file.txt";
-        let _ = mkerr!("{} not found", filename);
+        let _: Error = mkerr!("{} not found", filename);
     }
 
     #[test]
@@ -439,9 +439,9 @@ mod tests {
         let err_from_mkerr = mkerr!(
             state = 42,
             context = "test",
-            error = mkerr!("source").erase(),
+            error = mkerr!("source").stateless().erase(),
         );
-        let err_from_builder = Builder::with_error(mkerr!("source").erase())
+        let err_from_builder = Builder::with_error(mkerr!("source").stateless().erase())
             .with_state(42)
             .with_context("test")
             .build_error();
@@ -456,10 +456,10 @@ mod tests {
     fn error_from_kvs_unordered() {
         let err_from_mkerr = mkerr!(
             context = "test",
-            error = mkerr!("source").erase(),
+            error = mkerr!("source").stateless().erase(),
             state = 42,
         );
-        let err_from_builder = Builder::with_error(mkerr!("source").erase())
+        let err_from_builder = Builder::with_error(mkerr!("source").stateless().erase())
             .with_state(42)
             .with_context("test")
             .build_error();
@@ -474,11 +474,11 @@ mod tests {
     fn error_from_hybrid() {
         let world = "world!";
         let err_from_mkerr = mkerr!(
-            error = mkerr!("source").erase(),
+            error = mkerr!("source").stateless().erase(),
             state = 42,
             "hello {world}"
         );
-        let err_from_builder = Builder::with_error(mkerr!("source").erase())
+        let err_from_builder = Builder::with_error(mkerr!("source").stateless().erase())
             .with_state(42)
             .with_context(format!("hello {world}"))
             .build_error();
@@ -491,7 +491,7 @@ mod tests {
 
     #[test]
     fn infer_default_state_if_state_is_not_specified() {
-        let _: Error<i32> = mkerr!(context = "test").into();
+        let _: Error<i32> = mkerr!(context = "test");
         let _ = || -> Result<(), Error<i32>> {
             return mkres!(context = "test");
         };
@@ -500,7 +500,7 @@ mod tests {
     #[test]
     fn no_need_for_type_hint_if_state_is_specified() {
         let _ = mkerr!(state = 42, context = "test");
-        let _ = mkerr!(context = "test");
+        let _: Error = mkerr!(context = "test");
     }
 
     // Test that the macros can select format string or literal based on the input.
@@ -508,13 +508,13 @@ mod tests {
     #[test]
     fn error_from_literal_like_format_string() {
         let filename = "file.txt";
-        let err = mkerr!("{filename} not found");
+        let err = mkerr!("{filename} not found").stateless();
         assert!(err.has_context_of::<String>());
     }
 
     #[test]
     fn error_from_literal_without_allocation() {
-        let err = mkerr!("file not found");
+        let err = mkerr!("file not found").stateless();
         assert!(!err.has_context_of::<String>());
     }
 
@@ -523,13 +523,13 @@ mod tests {
         let world = "world";
         let exclamation = "!";
         let err_from_mkerr = mkerr!(
-            error = mkerr!("source").erase(),
+            error = mkerr!("source").stateless().erase(),
             state = 42,
             "hello {world}{}",
             exclamation,
         );
         let err_from_mkres: Result<(), _> = mkres!(
-            error = mkerr!("source").erase(),
+            error = mkerr!("source").stateless().erase(),
             state = 42,
             "hello {world}{}",
             exclamation,
@@ -556,8 +556,8 @@ mod tests {
         }
 
         // mkctx creates a closure; the closure is not called yet
-        let builder =
-            Builder::with_error(mkerr!("oops").erase()).with_context(mkctx!("{}", CallTracker));
+        let builder = Builder::with_error(mkerr!("oops").stateless().erase())
+            .with_context(mkctx!("{}", CallTracker));
 
         assert!(
             !CALLED.load(Ordering::SeqCst),

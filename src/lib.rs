@@ -471,6 +471,11 @@ impl Error {
         let (_state, context, source) = self.0.into_parts::<C, E>();
         (context, source)
     }
+
+    /// Identity helper to aid type inference.
+    pub fn stateless(self) -> Self {
+        self
+    }
 }
 
 impl<F> Error<FormatWith<F>>
