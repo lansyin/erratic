@@ -267,11 +267,11 @@ fn into_boxed_error() {
 
 #[test]
 fn wrap_self() {
-    let _: Error = mkerr!(context = "while testing wrap_self");
-    let _: Error = mkerr!(context = "while testing wrap_self");
+    let _: Error = mkerr!(context = TestMessage::HOGE);
+    let _: Error = mkerr!(context = TestMessage::HOGE);
     let _: Error = mkerr!(
-        error = mkerr!(context = "while testing wrap_self").stateless(),
-        context = "while testing wrap_self with nested error",
+        error = mkerr!(context = TestMessage::HOGE).stateless(),
+        context = TestMessage::FUGA,
     );
 }
 

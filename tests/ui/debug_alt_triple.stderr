@@ -1,12 +1,14 @@
 Error {
     state: AppleNotFound,
     context: TestMessage(
-        "hoge",
+        "fuga",
     ),
     source: Error {
-        context: "failed to forage for food",
-        source: Error {
-            context: "no such fruit",
-        },
+        context: TestMessage(
+            "hoge",
+        ),
+        source: TestError(
+            "foo",
+        ),
     },
 }

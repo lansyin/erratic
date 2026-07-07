@@ -438,12 +438,12 @@ mod tests {
     fn error_from_kvs() {
         let err_from_mkerr = mkerr!(
             state = 42,
-            context = "test",
-            error = mkerr!("source").stateless().erase(),
+            context = test_fixtures::TestMessage::HOGE,
+            error = test_fixtures::TestError::FOO,
         );
-        let err_from_builder = Builder::with_error(mkerr!("source").stateless().erase())
+        let err_from_builder = Builder::with_error(test_fixtures::TestError::FOO)
             .with_state(42)
-            .with_context("test")
+            .with_context(test_fixtures::TestMessage::HOGE)
             .build_error();
 
         assert_eq!(
@@ -455,13 +455,13 @@ mod tests {
     #[test]
     fn error_from_kvs_unordered() {
         let err_from_mkerr = mkerr!(
-            context = "test",
-            error = mkerr!("source").stateless().erase(),
+            context = test_fixtures::TestMessage::HOGE,
+            error = test_fixtures::TestError::FOO,
             state = 42,
         );
-        let err_from_builder = Builder::with_error(mkerr!("source").stateless().erase())
+        let err_from_builder = Builder::with_error(test_fixtures::TestError::FOO)
             .with_state(42)
-            .with_context("test")
+            .with_context(test_fixtures::TestMessage::HOGE)
             .build_error();
 
         assert_eq!(
@@ -474,11 +474,11 @@ mod tests {
     fn error_from_hybrid() {
         let world = "world!";
         let err_from_mkerr = mkerr!(
-            error = mkerr!("source").stateless().erase(),
+            error = test_fixtures::TestError::FOO,
             state = 42,
             "hello {world}"
         );
-        let err_from_builder = Builder::with_error(mkerr!("source").stateless().erase())
+        let err_from_builder = Builder::with_error(test_fixtures::TestError::FOO)
             .with_state(42)
             .with_context(format!("hello {world}"))
             .build_error();
@@ -491,16 +491,16 @@ mod tests {
 
     #[test]
     fn infer_default_state_if_state_is_not_specified() {
-        let _: Error<i32> = mkerr!(context = "test");
+        let _: Error<i32> = mkerr!(context = test_fixtures::TestMessage::HOGE);
         let _ = || -> Result<(), Error<i32>> {
-            return mkres!(context = "test");
+            return mkres!(context = test_fixtures::TestMessage::HOGE);
         };
     }
 
     #[test]
     fn no_need_for_type_hint_if_state_is_specified() {
-        let _ = mkerr!(state = 42, context = "test");
-        let _: Error = mkerr!(context = "test");
+        let _ = mkerr!(state = 42, context = test_fixtures::TestMessage::HOGE);
+        let _: Error = mkerr!(context = test_fixtures::TestMessage::HOGE);
     }
 
     // Test that the macros can select format string or literal based on the input.
@@ -523,13 +523,13 @@ mod tests {
         let world = "world";
         let exclamation = "!";
         let err_from_mkerr = mkerr!(
-            error = mkerr!("source").stateless().erase(),
+            error = test_fixtures::TestError::FOO,
             state = 42,
             "hello {world}{}",
             exclamation,
         );
         let err_from_mkres: Result<(), _> = mkres!(
-            error = mkerr!("source").stateless().erase(),
+            error = test_fixtures::TestError::FOO,
             state = 42,
             "hello {world}{}",
             exclamation,
@@ -556,7 +556,7 @@ mod tests {
         }
 
         // mkctx creates a closure; the closure is not called yet
-        let builder = Builder::with_error(mkerr!("oops").stateless().erase())
+        let builder = Builder::with_error(test_fixtures::TestError::FOO)
             .with_context(mkctx!("{}", CallTracker));
 
         assert!(
