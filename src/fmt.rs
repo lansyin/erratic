@@ -26,10 +26,6 @@ pub trait Formatter: 'static {
     }
 }
 
-pub(crate) trait DebugDisplay: Debug + Display {}
-
-impl<T> DebugDisplay for T where T: Debug + Display {}
-
 fn format_state_context(
     f: &mut fmt::Formatter<'_>,
     state: Option<impl Debug>,

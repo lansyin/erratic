@@ -13,7 +13,7 @@ use crate::{
     },
 };
 
-pub struct ErasedRawError(ErasedRawErrorInner);
+pub(super) struct ErasedRawError(ErasedRawErrorInner);
 
 enum ErasedRawErrorInner {
     Const(Align4Ref<'static, ConstBody>),

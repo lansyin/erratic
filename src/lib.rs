@@ -230,9 +230,9 @@ use core::{
 
 use crate::{
     builder::Builder,
-    context::{Context, ContextFn, Contextless, Identity},
+    context::{Context, ContextFn, Contextless, Identity, Printable},
     fmt::Formatter,
-    raw::{BoxedSource, RawError},
+    raw::RawError,
     state::{FormatWith, State, Stateless, Vacant},
 };
 
@@ -253,7 +253,7 @@ where
     where
         C: Context,
     {
-        Self(RawError::new(None, None::<Infallible>, ctx))
+        Self(RawError::from_error(None, None::<Infallible>, ctx))
     }
 
     /// Creates an `Error` from any [`Error`][core::error::Error].
@@ -266,11 +266,7 @@ where
 
     /// Creates an `Error` from a boxed error.
     pub fn from_boxed(boxed: Box<dyn error::Error + Send + Sync + 'static>) -> Self {
-        Self(RawError::new::<_, _>(
-            None,
-            Some(BoxedSource(boxed)),
-            Contextless::new(),
-        ))
+        Self(RawError::from_boxed(None, boxed, Contextless::new()))
     }
 
     /// Returns `true` if there is a state stored inside the error.
@@ -289,8 +285,8 @@ where
     }
 
     /// Returns a reference to the context, if present.
-    pub fn context(&self) -> Option<&(dyn Display + Send + Sync + 'static)> {
-        self.0.context().map(|v| v as _)
+    pub fn context(&self) -> Option<&(dyn Printable + Send + Sync + 'static)> {
+        self.0.context()
     }
 
     /// Returns `true` if the attached context is of type `C`.
@@ -394,7 +390,7 @@ where
 {
     /// Creates an `Error` from a state value.
     pub fn from_state(state: S) -> Self {
-        Error(RawError::new(
+        Error(RawError::from_error(
             Some(S::into_repr(state)),
             None::<Infallible>,
             Contextless::new(),
@@ -514,7 +510,7 @@ where
     S: State + ?Sized,
 {
     fn from(err: E) -> Self {
-        Error(RawError::new(None, Some(err), Contextless::new()))
+        Error(RawError::from_error(None, Some(err), Contextless::new()))
     }
 }
 

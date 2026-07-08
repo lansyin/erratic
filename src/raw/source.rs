@@ -6,7 +6,7 @@ use crate::raw::RawError;
 use super::backtrace::WithBacktrace;
 
 /// An error container that can be used as the source of [`RawError`].
-pub trait Source: Any + Send + Sync + 'static {
+pub(super) trait Source: Any + Send + Sync + 'static {
     fn error_ref(&self) -> Option<&(dyn Error + Send + Sync + 'static)>;
     fn error_mut(&mut self) -> Option<&mut (dyn Error + Send + Sync + 'static)>;
     fn into_boxed(self) -> Option<Box<dyn Error + Send + Sync + 'static>>;
@@ -54,7 +54,7 @@ where
     }
 }
 
-pub struct NoSource;
+pub(super) struct NoSource;
 
 impl Source for NoSource {
     fn error_ref(&self) -> Option<&(dyn Error + Send + Sync + 'static)> {
@@ -77,7 +77,7 @@ impl Source for NoSource {
     }
 }
 
-pub struct BoxedSource(pub Box<dyn Error + Send + Sync + 'static>);
+pub(super) struct BoxedSource(pub Box<dyn Error + Send + Sync + 'static>);
 
 impl Source for BoxedSource {
     fn error_ref(&self) -> Option<&(dyn Error + Send + Sync + 'static)> {
@@ -105,7 +105,7 @@ impl Source for BoxedSource {
     }
 }
 
-pub struct IndirectSource(RawError);
+pub(super) struct IndirectSource(RawError);
 
 impl IndirectSource {
     pub(crate) fn try_new(raw: super::RawError) -> Result<Self, RawError> {
@@ -143,7 +143,7 @@ impl Source for IndirectSource {
     }
 }
 
-pub struct WithBacktraceSource(pub WithBacktrace);
+pub(super) struct WithBacktraceSource(pub WithBacktrace);
 
 impl Source for WithBacktraceSource {
     fn error_ref(&self) -> Option<&(dyn Error + Send + Sync + 'static)> {

@@ -162,3 +162,8 @@ where
         self.0
     }
 }
+
+/// A value implementing both `Debug` and `Display`.
+pub trait Printable: Debug + Display {}
+
+impl<T> Printable for T where T: Debug + Display {}

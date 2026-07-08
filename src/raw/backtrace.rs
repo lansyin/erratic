@@ -17,7 +17,7 @@ use core::{
 use crate::raw::source::{Source, WithBacktraceSource};
 
 // TODO: Remove this workaround once Error::provide gets stabilized.
-pub(crate) struct WithBacktrace {
+pub(super) struct WithBacktrace {
     err: Box<dyn Source>,
     take_err: fn(Self, &mut dyn Any) -> Result<(), Self>,
     into_source: fn(Self) -> Option<Box<dyn error::Error + Send + Sync + 'static>>,

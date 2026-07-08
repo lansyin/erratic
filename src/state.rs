@@ -131,7 +131,7 @@ where
         C: Context,
     {
         let Some(vacant) = self.inner else {
-            return Error(RawError::new(
+            return Error(RawError::from_error(
                 Some(S2::into_repr(state)),
                 None::<Infallible>,
                 context,
@@ -146,7 +146,7 @@ where
         S2: State,
     {
         let Some(vacant) = self.inner else {
-            return Error(RawError::new(
+            return Error(RawError::from_error(
                 Some(S2::into_repr(state)),
                 None::<Infallible>,
                 Contextless::new(),
@@ -161,7 +161,7 @@ where
         C: Context,
     {
         let Some(vacant) = self.inner else {
-            return Error(RawError::new(None, None::<Infallible>, context));
+            return Error(RawError::from_error(None, None::<Infallible>, context));
         };
         Error(vacant.derive(None, context))
     }

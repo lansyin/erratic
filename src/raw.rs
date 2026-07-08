@@ -15,19 +15,16 @@ use core::{
 };
 
 use crate::{
-    context::{self, Context, Empty},
-    fmt::{self, DebugDisplay},
-    match_else,
+    context::{self, Context, Empty, Printable},
+    fmt, match_else,
     raw::{
         erased::ErasedRawError,
         ptr::{Align4, Align4Own, Align4PtrCompat, Align4Ref, Metadata, Mut, Ref},
-        source::{IndirectSource, NoSource, Source, WithBacktraceSource},
+        source::{BoxedSource, IndirectSource, NoSource, Source, WithBacktraceSource},
     },
     rtti,
 };
 use backtrace::WithBacktrace;
-
-pub use source::BoxedSource;
 
 /// Triple-state error storage.
 ///
@@ -41,7 +38,7 @@ pub use source::BoxedSource;
 ///
 /// The discriminant is written at construction and must never be modified afterward.
 #[repr(C)]
-pub union RawError<S = Infallible>
+pub(crate) union RawError<S = Infallible>
 where
     S: 'static,
 {
@@ -224,8 +221,31 @@ impl RawError {
 }
 
 impl<S> RawError<S> {
+    /// Constructs from an standard error.
+    pub fn from_error<E, C>(state: Option<S>, source: Option<E>, context: C) -> Self
+    where
+        S: Debug + Send + Sync + 'static,
+        E: error::Error + Send + Sync + 'static,
+        C: context::Context,
+    {
+        Self::new(state, source, context)
+    }
+
+    /// Constructs from a boxed error.
+    pub fn from_boxed<C>(
+        state: Option<S>,
+        source: Box<dyn error::Error + Send + Sync + 'static>,
+        context: C,
+    ) -> Self
+    where
+        S: Debug + Send + Sync + 'static,
+        C: context::Context,
+    {
+        Self::new(state, Some(BoxedSource(source)), context)
+    }
+
     /// Constructs a [`RawError`].
-    pub fn new<E, C>(state: Option<S>, source: Option<E>, context: C) -> Self
+    fn new<E, C>(state: Option<S>, source: Option<E>, context: C) -> Self
     where
         S: Debug + Send + Sync + 'static,
         E: Source + Send + Sync + 'static,
@@ -329,20 +349,13 @@ impl<S> RawError<S> {
     }
 
     /// Returns a reference to the displayable context.
-    pub fn context(&self) -> Option<&'_ (dyn DebugDisplay + Send + Sync + 'static)> {
+    pub fn context(&self) -> Option<&(dyn Printable + Send + Sync + 'static)> {
         match self.select_ref() {
-            // Safety: Projection from `ConstBody` to `ConstBody::context` is safe.
-            SelectRef::Const(body) => unsafe {
-                Some(
-                    body.borrow()
-                        .project(|body| &raw const (*body).context)
-                        .deref(),
-                )
-            },
+            SelectRef::Const(body) => Some(&body.borrow().deref().context),
             SelectRef::Boxed(body) => unsafe {
                 let vtable = DynBody::vtable(body.borrow());
                 // Safety: The body pointer is confirmed valid.
-                (vtable.context)(body.borrow()).map(|c| c as _)
+                (vtable.context)(body.borrow()).map(|v| v as _)
             },
             SelectRef::Inline(_body) => None,
         }
@@ -490,9 +503,7 @@ impl<S> RawError<S> {
         match self.select_own() {
             SelectOwn::Const(body) => {
                 // Safety: The project to context is inbound.
-                let context =
-                    unsafe { body.borrow().project(|v| &raw const (*v).context).copied() };
-                let context = rtti::concretize::<_, C>(context).ok();
+                let context = rtti::concretize::<_, C>(body.borrow().deref().context).ok();
                 (None, context, None)
             }
             SelectOwn::Inline(body) => (Some(body.into_value()), None, None),
@@ -521,24 +532,22 @@ impl<S> RawError<S> {
                 const_body: ManuallyDrop::new(body),
             }),
             SelectOwn::Inline(body) => Ok((body.into_value(), None)),
-            SelectOwn::Boxed(body) => {
-                unsafe {
-                    let vt = DynBody::vtable(body.borrow());
-                    let mut state_dst = None::<S>;
-                    // Safety: The body, state pointers are confirmed valid.
-                    let re = (vt.extract_state)(body, &mut state_dst as &mut dyn Any);
+            SelectOwn::Boxed(body) => unsafe {
+                let vt = DynBody::vtable(body.borrow());
+                let mut state_dst = None::<S>;
+                // Safety: The body, state pointers are confirmed valid.
+                let re = (vt.extract_state)(body, &mut state_dst as &mut dyn Any);
 
-                    match (state_dst, re) {
-                        (Some(state), Ok(vacant)) => Ok((state, Some(vacant))),
-                        (None, Err(body)) => Err(RawError {
-                            boxed_body: ManuallyDrop::new(body),
-                        }),
-                        (None, Ok(_)) | (Some(_), Err(_)) => {
-                            unreachable!() // Note: `state_dst` becomes `Some` iff `extract_state` returns `Ok`. 
-                        }
+                match (state_dst, re) {
+                    (Some(state), Ok(vacant)) => Ok((state, Some(vacant))),
+                    (None, Err(body)) => Err(RawError {
+                        boxed_body: ManuallyDrop::new(body),
+                    }),
+                    (None, Ok(_)) | (Some(_), Err(_)) => {
+                        unreachable!() // Note: `state_dst` becomes `Some` iff `extract_state` returns `Ok`. 
                     }
                 }
-            }
+            },
         }
     }
 
@@ -600,14 +609,7 @@ impl<S> RawError<S> {
         S: Debug,
     {
         match self.select_own() {
-            SelectOwn::Const(body) => unsafe {
-                // Safety: Projection from `ConstBody` to `ConstBody::context` is safe.
-                let context = body
-                    .borrow()
-                    .project(|body| &raw const (*body).context)
-                    .deref();
-                (*context).into()
-            },
+            SelectOwn::Const(body) => (body.borrow().deref().context).into(),
             SelectOwn::Inline(body) => format!("{:?}", body.borrow_value()).into(),
             SelectOwn::Boxed(body) => unsafe {
                 let vtable = DynBody::vtable(body.borrow());
@@ -624,13 +626,13 @@ impl<S> RawError<S> {
         ErasedRawError::from_typed(self)
     }
 
-    pub fn backtrace_opaque(&self) -> Option<&dyn DebugDisplay> {
+    pub fn backtrace_opaque(&self) -> Option<impl Debug + Display> {
         #[cfg(feature = "backtrace")]
         {
             WithBacktrace::search(|| self.source().map(|v| v as _)).map(|v| v as _)
         }
         #[cfg(not(feature = "backtrace"))]
-        None
+        None::<Infallible>
     }
 
     #[cfg(feature = "backtrace")]
@@ -707,7 +709,7 @@ where
 }
 
 #[repr(C)]
-pub struct ConstBody {
+struct ConstBody {
     context: &'static str,
 }
 
@@ -740,7 +742,7 @@ mod helper {
 
     use crate::rtti;
 
-    pub struct Exclude<T, X> {
+    pub(super) struct Exclude<T, X> {
         value: T,
         _marker: PhantomData<X>,
     }
@@ -821,7 +823,7 @@ struct DynBodyVTable {
     /// See [DynBody::state].
     state: unsafe fn(Ref<'_, DynBody>, TypeId, NonNull<()>),
     /// See [DynBody::context].
-    context: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn DebugDisplay + Send + Sync + 'static)>,
+    context: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn Printable + Send + Sync + 'static)>,
     /// See [DynBody::downcast_context_ref].
     downcast_context_ref: unsafe fn(Ref<'_, DynBody>, TypeId, NonNull<()>),
     /// See [DynBody::downcast_context_mut].
@@ -1179,9 +1181,7 @@ where
     /// # Safety
     ///
     /// - `this` must point to a valid `DynBody<S, E, C>`.
-    unsafe fn context(
-        this: Ref<'_, DynBody>,
-    ) -> Option<&(dyn DebugDisplay + Send + Sync + 'static)> {
+    unsafe fn context(this: Ref<'_, DynBody>) -> Option<&(dyn Printable + Send + Sync + 'static)> {
         let this = unsafe { this.cast::<Self>().deref() };
 
         this.context.get().map(|c| c as _)
@@ -1285,7 +1285,7 @@ where
     }
 }
 
-pub struct RawVacant(ErasedDynBody);
+pub(crate) struct RawVacant(ErasedDynBody);
 
 impl RawVacant {
     pub fn try_with_state<S>(mut self, state: S) -> Result<RawError<S>, (Self, S)> {

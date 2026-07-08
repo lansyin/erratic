@@ -81,7 +81,9 @@ where
         match (value.state, value.err, F::Output::is_contextless()) {
             (None, None, true) => unreachable!(),
             (None, Some(err), true) => err.into(),
-            (state, err, _) => Error::<S>(RawError::new(state, err, value.context_fn.call())),
+            (state, err, _) => {
+                Error::<S>(RawError::from_error(state, err, value.context_fn.call()))
+            }
         }
     }
 }
@@ -101,7 +103,7 @@ where
         match (value.err, F::Output::is_contextless()) {
             (None, true) => unreachable!(),
             (Some(err), true) => err.into(),
-            (err, _) => Error(RawError::new(None, err, value.context_fn.call())),
+            (err, _) => Error(RawError::from_error(None, err, value.context_fn.call())),
         }
     }
 }
@@ -116,7 +118,7 @@ where
         match (value.err, F::Output::is_contextless()) {
             (None, true) => unreachable!(),
             (Some(err), true) => err,
-            (None, false) => Error(RawError::new(
+            (None, false) => Error(RawError::from_error(
                 None,
                 None::<Infallible>,
                 value.context_fn.call(),
@@ -142,7 +144,7 @@ where
     S: State + ?Sized,
 {
     fn from(value: Builder<Error<Stateless>, Stateless, F>) -> Self {
-        Error(RawError::new(
+        Error(RawError::from_error(
             None,
             value.err.map(|e| e.erase()),
             value.context_fn.call(),
@@ -157,7 +159,7 @@ where
     S: State,
 {
     fn from(value: Builder<Error<Stateless>, S, F>) -> Self {
-        Error(RawError::new(
+        Error(RawError::from_error(
             value.state,
             value.err.map(|e| e.erase()),
             value.context_fn.call(),
