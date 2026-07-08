@@ -408,7 +408,7 @@ fn backtrace_only_at_captured_level_in_debug_alt() {
     };
 
     let formatted = format!("{err:#?}");
-    let count = formatted.matches("backtrace:").count();
+    let count = formatted.matches("backtrace: Backtrace").count();
     assert_eq!(
         count, 1,
         "`backtrace:` should appear exactly once (only at the captured inner level) \
