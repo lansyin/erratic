@@ -495,6 +495,7 @@ impl<'a, T> Ref<'a, T>
 where
     T: Copy,
 {
+    #[allow(dead_code)]
     /// Reads the value by copy.
     pub fn copied(&self) -> T {
         unsafe { self.ptr.read() }
