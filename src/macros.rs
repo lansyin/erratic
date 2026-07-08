@@ -408,7 +408,7 @@ mod tests {
         string::{String, ToString},
     };
 
-    use crate::*;
+    use crate::{test_fixtures::*, *};
 
     // Ensure the macros do not require type annotations in the most common cases
     #[test]
@@ -438,12 +438,12 @@ mod tests {
     fn error_from_kvs() {
         let err_from_mkerr = mkerr!(
             state = 42,
-            context = test_fixtures::TestMessage::HOGE,
-            error = test_fixtures::TestError::FOO,
+            context = TestMessage::HOGE,
+            error = TestError::FOO,
         );
-        let err_from_builder = Builder::with_error(test_fixtures::TestError::FOO)
+        let err_from_builder = Builder::with_error(TestError::FOO)
             .with_state(42)
-            .with_context(test_fixtures::TestMessage::HOGE)
+            .with_context(TestMessage::HOGE)
             .build_error();
 
         assert_eq!(
@@ -455,13 +455,13 @@ mod tests {
     #[test]
     fn error_from_kvs_unordered() {
         let err_from_mkerr = mkerr!(
-            context = test_fixtures::TestMessage::HOGE,
-            error = test_fixtures::TestError::FOO,
+            context = TestMessage::HOGE,
+            error = TestError::FOO,
             state = 42,
         );
-        let err_from_builder = Builder::with_error(test_fixtures::TestError::FOO)
+        let err_from_builder = Builder::with_error(TestError::FOO)
             .with_state(42)
-            .with_context(test_fixtures::TestMessage::HOGE)
+            .with_context(TestMessage::HOGE)
             .build_error();
 
         assert_eq!(
@@ -473,12 +473,8 @@ mod tests {
     #[test]
     fn error_from_hybrid() {
         let world = "world!";
-        let err_from_mkerr = mkerr!(
-            error = test_fixtures::TestError::FOO,
-            state = 42,
-            "hello {world}"
-        );
-        let err_from_builder = Builder::with_error(test_fixtures::TestError::FOO)
+        let err_from_mkerr = mkerr!(error = TestError::FOO, state = 42, "hello {world}");
+        let err_from_builder = Builder::with_error(TestError::FOO)
             .with_state(42)
             .with_context(format!("hello {world}"))
             .build_error();
@@ -491,16 +487,16 @@ mod tests {
 
     #[test]
     fn infer_default_state_if_state_is_not_specified() {
-        let _: Error<i32> = mkerr!(context = test_fixtures::TestMessage::HOGE);
+        let _: Error<i32> = mkerr!(context = TestMessage::HOGE);
         let _ = || -> Result<(), Error<i32>> {
-            return mkres!(context = test_fixtures::TestMessage::HOGE);
+            return mkres!(context = TestMessage::HOGE);
         };
     }
 
     #[test]
     fn no_need_for_type_hint_if_state_is_specified() {
-        let _ = mkerr!(state = 42, context = test_fixtures::TestMessage::HOGE);
-        let _: Error = mkerr!(context = test_fixtures::TestMessage::HOGE);
+        let _ = mkerr!(state = 42, context = TestMessage::HOGE);
+        let _: Error = mkerr!(context = TestMessage::HOGE);
     }
 
     // Test that the macros can select format string or literal based on the input.
@@ -523,13 +519,13 @@ mod tests {
         let world = "world";
         let exclamation = "!";
         let err_from_mkerr = mkerr!(
-            error = test_fixtures::TestError::FOO,
+            error = TestError::FOO,
             state = 42,
             "hello {world}{}",
             exclamation,
         );
         let err_from_mkres: Result<(), _> = mkres!(
-            error = test_fixtures::TestError::FOO,
+            error = TestError::FOO,
             state = 42,
             "hello {world}{}",
             exclamation,
@@ -556,8 +552,7 @@ mod tests {
         }
 
         // mkctx creates a closure; the closure is not called yet
-        let builder = Builder::with_error(test_fixtures::TestError::FOO)
-            .with_context(mkctx!("{}", CallTracker));
+        let builder = Builder::with_error(TestError::FOO).with_context(mkctx!("{}", CallTracker));
 
         assert!(
             !CALLED.load(Ordering::SeqCst),
