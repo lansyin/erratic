@@ -135,7 +135,14 @@ where
     let show_less = f.sign_minus();
 
     if f.alternate() {
-        format_debug_struct(f, "Error", state, context, source, backtrace)
+        format_debug_struct(
+            f,
+            "Error",
+            state,
+            context,
+            source,
+            backtrace.filter(|_| !show_less),
+        )
     } else {
         format_chain(f, state, context, source)?;
 

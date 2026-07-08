@@ -1364,17 +1364,14 @@ impl Debug for RawVacant {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let body_ref = self.0.borrow();
         let vt = DynBody::vtable(body_ref);
+        let show_less = f.sign_minus();
 
         unsafe {
             let context = (vt.context)(body_ref);
             let source = (vt.source)(body_ref);
-            let backtrace = (!f.sign_minus())
-                .then(|| {
-                    WithBacktrace::search_debug(|| {
-                        (vt.source)(body_ref).map(|v| v as &(dyn error::Error + 'static))
-                    })
-                })
-                .flatten();
+            let backtrace = WithBacktrace::search_debug(|| {
+                (vt.source)(body_ref).map(|v| v as &(dyn error::Error + 'static))
+            });
 
             fmt::format_debug_struct::<Infallible>(
                 f,
@@ -1382,7 +1379,7 @@ impl Debug for RawVacant {
                 None,
                 context,
                 source.map(|v| v as _),
-                backtrace,
+                backtrace.filter(|_| !show_less),
             )
         }
     }
