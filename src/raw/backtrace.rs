@@ -14,7 +14,10 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use crate::raw::source::{Source, WithBacktraceSource};
+use crate::{
+    fmt::Origin,
+    raw::source::{Source, WithBacktraceSource},
+};
 
 // TODO: Remove this workaround once Error::provide gets stabilized.
 pub(super) struct WithBacktrace {
@@ -71,7 +74,7 @@ impl WithBacktrace {
     #[cfg(feature = "backtrace")]
     pub fn search<'a>(
         f: impl FnOnce() -> Option<&'a (dyn error::Error + 'static)>,
-    ) -> Option<&'a std::backtrace::Backtrace> {
+    ) -> Option<(&'a std::backtrace::Backtrace, Origin)> {
         struct DeferSetSearchingBacktrace(bool);
 
         impl Drop for DeferSetSearchingBacktrace {
@@ -83,12 +86,14 @@ impl WithBacktrace {
         SEARCHING.set(true);
         let _reset_guard = DeferSetSearchingBacktrace(false);
 
+        let mut origin = Origin::Captured;
         let mut source = f();
         while let Some(err) = source {
             if let Some(this) = err.downcast_ref::<WithBacktrace>() {
-                return Some(&this.backtrace);
+                return Some((&this.backtrace, origin));
             }
             source = err.source();
+            origin = Origin::Inherited;
         }
         None
     }
@@ -106,27 +111,16 @@ impl WithBacktrace {
 
     pub fn search_debug<'a>(
         #[allow(unused_variables)] f: impl FnOnce() -> Option<&'a (dyn error::Error + 'static)>,
-    ) -> Option<impl Debug + Display> {
+    ) -> Option<(impl Debug + Display, Origin)> {
         #[cfg(feature = "backtrace")]
         {
             Self::search(f)
         }
         #[cfg(not(feature = "backtrace"))]
         {
-            None::<&i32>
-        }
-    }
+            use core::convert::Infallible;
 
-    pub fn search_display<'a>(
-        #[allow(unused_variables)] f: impl FnOnce() -> Option<&'a (dyn error::Error + 'static)>,
-    ) -> Option<impl Debug + Display> {
-        #[cfg(feature = "backtrace")]
-        {
-            Self::search(f)
-        }
-        #[cfg(not(feature = "backtrace"))]
-        {
-            None::<i32>
+            None::<(Infallible, _)>
         }
     }
 

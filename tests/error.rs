@@ -389,6 +389,33 @@ fn backtrace_captures_from_first_layer() {
     );
 }
 
+#[cfg(feature = "backtrace")]
+#[test]
+fn backtrace_only_at_captured_level_in_debug_alt() {
+    fn inner_most() -> Error {
+        mkerr!(error = TestError::BAZ)
+    }
+    fn middle() -> Error {
+        mkerr!(error = inner_most(), "middle layer")
+    }
+    fn outer_most() -> Error {
+        mkerr!(error = middle(), "outer layer")
+    }
+
+    let err = outer_most();
+    let Some(_bt) = err.backtrace() else {
+        return;
+    };
+
+    let formatted = format!("{err:#?}");
+    let count = formatted.matches("backtrace:").count();
+    assert_eq!(
+        count, 1,
+        "`backtrace:` should appear exactly once (only at the captured inner level) \
+         in `{{:#?}}`, got {count} occurrences:\n{formatted}"
+    );
+}
+
 #[test]
 fn root_finds_deepest_source() {
     fn inner_most() -> Error {

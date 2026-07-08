@@ -1,7 +1,7 @@
 use core::fmt::Debug;
 use std::fmt;
 
-use erratic::fmt::Formatter;
+use erratic::fmt::{Formatter, Origin};
 use erratic::state::FormatWith;
 use erratic::test_fixtures::*;
 use erratic::*;
@@ -101,7 +101,7 @@ impl Formatter for Arrow {
         f: &mut core::fmt::Formatter<'_>,
         context: Option<impl fmt::Debug + fmt::Display>,
         mut source: Option<&(dyn core::error::Error + 'static)>,
-        _backtrace: Option<impl fmt::Debug + fmt::Display>,
+        _backtrace: Option<(impl fmt::Debug + fmt::Display, Origin)>,
     ) -> core::fmt::Result {
         let mut errs = context
             .map(|e| format!("{e}"))
@@ -118,7 +118,7 @@ impl Formatter for Arrow {
         f: &mut fmt::Formatter<'_>,
         context: Option<impl fmt::Debug + fmt::Display>,
         mut source: Option<&(dyn std::error::Error + 'static)>,
-        _backtrace: Option<impl fmt::Debug + fmt::Display>,
+        _backtrace: Option<(impl fmt::Debug + fmt::Display, Origin)>,
     ) -> fmt::Result {
         if let Some(ctx) = context {
             write!(f, "{ctx}")?;

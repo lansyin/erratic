@@ -63,16 +63,20 @@ impl Debug for ErasedRawError {
                 None,
                 Some(&body.borrow().deref().context),
                 None,
-                None::<&Infallible>,
+                None::<(Infallible, _)>,
             ),
             ErasedRawErrorInner::Boxed(body) => {
                 let body = body.borrow();
                 let vt = DynBody::vtable(body);
                 unsafe { (vt.debug)(body, f) }
             }
-            ErasedRawErrorInner::Inline(body) => {
-                fmt::format_debug(f, Some(body), None::<Infallible>, None, None::<&Infallible>)
-            }
+            ErasedRawErrorInner::Inline(body) => fmt::format_debug(
+                f,
+                Some(body),
+                None::<Infallible>,
+                None,
+                None::<(Infallible, _)>,
+            ),
         }
     }
 }
@@ -85,7 +89,7 @@ impl Display for ErasedRawError {
                 None,
                 Some(&body.borrow().deref().context),
                 None,
-                None::<&Infallible>,
+                None::<(Infallible, _)>,
             ),
             ErasedRawErrorInner::Boxed(body) => {
                 let body = body.borrow();
@@ -97,7 +101,7 @@ impl Display for ErasedRawError {
                 Some(body),
                 None::<&Infallible>,
                 None,
-                None::<&Infallible>,
+                None::<(Infallible, _)>,
             ),
         }
     }

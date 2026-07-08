@@ -5,13 +5,23 @@ use core::{
     fmt::{self, Debug, Display},
 };
 
+/// The origin of a backtrace.
+///
+/// When printing an error chain structurally, as every level carries the same backtrace
+/// from the root, only print when the origin is `Captured` to avoid duplicates.
+#[derive(Debug, Clone, Copy)]
+pub enum Origin {
+    Captured,
+    Inherited,
+}
+
 /// A formatter for [`Error`][crate::Error], works with [`FormatWith`][crate::state::FormatWith].
 pub trait Formatter: 'static {
     fn format_debug(
         f: &mut fmt::Formatter<'_>,
         context: Option<impl Debug + Display>,
         source: Option<&(dyn error::Error + 'static)>,
-        backtrace: Option<impl Debug + Display>,
+        backtrace: Option<(impl Debug + Display, Origin)>,
     ) -> fmt::Result {
         format_debug(f, None::<&Infallible>, context, source, backtrace)
     }
@@ -20,7 +30,7 @@ pub trait Formatter: 'static {
         f: &mut fmt::Formatter<'_>,
         context: Option<impl Debug + Display>,
         source: Option<&(dyn error::Error + 'static)>,
-        backtrace: Option<impl Debug + Display>,
+        backtrace: Option<(impl Debug + Display, Origin)>,
     ) -> fmt::Result {
         format_display(f, None::<&Infallible>, context, source, backtrace)
     }
@@ -52,7 +62,7 @@ pub(crate) fn format_debug_struct<S>(
     state: Option<&S>,
     context: Option<impl Debug>,
     source: Option<&(dyn error::Error + 'static)>,
-    backtrace: Option<impl Debug + Display>,
+    backtrace: Option<(impl Debug + Display, Origin)>,
 ) -> fmt::Result
 where
     S: Debug + 'static,
@@ -71,7 +81,9 @@ where
         ds.field("source", &source);
     }
 
-    if let Some(backtrace) = backtrace {
+    if let Some((backtrace, origin)) = backtrace
+        && matches!(origin, Origin::Captured)
+    {
         ds.field("backtrace", &backtrace);
     }
 
@@ -115,7 +127,7 @@ pub(crate) fn format_debug<S>(
     state: Option<&S>,
     context: Option<impl Debug + Display>,
     source: Option<&(dyn error::Error + 'static)>,
-    backtrace: Option<impl Debug + Display>,
+    backtrace: Option<(impl Debug + Display, Origin)>,
 ) -> fmt::Result
 where
     S: Debug + 'static,
@@ -123,18 +135,11 @@ where
     let show_less = f.sign_minus();
 
     if f.alternate() {
-        format_debug_struct(
-            f,
-            "Error",
-            state,
-            context,
-            source,
-            (!show_less).then_some(backtrace).flatten(),
-        )
+        format_debug_struct(f, "Error", state, context, source, backtrace)
     } else {
         format_chain(f, state, context, source)?;
 
-        if !show_less && let Some(backtrace) = backtrace {
+        if !show_less && let Some((backtrace, _)) = backtrace {
             write!(f, "\nBacktrace:\n{backtrace}")?;
         }
 
@@ -147,7 +152,7 @@ pub(crate) fn format_display<S>(
     state: Option<&S>,
     context: Option<impl Display>,
     source: Option<&(dyn error::Error + 'static)>,
-    _backtrace: Option<impl Display>,
+    _backtrace: Option<(impl Debug + Display, Origin)>,
 ) -> fmt::Result
 where
     S: Debug + 'static,

@@ -16,7 +16,8 @@ use core::{
 
 use crate::{
     context::{self, Context, Empty, Printable},
-    fmt, match_else,
+    fmt::{self, Origin},
+    match_else,
     raw::{
         erased::ErasedRawError,
         ptr::{Align4, Align4Own, Align4PtrCompat, Align4Ref, Metadata, Mut, Ref},
@@ -626,18 +627,18 @@ impl<S> RawError<S> {
         ErasedRawError::from_typed(self)
     }
 
-    pub fn backtrace_opaque(&self) -> Option<impl Debug + Display> {
+    pub fn backtrace_opaque(&self) -> Option<(impl Debug + Display, Origin)> {
         #[cfg(feature = "backtrace")]
         {
             WithBacktrace::search(|| self.source().map(|v| v as _)).map(|v| v as _)
         }
         #[cfg(not(feature = "backtrace"))]
-        None::<Infallible>
+        None::<(Infallible, _)>
     }
 
     #[cfg(feature = "backtrace")]
     pub fn backtrace(&self) -> Option<&std::backtrace::Backtrace> {
-        WithBacktrace::search(|| self.source().map(|v| v as _))
+        WithBacktrace::search(|| self.source().map(|v| v as _)).map(|(backtrace, _)| backtrace)
     }
 }
 
@@ -668,10 +669,10 @@ where
                 None::<&()>,
                 Some(body.borrow().deref().context),
                 None,
-                None::<&Infallible>,
+                None::<(Infallible, _)>,
             ),
             SelectRef::Inline(_) => {
-                fmt::format_debug(f, self.state(), None::<&str>, None, None::<&Infallible>)
+                fmt::format_debug(f, self.state(), None::<&str>, None, None::<(Infallible, _)>)
             }
             SelectRef::Boxed(body) => {
                 let vtable = DynBody::vtable(body.borrow());
@@ -687,9 +688,13 @@ where
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self.select_ref() {
-            SelectRef::Const(_) | SelectRef::Inline(_) => {
-                fmt::format_display(f, self.state(), self.context(), None, None::<&Infallible>)
-            }
+            SelectRef::Const(_) | SelectRef::Inline(_) => fmt::format_display(
+                f,
+                self.state(),
+                self.context(),
+                None,
+                None::<(Infallible, _)>,
+            ),
             SelectRef::Boxed(body) => {
                 let vtable = DynBody::vtable(body.borrow());
                 unsafe { (vtable.display)(body.borrow(), f) }
@@ -1269,7 +1274,7 @@ where
             self.try_get_state(),
             self.context.get(),
             self.source.error_ref().map(|e| e as _),
-            WithBacktrace::search_display(|| self.source.error_ref().map(|e| e as _)),
+            WithBacktrace::search_debug(|| self.source.error_ref().map(|e| e as _)),
         )
     }
 }
