@@ -509,6 +509,9 @@ impl<'a, T> Clone for Ref<'a, T> {
 
 impl<'a, T> Copy for Ref<'a, T> {}
 
+unsafe impl<'a, T> Send for Ref<'a, T> where T: Sync {}
+unsafe impl<'a, T> Sync for Ref<'a, T> where T: Sync {}
+
 /// Typed mutable reference wrapping a [`NonNull`] pointer.
 pub struct Mut<'a, T> {
     ptr: NonNull<T>,
@@ -564,6 +567,9 @@ impl<'a, T> Mut<'a, T> {
         unsafe { self.ptr.as_mut() }
     }
 }
+
+unsafe impl<'a, T> Send for Mut<'a, T> where T: Send {}
+unsafe impl<'a, T> Sync for Mut<'a, T> where T: Sync {}
 
 #[cfg(test)]
 mod tests {
