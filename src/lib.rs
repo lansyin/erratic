@@ -81,7 +81,7 @@
 //! fn write(w: &mut Writer, data: &[u8]) -> Result<()> {
 //!     while let Err((state, _)) = try_write(w, data).extract_state()? {
 //!         // Handle domain errors.                                  ^ Bubble up infra errors.
-//!         match state { //
+//!         match state {
 //!             State::RetryLater => thread::yield_now(),
 //!             // ..
 //!         }
@@ -182,7 +182,7 @@
 //! [strict_provenance]: https://doc.rust-lang.org/std/ptr/index.html#strict-provenance
 //!
 //! The error has three possible layouts. When constructed from a literal, it stores a pointer to the literal.
-//! When constructed from a small state, it stores the state inline. Otherwise, it points to a heap-allocated Object
+//! When constructed from a small state, it stores the state inline. Otherwise, it points to a heap-allocated object
 //! containing a vtable and potentially a state, source, and/or context.
 //!
 //! ```plaintext
@@ -191,10 +191,10 @@
 //! └─────────────────────╎───┘   └──────────────┘   └─────────┘
 //! ┌Error<S>─────────────╎───┐   ┌BoxedBody─────────────┬────────────────────┬────────┬─────────┐
 //! │ Align4Own<BoxedBody>╎01 ├───┤ Align4Ref<VTable>╎0H │ MaybeUninit<State> │ Source │ Context │
-//! └─────────────────────╎───┘   └────────────────────┼─┴───────────────┼────┴────────┴─────────┘
-//! ┌Error<S>─────┬───────╎───┐                        └──H=1:HasState───┘
-//! │    State    │ 000000╎10 │
-//! └─────────────┴───────╎───┘
+//! └─────────────────────╎───┘   └─────────┼──────────┼─┴───────────────┼────┴────────┴─────────┘
+//! ┌Error<S>─────┬───────╎───┐   ┌VTable───┴──┬────╌  └──H=1:HasState───┘
+//! │    State    │ 000000╎10 │   │ Drop::drop │ ···  
+//! └─────────────┴───────╎───┘   └────────────┴────╌
 //! ```
 //!
 #![no_std]

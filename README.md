@@ -1,7 +1,7 @@
 # Erratic /ɪˈrætɪk/
 
 [![license](https://img.shields.io/badge/license-MIT-hotpink)](https://github.com/lansyin/erratic)
-[![msrv](https://img.shields.io/badge/msrv-1.89.0-lightcoral)](https://github.com/lansyin/erratic)
+[![MSRV](https://img.shields.io/badge/MSRV-Rust_1.89-lightcoral)](https://github.com/lansyin/erratic/blob/main/Cargo.toml#L5)
 [![crates.io](https://img.shields.io/crates/v/erratic)](https://crates.io/crates/erratic)
 [![docs.rs](https://img.shields.io/docsrs/erratic)](https://docs.rs/erratic/latest/erratic/)
 
@@ -70,7 +70,7 @@ avoid the heap entirely, and both share the same `Error<S>` type.
 fn write(w: &mut Writer, data: &[u8]) -> Result<()> {
     while let Err((state, _)) = try_write(w, data).extract_state()? {
         // Handle domain errors.                                  ^ Bubble up infra errors.
-        match state { //
+        match state {
             State::RetryLater => thread::yield_now(),
             // ..
         }
@@ -81,11 +81,11 @@ fn write(w: &mut Writer, data: &[u8]) -> Result<()> {
 
 The `?` operator covers the most common cases, regardless of whether the return type carries state:
 
-| Source Type        | Return Type   | Explanation                                          |
-| :----------------- | :------------ | :--------------------------------------------------- |
-| `impl Error`       | `Error<_>`    | Wrap any standard error type.                        |
-| `Builder<..>`      | `Error<_>`    | Build an error from state, context, and/or source.   |
-| `Error<Stateless>` | `Error<S>`    | Cheaply convert a stateless error to a stateful one. |
+| Source Type        | Return Type | Explanation                                          |
+| :----------------- | :---------- | :--------------------------------------------------- |
+| `impl Error`       | `Error<_>`  | Wrap any standard error type.                        |
+| `Builder<..>`      | `Error<_>`  | Build an error from state, context, and/or source.   |
+| `Error<Stateless>` | `Error<S>`  | Cheaply convert a stateless error to a stateful one. |
 
 States are meant to be handled explicitly. Several utility methods are provided:
 
@@ -168,7 +168,7 @@ freeing up the lower 2 bits to encode its discriminant. Pointer tagging in this 
 [strict_provenance]: https://doc.rust-lang.org/std/ptr/index.html#strict-provenance
 
 The error has three possible layouts. When constructed from a literal, it stores a pointer to the literal.
-When constructed from a small state, it stores the state inline. Otherwise, it points to a heap-allocated Object
+When constructed from a small state, it stores the state inline. Otherwise, it points to a heap-allocated object
 containing a vtable and potentially a state, source, and/or context.
 
 ```plaintext
@@ -177,13 +177,13 @@ containing a vtable and potentially a state, source, and/or context.
 └─────────────────────╎───┘   └──────────────┘   └─────────┘
 ┌Error<S>─────────────╎───┐   ┌BoxedBody─────────────┬────────────────────┬────────┬─────────┐
 │ Align4Own<BoxedBody>╎01 ├───┤ Align4Ref<VTable>╎0H │ MaybeUninit<State> │ Source │ Context │
-└─────────────────────╎───┘   └────────────────────┼─┴───────────────┼────┴────────┴─────────┘
-┌Error<S>─────┬───────╎───┐                        └──H=1:HasState───┘
-│    State    │ 000000╎10 │
-└─────────────┴───────╎───┘
+└─────────────────────╎───┘   └─────────┼──────────┼─┴───────────────┼────┴────────┴─────────┘
+┌Error<S>─────┬───────╎───┐   ┌VTable───┴──┬────╌  └──H=1:HasState───┘
+│    State    │ 000000╎10 │   │ Drop::drop │ ···
+└─────────────┴───────╎───┘   └────────────┴────╌
 ```
 
-
 ## Contributing
-Contributions are warmly welcomed! Whether you have a bug report, feature request, or 
-an improvement in mind, feel free to open an issue or submit a pull request. Appreciate any thoughts! 
+
+Contributions are warmly welcomed! Whether you have a bug report, feature request, or
+an improvement in mind, feel free to open an issue or submit a pull request. Appreciate any thoughts!
