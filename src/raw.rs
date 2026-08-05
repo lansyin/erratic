@@ -337,11 +337,6 @@ impl<S> RawError<S> {
             let Err(source) = match_else!(source.downcast::<ErasedRawError>(), Ok(erased) => {
                 return new_1(state, *erased, context);
             });
-            let Err(source) = match_else!(source.downcast::<Align4<DynBody<Infallible, BoxedSource, Empty>>>(), Ok(boxed) => {
-                let Align4(body) = *boxed;
-                let (_, source, _) = body.destruct();
-                return new_1(state, source, context);
-            });
 
             return new_1(state, BoxedSource(source), context);
         });
@@ -604,7 +599,7 @@ impl<S> RawError<S> {
         }
     }
 
-    /// Convert into a boxed error without reallocation if already boxed, otherwise box the error.
+    /// Converts into a boxed error, eliminating reallocations if possible.
     pub fn into_boxed_error(self) -> Box<dyn error::Error + Send + Sync + 'static>
     where
         S: Debug,
@@ -1074,8 +1069,19 @@ where
     ) -> Box<dyn error::Error + Send + Sync + 'static> {
         unsafe {
             let this = ErasedDynBody::into_inner::<S, E, C>(this);
+            let has_state = this.borrow().deref().has_state_bit_set();
+            let has_context = !C::is_contextless();
 
-            this.into_boxed()
+            match (has_state, has_context) {
+                (false, false) => {
+                    let Align4(this) = *this.into_boxed();
+                    let (_, source, _) = this.destruct();
+                    source
+                        .into_boxed()
+                        .unwrap_or(Box::from("empty erratic error")) // Note: This should never happen, but we provide a fallback to avoid any oversights. 
+                }
+                (_, _) => this.into_boxed(),
+            }
         }
     }
 
@@ -1732,7 +1738,7 @@ mod tests {
     }
 
     #[test]
-    fn round_trip_repeatedly_keeps_single_boxed_layer() {
+    fn round_trip_repeatedly_keeps_single_layer() {
         // Start with a source-only RawError: (RawError -> TestError)
         let mut err = RawError::new(None::<Infallible>, Some(TestError::BAR), Contextless::new());
         assert_eq!(err.chain().count(), 1);
@@ -1747,7 +1753,7 @@ mod tests {
                 Some(BoxedSource(boxed)),
                 Contextless::new(),
             );
-            assert_eq!(err.chain().count(), 2, "chain length should always be 2.");
+            assert_eq!(err.chain().count(), 1, "chain length should always be 1");
             assert!(
                 err.chain().last().unwrap().is::<TestError>(),
                 "TestError should always be reachable"
