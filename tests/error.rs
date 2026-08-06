@@ -124,6 +124,26 @@ fn builder_case4() {
 }
 
 #[test]
+fn builder_case4_regression_260806() {
+    // Regression: When the builder had a context and the wrapped error did not have a state,
+    // the builder would just call `with_phantom_state` without attaching the builder's context,
+    // resulting in the context being lost.
+
+    let inner: Error<TestState> = TestError::FOO.into();
+    assert!(inner.state().is_none());
+
+    let outer: Error<TestState> = Builder::with_error(inner)
+        .with_context(TestMessage::HOGE)
+        .into();
+
+    assert_eq!(outer.context().unwrap().to_string(), "hoge");
+    assert!(outer.find::<TestError>().is_some());
+    let (state, context, _source) = outer.into_parts::<TestMessage, TestError>();
+    assert!(state.is_none());
+    assert_matches!(context, Some(TestMessage::HOGE));
+}
+
+#[test]
 fn builder_case5() {
     // Note: case5 was removed as it has no meaningful use case.
 }
@@ -197,14 +217,7 @@ fn downcast_source_mut_wrong_type() {
 #[test]
 fn erase_makes_opaque() {
     let err: Error = mkerr!(error = TestError::FOO);
-    assert_eq!(err.erase().to_string(), "foo");
-}
-
-#[test]
-fn erase_ref_lifetime() {
-    let err: Error = mkerr!(error = TestError::FOO);
-    let opaque: &(dyn std::error::Error + Send + Sync + 'static) = err.erase_ref();
-    assert_eq!(opaque.to_string(), "foo");
+    assert_eq!(err.erase_state().to_string(), "foo");
 }
 
 #[test]
@@ -222,7 +235,7 @@ fn into_source_const_is_none() {
 #[test]
 fn chain_wraps_source() {
     let inner: Error = mkerr!(error = TestError::BAR);
-    let outer: Error = mkerr!(error = inner.erase());
+    let outer: Error = mkerr!(error = inner.erase_state());
     let mut chain = outer.chain();
     assert_eq!(chain.next().unwrap().to_string(), "bar");
     assert!(chain.next().is_none());
@@ -238,8 +251,54 @@ fn from_std_error_via_into() {
 #[test]
 fn from_same_type_id_does_not_double_wrap() {
     let inner: Error = mkerr!(error = TestError::BAR);
-    let outer: Error = inner.erase().into();
+    let outer: Error = inner.erase_state().into();
     assert_eq!(outer.into_source().unwrap().to_string(), "bar",);
+}
+
+#[test]
+fn into_parts_stateful_recovers_nested_erratic() {
+    // A nested erratic error stored as the source must be recoverable through
+    // `Error::<S>::into_parts` (the stateful variant) as a full `Error`.
+    let inner: Error = mkerr!(error = TestError::FOO, context = TestMessage::HOGE);
+    let outer: Error<TestState> = Builder::with_error(inner)
+        .with_state(TestState::AppleNotFound)
+        .with_context(TestMessage::PIYO)
+        .into();
+
+    let (state, context, source) = outer.into_parts::<TestMessage, Error>();
+    assert_eq!(state, Some(TestState::AppleNotFound));
+    assert_matches!(context, Some(TestMessage::PIYO));
+    assert_matches!(
+        source.as_ref().map(|e| e.to_string()),
+        Some(s) if s == "hoge"
+    );
+
+    // The recovered nested error is a real `Error` that still carries its own parts.
+    let nested = source.expect("nested erratic error should be recoverable");
+    let (nested_context, nested_source) = nested.into_parts::<TestMessage, TestError>();
+    assert_matches!(nested_context, Some(TestMessage::HOGE));
+    assert_matches!(nested_source, Some(TestError::FOO));
+}
+
+#[test]
+fn into_parts_stateless_recovers_nested_erratic() {
+    // Same as above, through the stateless `Error::into_parts` variant.
+    let inner: Error = mkerr!(error = TestError::FOO, context = TestMessage::HOGE);
+    let outer: Error = Builder::with_error(inner)
+        .with_context(TestMessage::PIYO)
+        .into();
+
+    let (context, source) = outer.into_parts::<TestMessage, Error>();
+    assert_matches!(context, Some(TestMessage::PIYO));
+    assert_matches!(
+        source.as_ref().map(|e| e.to_string()),
+        Some(s) if s == "hoge"
+    );
+
+    let nested = source.expect("nested erratic error should be recoverable");
+    let (nested_context, nested_source) = nested.into_parts::<TestMessage, TestError>();
+    assert_matches!(nested_context, Some(TestMessage::HOGE));
+    assert_matches!(nested_source, Some(TestError::FOO));
 }
 
 #[test]
@@ -324,30 +383,30 @@ fn eliminate_alloc() {
     {
         let inner = TestError::BAR;
         let mid = mkerr!(error = inner, state = TestState::AppleNotFound);
-        let outer: Error = mkerr!(error = mid.erase());
+        let outer: Error = mkerr!(error = mid.erase_state());
         assert_eq!(outer.chain().count(), 2);
     }
     {
         let inner = TestError::BAR;
         let mid: Error = mkerr!(error = inner);
-        let outer: Error = mkerr!(error = mid.erase());
+        let outer: Error = mkerr!(error = mid.erase_state());
         assert_eq!(outer.chain().count(), 1);
     }
     {
         let inner = TestError::BAR;
-        let mid = mkerr!(error = inner, state = TestState::AppleNotFound).erase();
+        let mid = mkerr!(error = inner, state = TestState::AppleNotFound).erase_state();
         let outer: Error = mkerr!(error = mid);
         assert_eq!(outer.chain().count(), 2);
     }
     {
         let inner = TestError::BAR;
-        let mid = mkerr!(error = inner).stateless().erase();
+        let mid = mkerr!(error = inner).stateless().erase_state();
         let outer: Error = mkerr!(error = mid);
         assert_eq!(outer.chain().count(), 1);
     }
     {
         let inner = TestError::BAR;
-        let mid = mkerr!(error = inner).stateless().erase();
+        let mid = mkerr!(error = inner).stateless().erase_state();
         let outer = Builder::with_error(mid).build_error();
         assert_eq!(outer.chain().count(), 1);
     }

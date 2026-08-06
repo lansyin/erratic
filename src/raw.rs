@@ -16,16 +16,16 @@ use core::{
 
 use crate::{
     context::{self, Context, Empty, Printable},
-    fmt::{self, Origin},
-    match_else,
+    fmt, match_else,
     raw::{
-        erased::ErasedRawError,
         ptr::{Align4, Align4Own, Align4PtrCompat, Align4Ref, Metadata, Mut, Ref},
-        source::{BoxedSource, IndirectSource, NoSource, Source, WithBacktraceSource},
+        source::{BoxedSource, ErasedSource, NoSource, Source, WithBacktraceSource},
     },
     rtti,
 };
 use backtrace::WithBacktrace;
+
+pub(crate) use erased::ErasedRawError;
 
 /// Triple-state error storage.
 ///
@@ -172,11 +172,8 @@ impl<S> RawError<S> {
             SelectRef::Const(_) | SelectRef::Inline(_) => false,
             SelectRef::Boxed(body) => {
                 let vt = DynBody::vtable(body.borrow());
-                let has_state = unsafe { (vt.has_state)(body.borrow()) };
-                let has_context = unsafe { (vt.context)(body.borrow()).is_some() };
-                let has_source = unsafe { (vt.source)(body.borrow()).is_some() };
-
-                matches!((has_state, has_context, has_source), (false, false, true))
+                // Safety: The body pointer is confirmed valid.
+                unsafe { (vt.is_source_only)(body.borrow()) }
             }
         }
     }
@@ -199,6 +196,103 @@ impl<S> RawError<S> {
                 })),
                 RawError::<S>::KIND_BOXED,
             ))),
+        }
+    }
+
+    fn new<E, C>(state: Option<S>, source: Option<E>, context: C) -> Self
+    where
+        S: Debug + Send + Sync + 'static,
+        E: Source + Send + Sync + 'static,
+        C: context::Context,
+    {
+        fn new_0<S, E, C>(state: Option<S>, source: E, context: C) -> RawError<S>
+        where
+            S: Debug + Send + Sync + 'static,
+            E: Source + Send + Sync + 'static,
+            C: context::Context,
+        {
+            let has_state = state.is_some();
+            let has_context = !C::is_contextless();
+
+            if has_state || has_context {
+                return new_1(state, source, context);
+            }
+
+            let Err(source) = match_else!(rtti::concretize::<_, ErasedSource>(source), Ok(ErasedSource(erased)) => {
+                let Err(erased) = match_else!(erased.try_into_stateless(), Ok(err) => {
+                    // Note: Backtrace capture (`new_1`) can be skipped here. When capture is active, any in-process
+                    // `ErasedRawError` already carries a `WithBacktrace` in its chain, so returning
+                    // the erased error directly preserves it.
+                    return err.with_phantom_state();
+                });
+                return new_1(state, ErasedSource(erased), context)
+            });
+
+            new_1(state, source, context)
+        }
+
+        fn new_1<S, E, C>(state: Option<S>, source: E, context: C) -> RawError<S>
+        where
+            S: Debug + Send + Sync + 'static,
+            E: Source + Send + Sync + 'static,
+            C: context::Context,
+        {
+            match WithBacktrace::try_attach(source) {
+                Ok(source) => new_2(state, source, context),
+                Err(source) => {
+                    let has_source = source.error_ref().is_some();
+                    let has_context = !C::is_contextless();
+
+                    match (state, has_context, has_source) {
+                        (Some(state), false, false) => {
+                            let Err(state) = match_else!(RawError::try_new_inline(state), Ok(this) => {
+                                return this;
+                            });
+                            new_2(Some(state), source, context)
+                        }
+                        (None, true, false) => match context.try_into_repr() {
+                            None => match RawError::try_new_const::<C>() {
+                                Some(raw) => raw.with_phantom_state(),
+                                None => new_2(None, source, Empty::new()),
+                            },
+                            Some(context) => new_2(None, source, context),
+                        },
+                        (state, _, _) => new_2(state, source, context),
+                    }
+                }
+            }
+        }
+
+        fn new_2<S, E, C>(state: Option<S>, source: E, context: C) -> RawError<S>
+        where
+            S: Debug + Send + Sync + 'static,
+            E: Source + Send + Sync + 'static,
+            C: context::Context,
+        {
+            let context = context.try_into_repr();
+            let context_fallback = C::FALLBACK;
+
+            match (context, context_fallback) {
+                (Some(context), _) => RawError::new_boxed(state, source, context),
+                (None, Some(context)) => RawError::new_boxed(state, source, context),
+                (None, None) => RawError::new_boxed(state, source, Empty::new()),
+            }
+        }
+
+        let Some(source) = source else {
+            return new_0(state, NoSource, context);
+        };
+
+        new_0(state, source, context)
+    }
+
+    #[cfg(test)]
+    fn get_alloc_fingerprint(&self) -> Option<usize> {
+        match self.select_ref() {
+            SelectRef::Const(_) | SelectRef::Inline(_) => None,
+            SelectRef::Boxed(erased_dyn_body) => {
+                Some(erased_dyn_body.borrow().deref() as *const _ as usize)
+            }
         }
     }
 }
@@ -232,6 +326,15 @@ impl<S> RawError<S> {
         Self::new(state, source, context)
     }
 
+    /// Constructs from an erased error.
+    pub fn from_erased<C>(state: Option<S>, source: Option<ErasedRawError>, context: C) -> Self
+    where
+        S: Debug + Send + Sync + 'static,
+        C: context::Context,
+    {
+        Self::new(state, source.map(ErasedSource), context)
+    }
+
     /// Constructs from a boxed error.
     pub fn from_boxed<C>(
         state: Option<S>,
@@ -243,105 +346,6 @@ impl<S> RawError<S> {
         C: context::Context,
     {
         Self::new(state, Some(BoxedSource(source)), context)
-    }
-
-    /// Constructs a [`RawError`].
-    fn new<E, C>(state: Option<S>, source: Option<E>, context: C) -> Self
-    where
-        S: Debug + Send + Sync + 'static,
-        E: Source + Send + Sync + 'static,
-        C: context::Context,
-    {
-        fn new_1<S, E, C>(state: Option<S>, source: E, context: C) -> RawError<S>
-        where
-            S: Debug + Send + Sync + 'static,
-            E: Source + Send + Sync + 'static,
-            C: context::Context,
-        {
-            match WithBacktrace::try_attach(source) {
-                Ok(source) => new_2(state, source, context),
-                Err(source) => {
-                    let has_source = source.error_ref().is_some();
-                    let has_context = !C::is_contextless();
-
-                    match (state, has_context, has_source) {
-                        (Some(state), false, false) => {
-                            let Err(state) = match_else!(RawError::try_new_inline(state), Ok(this) => {
-                                return this;
-                            });
-                            new_2(Some(state), source, context)
-                        }
-                        (None, true, false) => match context.try_into_repr() {
-                            None => match RawError::try_new_const::<C>() {
-                                Some(raw) => raw.with_phantom_state(),
-                                None => new_2(None, source, Empty::new()),
-                            },
-                            Some(context) => new_2(None, source, context),
-                        },
-                        (None, false, true) => {
-                            match rtti::concretize::<_, ErasedRawError>(source) {
-                                Ok(erased) => match erased.try_into_stateless() {
-                                    Ok(stateless) => stateless.with_phantom_state(),
-                                    Err(erased) => new_2(None, erased, context),
-                                },
-                                Err(source) => new_2(None, source, context),
-                            }
-                        }
-                        (state, _, _) => new_2(state, source, context),
-                    }
-                }
-            }
-        }
-
-        fn new_2<S, E, C>(state: Option<S>, source: E, context: C) -> RawError<S>
-        where
-            S: Debug + Send + Sync + 'static,
-            E: Source + Send + Sync + 'static,
-            C: context::Context,
-        {
-            let context = context.try_into_repr();
-            let context_fallback = C::FALLBACK;
-
-            match (context, context_fallback) {
-                (Some(context), _) => new_3(state, source, context),
-                (None, Some(context)) => new_3(state, source, context),
-                (None, None) => new_3(state, source, Empty::new()),
-            }
-        }
-
-        fn new_3<S, E, C>(state: Option<S>, source: E, context: C) -> RawError<S>
-        where
-            S: Debug + Send + Sync + 'static,
-            E: Source + Send + Sync + 'static,
-            C: Debug + Display + Send + Sync + 'static,
-        {
-            let Err(source) = match_else!(rtti::concretize::<_, ErasedRawError>(source), Ok(erased) => {
-                match erased.try_into_stateless() {
-                    Ok(stateless) => match IndirectSource::try_new(stateless) {
-                        Ok(source) => return RawError::new_boxed(state, source, context),
-                        Err(stateless) => return RawError::new_boxed(state, stateless.erase(), context),
-                    },
-                    Err(erased) => {
-                        return RawError::new_boxed(state, erased, context)
-                    }
-                }
-            });
-
-            RawError::new_boxed(state, source, context)
-        }
-
-        let Some(source) = source else {
-            return new_1(state, NoSource, context);
-        };
-        let Err(source) = match_else!(rtti::concretize::<_, BoxedSource>(source), Ok(BoxedSource(source)) => {
-            let Err(source) = match_else!(source.downcast::<ErasedRawError>(), Ok(erased) => {
-                return new_1(state, *erased, context);
-            });
-
-            return new_1(state, BoxedSource(source), context);
-        });
-
-        new_1(state, source, context)
     }
 
     /// Returns a reference to the displayable context.
@@ -615,20 +619,38 @@ impl<S> RawError<S> {
         }
     }
 
-    pub fn erase(self) -> impl error::Error + Send + Sync + 'static
+    pub fn into_erased(self) -> ErasedRawError
     where
         S: Debug + Send + Sync + 'static,
     {
         ErasedRawError::from_typed(self)
     }
 
-    pub fn backtrace_opaque(&self) -> Option<(impl Debug + Display, Origin)> {
-        #[cfg(feature = "backtrace")]
-        {
-            WithBacktrace::search(|| self.source().map(|v| v as _)).map(|v| v as _)
+    pub fn erase_state(self) -> RawError
+    where
+        S: Debug + Send + Sync + 'static,
+    {
+        match self.select_own() {
+            SelectOwn::Const(body) => RawError {
+                const_body: ManuallyDrop::new(body),
+            },
+            SelectOwn::Inline(body) => {
+                let erased = ErasedRawError::from_typed(RawError {
+                    inline_body: ManuallyDrop::new(body),
+                });
+                RawError::new(None::<Infallible>, Some(ErasedSource(erased)), Empty::new())
+            }
+            SelectOwn::Boxed(mut body) => {
+                let vt = DynBody::vtable(body.borrow());
+                // Safety: The body pointer is confirmed valid.
+                unsafe {
+                    (vt.erase_state)(body.borrow_mut());
+                }
+                RawError {
+                    boxed_body: ManuallyDrop::new(body),
+                }
+            }
         }
-        #[cfg(not(feature = "backtrace"))]
-        None::<(Infallible, _)>
     }
 
     #[cfg(feature = "backtrace")]
@@ -815,6 +837,10 @@ struct DynBodyVTable {
     try_set_state: unsafe fn(Mut<DynBody>, &mut dyn Any) -> bool,
     /// See [DynBody::has_state].
     has_state: unsafe fn(Ref<'_, DynBody>) -> bool,
+    /// See [DynBody::erase_state].
+    erase_state: unsafe fn(Mut<DynBody>),
+    /// See [DynBody::is_source_only].
+    is_source_only: unsafe fn(Ref<'_, DynBody>) -> bool,
     /// See [DynBody::source].
     source: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn error::Error + Send + Sync + 'static)>,
     /// See [DynBody::source_mut].
@@ -848,6 +874,8 @@ impl DynBodyVTable {
             display: DynBody::<S, E, C>::display,
             try_set_state: DynBody::<S, E, C>::try_set_state,
             has_state: DynBody::<S, E, C>::has_state,
+            erase_state: DynBody::<S, E, C>::erase_state,
+            is_source_only: DynBody::<S, E, C>::is_source_only,
             source: DynBody::<S, E, C>::source,
             source_mut: DynBody::<S, E, C>::source_mut,
             state: DynBody::<S, E, C>::state,
@@ -859,8 +887,9 @@ impl DynBodyVTable {
 }
 
 impl<S, E, C> DynBody<S, E, C> {
-    const NO_STATE: Metadata = Metadata::_0;
-    const HAS_STATE: Metadata = Metadata::_1;
+    const STATE_NOTSET: Metadata = Metadata::_0;
+    const STATE_SET: Metadata = Metadata::_1;
+    const STATE_FREEZED: Metadata = Metadata::_2;
 
     /// Returns a static shared reference to the vtable.
     fn vtable(this: Ref<'_, DynBody<S, E, C>>) -> &'static DynBodyVTable {
@@ -871,6 +900,12 @@ impl<S, E, C> DynBody<S, E, C> {
                 .deref()
         }
     }
+}
+
+enum StateAccess {
+    NotSet,
+    Set,
+    Freezed,
 }
 
 impl<S, E, C> DynBody<S, E, C>
@@ -884,8 +919,8 @@ where
             Align4Ref::new(
                 &const { Align4(DynBodyVTable::new::<S, E, C>()) },
                 match state {
-                    Some(_) => Self::HAS_STATE,
-                    None => Self::NO_STATE,
+                    Some(_) => Self::STATE_SET,
+                    None => Self::STATE_NOTSET,
                 },
             ),
             match state {
@@ -895,57 +930,71 @@ where
         )
     }
 
-    /// Check if the state exisis.
-    fn has_state_bit_set(&self) -> bool {
+    fn state_access(&self) -> StateAccess {
         unsafe {
             // # Safety: `Align4Ref` is `repr(C)` and stores the metadata at offset 0.
             match Metadata((&raw const (self.vtable) as *const u8).read() & Metadata::MASK) {
-                Self::NO_STATE => false,
-                Self::HAS_STATE => true,
+                Self::STATE_NOTSET => StateAccess::NotSet,
+                Self::STATE_SET => StateAccess::Set,
+                Self::STATE_FREEZED => StateAccess::Freezed,
                 _ => unreachable!(),
             }
         }
     }
 
     /// Returns a shared reference to the state, if any.
-    fn try_get_state(&self) -> Option<&S> {
-        self.has_state_bit_set()
-            .then(|| unsafe { self.state.assume_init_ref() })
+    fn get_state(&self) -> Option<&S> {
+        match self.state_access() {
+            StateAccess::Set => Some(unsafe { self.state.assume_init_ref() }),
+            StateAccess::NotSet | StateAccess::Freezed => None,
+        }
     }
 
-    /// Replaces the stored state with a new value. Returns the old one, if any.
-    fn replace_state(&mut self, state: Option<S>) -> Option<S> {
-        unsafe {
-            let (has_state, old_state) = match (self.has_state_bit_set(), state) {
-                (false, None) => (false, None),
-                (false, Some(state)) => {
-                    self.state.write(state);
-                    (true, None)
-                }
-                (true, None) => (false, Some(self.state.assume_init_read())),
-                (true, Some(state)) => {
-                    let old_state = self.state.assume_init_read();
-                    self.state.write(state);
-                    (true, Some(old_state))
-                }
-            };
-            let pvt = self.vtable.borrow_raw().deref();
-            self.vtable = Align4Ref::new(
-                pvt,
-                match has_state {
-                    false => Self::NO_STATE,
-                    true => Self::HAS_STATE,
-                },
-            );
+    /// Returns a shared reference to the state, if any.
+    fn get_state_for_format(&self) -> Option<&S> {
+        match self.state_access() {
+            StateAccess::Set | StateAccess::Freezed => {
+                Some(unsafe { self.state.assume_init_ref() })
+            }
+            StateAccess::NotSet => None,
+        }
+    }
 
-            old_state
+    fn set_state(&mut self, state: S) -> Result<(), S> {
+        match self.state_access() {
+            StateAccess::NotSet => {
+                self.state.write(state);
+                self.vtable = Align4Ref::new(self.vtable.borrow_raw().deref(), Self::STATE_SET);
+                Ok(())
+            }
+            StateAccess::Set | StateAccess::Freezed => Err(state),
+        }
+    }
+
+    fn take_state(&mut self) -> Option<S> {
+        match self.state_access() {
+            StateAccess::Set => {
+                let state = unsafe { self.state.assume_init_read() };
+                self.vtable = Align4Ref::new(self.vtable.borrow_raw().deref(), Self::STATE_NOTSET);
+                Some(state)
+            }
+            StateAccess::NotSet | StateAccess::Freezed => None,
+        }
+    }
+
+    fn freeze_state(&mut self) {
+        match self.state_access() {
+            StateAccess::Set => {
+                self.vtable = Align4Ref::new(self.vtable.borrow_raw().deref(), Self::STATE_FREEZED);
+            }
+            StateAccess::NotSet | StateAccess::Freezed => (),
         }
     }
 
     /// Consumes `self` and decomposes into its raw components:
     /// `(state, source, context)`.
     fn destruct(mut self) -> (Option<S>, E, Option<C>) {
-        let state = self.replace_state(None);
+        let state = self.take_state();
 
         let mut this = MaybeUninit::new(self);
         let this = this.as_mut_ptr();
@@ -1049,7 +1098,7 @@ where
         let mut this = unsafe { ErasedDynBody::into_inner::<S, E, C>(this) };
 
         if let Some(dst) = state_dst.downcast_mut::<Option<S>>() {
-            *dst = this.borrow_mut().deref_mut().replace_state(None);
+            *dst = this.borrow_mut().deref_mut().take_state();
 
             if dst.is_some() {
                 return Ok(RawVacant(ErasedDynBody::from_typed(this)));
@@ -1069,7 +1118,10 @@ where
     ) -> Box<dyn error::Error + Send + Sync + 'static> {
         unsafe {
             let this = ErasedDynBody::into_inner::<S, E, C>(this);
-            let has_state = this.borrow().deref().has_state_bit_set();
+            let has_state = matches!(
+                this.borrow().deref().state_access(),
+                StateAccess::Set | StateAccess::Freezed
+            );
             let has_context = !C::is_contextless();
 
             match (has_state, has_context) {
@@ -1121,12 +1173,16 @@ where
     unsafe fn try_set_state(this: Mut<'_, DynBody>, state_src: &mut dyn Any) -> bool {
         let this = unsafe { this.cast::<Self>().deref_mut() };
 
-        if let Some(state_src) = state_src.downcast_mut::<Option<S>>() {
-            let Some(state_src) = state_src.take() else {
+        if let Some(state_src_opt) = state_src.downcast_mut::<Option<S>>() {
+            let Some(state_src) = state_src_opt.take() else {
                 panic!("try_set_state: state_src must be `Some`");
             };
-            this.replace_state(Some(state_src));
-            true
+            if let Err(state) = this.set_state(state_src) {
+                state_src_opt.replace(state);
+                false
+            } else {
+                true
+            }
         } else {
             false
         }
@@ -1140,7 +1196,36 @@ where
     unsafe fn has_state(this: Ref<'_, DynBody>) -> bool {
         let this = unsafe { this.cast::<Self>().deref() };
 
-        this.has_state_bit_set()
+        matches!(this.state_access(), StateAccess::Set)
+    }
+
+    /// Erase the state in place.
+    ///
+    /// # Safety
+    ///
+    /// - `this` must be a valid `Mut` pointing to `DynBody<S, E, C>`.
+    unsafe fn erase_state(this: Mut<'_, DynBody>) {
+        let this = unsafe { this.cast::<Self>().deref_mut() };
+
+        this.freeze_state();
+    }
+
+    /// Check if the error is source-only (no state, no context, and a source).
+    ///
+    /// A state that has been freezed still counts as state,
+    /// so an error with an erased state is never considered source-only.
+    ///
+    /// # Safety
+    ///
+    /// - `this` must point to a valid `DynBody<S, E, C>`.
+    unsafe fn is_source_only(this: Ref<'_, DynBody>) -> bool {
+        let this = unsafe { this.cast::<Self>().deref() };
+
+        let has_state = matches!(this.state_access(), StateAccess::Set | StateAccess::Freezed);
+        let has_context = this.context.get().is_some();
+        let has_source = this.source.error_ref().is_some();
+
+        !has_state && !has_context && has_source
     }
 
     /// Returns a reference to the source error.
@@ -1181,7 +1266,7 @@ where
         if TypeId::of::<S>() == state_ty {
             let dst = unsafe { state_dst.cast::<Option<&S>>().as_mut() };
 
-            if let Some(state) = this.try_get_state() {
+            if let Some(state) = this.get_state() {
                 dst.replace(state);
             }
         }
@@ -1241,10 +1326,12 @@ impl<S, E, C> Drop for DynBody<S, E, C> {
     fn drop(&mut self) {
         unsafe {
             match Metadata((&raw const (self.vtable) as *const u8).read() & Metadata::MASK) {
-                Self::HAS_STATE => {
+                // Note: An erased state is still initialized (it is only hidden from
+                // access), so it must be dropped just like a set state.
+                Self::STATE_SET | Self::STATE_FREEZED => {
                     MaybeUninit::assume_init_drop(&mut self.state);
                 }
-                Self::NO_STATE => {}
+                Self::STATE_NOTSET => {}
                 _ => unreachable!(),
             }
         }
@@ -1260,7 +1347,7 @@ where
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         fmt::format_debug(
             f,
-            self.try_get_state(),
+            self.get_state_for_format(),
             self.context.get(),
             self.source.error_ref().map(|e| e as _),
             WithBacktrace::search_debug(|| self.source.error_ref().map(|e| e as _)),
@@ -1277,7 +1364,7 @@ where
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         fmt::format_display(
             f,
-            self.try_get_state(),
+            self.get_state_for_format(),
             self.context.get(),
             self.source.error_ref().map(|e| e as _),
             WithBacktrace::search_debug(|| self.source.error_ref().map(|e| e as _)),
@@ -1353,12 +1440,12 @@ impl RawVacant {
                 },
                 _ => RawError::new(
                     state,
-                    Some(
+                    Some(ErasedSource(
                         RawError::<Infallible> {
                             boxed_body: ManuallyDrop::new(self.0),
                         }
-                        .erase(),
-                    ),
+                        .into_erased(),
+                    )),
                     context,
                 ),
             }
@@ -1706,7 +1793,11 @@ mod tests {
         // Erase the type → ErasedRawError -> TestError
         let erased = ErasedRawError::from_typed(inner);
         // Re-wrap: this should eliminate the ErasedRawError layer since it carries no extra info
-        let err = RawError::new(None::<Infallible>, Some(erased), Contextless::new());
+        let err = RawError::new(
+            None::<Infallible>,
+            Some(ErasedSource(erased)),
+            Contextless::new(),
+        );
         // Chain should still be 1: RawError -> TestError
         assert_eq!(err.chain().count(), 1);
         assert!(
@@ -1716,25 +1807,35 @@ mod tests {
     }
 
     #[test]
-    fn new_eliminates_boxed_erased_layer() {
+    fn wrapping_source_only_erased_repeatedly_does_not_allocate() {
         // Build a source-only RawError: (RawError -> TestError)
-        let inner = RawError::new(None::<Infallible>, Some(TestError::BAR), Contextless::new());
-        // Erase the type → ErasedRawError
-        let erased = ErasedRawError::from_typed(inner);
-        // Box the erased error → Box<dyn Error> -> ErasedRawError -> TestError
-        let boxed: Box<dyn error::Error + Send + Sync + 'static> = Box::new(erased);
-        // Re-wrap: this should eliminate both Box and ErasedRawError layers
-        let err = RawError::new(
-            None::<Infallible>,
-            Some(BoxedSource(boxed)),
-            Contextless::new(),
-        );
-        // Chain should still be 1: RawError -> TestError
-        assert_eq!(err.chain().count(), 1);
-        assert!(
-            err.downcast_source_ref::<TestError>().is_some(),
-            "TestError should be reachable directly"
-        );
+        let mut err = RawError::new(None::<Infallible>, Some(TestError::BAR), Contextless::new());
+        let fingerprint = err
+            .get_alloc_fingerprint()
+            .expect("source-only error should be boxed");
+
+        for _ in 0..5 {
+            // Erase the type → ErasedRawError -> TestError
+            let erased = ErasedRawError::from_typed(err);
+            // Re-wrap without state/context: `new_0` should eliminate the erased layer in place
+            // via `try_into_stateless` + `with_phantom_state`, reusing the same allocation.
+            err = RawError::new(
+                None::<Infallible>,
+                Some(ErasedSource(erased)),
+                Contextless::new(),
+            );
+
+            assert_eq!(
+                err.get_alloc_fingerprint(),
+                Some(fingerprint),
+                "wrapping a source-only erased error must not allocate"
+            );
+            assert_eq!(err.chain().count(), 1, "chain length should always be 1");
+            assert!(
+                err.downcast_source_ref::<TestError>().is_some(),
+                "TestError should always be reachable"
+            );
+        }
     }
 
     #[test]

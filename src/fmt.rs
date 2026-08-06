@@ -1,6 +1,5 @@
 //! Trait for defining custom formatters.
 use core::{
-    convert::Infallible,
     error,
     fmt::{self, Debug, Display},
 };
@@ -9,31 +8,11 @@ use core::{
 ///
 /// When printing an error chain structurally, as every level carries the same backtrace
 /// from the root, only print when the origin is `Captured` to avoid duplicates.
+#[cfg_attr(not(feature = "backtrace"), allow(dead_code))]
 #[derive(Debug, Clone, Copy)]
-pub enum Origin {
+pub(crate) enum Origin {
     Captured,
     Inherited,
-}
-
-/// A formatter for [`Error`][crate::Error], works with [`FormatWith`][crate::state::FormatWith].
-pub trait Formatter: 'static {
-    fn format_debug(
-        f: &mut fmt::Formatter<'_>,
-        context: Option<impl Debug + Display>,
-        source: Option<&(dyn error::Error + 'static)>,
-        backtrace: Option<(impl Debug + Display, Origin)>,
-    ) -> fmt::Result {
-        format_debug(f, None::<&Infallible>, context, source, backtrace)
-    }
-
-    fn format_display(
-        f: &mut fmt::Formatter<'_>,
-        context: Option<impl Debug + Display>,
-        source: Option<&(dyn error::Error + 'static)>,
-        backtrace: Option<(impl Debug + Display, Origin)>,
-    ) -> fmt::Result {
-        format_display(f, None::<&Infallible>, context, source, backtrace)
-    }
 }
 
 fn format_state_context(
@@ -108,13 +87,11 @@ where
         let Some(err) = source else {
             unreachable!();
         };
-        // dedup.format_one(&mut Blackhole, |w| write!(w, "{SOURCE_PREFIX}{err}"))?;
         write!(f, "{err}")?;
         source = err.source();
     }
 
     while let Some(err) = source {
-        // dedup.format_one(f, |w| write!(w, "{SOURCE_PREFIX}{err}"))?;
         write!(f, "{SOURCE_PREFIX}{err}")?;
         source = err.source();
     }

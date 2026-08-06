@@ -110,7 +110,7 @@ macro_rules! mkctx {
 /// # enum State { NotFound }
 /// # fn foo() {
 /// # let filename = "";
-/// # let err = mkerr!("oops").stateless().erase();
+/// # let err = std::fmt::Error;
 /// let _: Error = mkerr!("404 not found");
 /// let _: Error = mkerr!("{filename} not found");
 /// let _: Error = mkerr!("{} not found", filename);

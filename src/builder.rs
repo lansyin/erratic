@@ -125,7 +125,12 @@ where
             )),
             (Some(err), _) => {
                 let Ok((state, vacant)) = match_else!(err.extract_state(), Err(err) => {
-                    return err.with_phantom_state();
+                    // No state to extract: still attach the context by wrapping the error as a source.
+                    return Error(RawError::from_erased(
+                        None,
+                        Some(err.0.into_erased()),
+                        value.context_fn.call(),
+                    ));
                 });
                 vacant.derive(state, value.context_fn.call())
             }
@@ -144,9 +149,9 @@ where
     S: State + ?Sized,
 {
     fn from(value: Builder<Error<Stateless>, Stateless, F>) -> Self {
-        Error(RawError::from_error(
+        Error(RawError::from_erased(
             None,
-            value.err.map(|e| e.erase()),
+            value.err.map(|e| e.0.into_erased()),
             value.context_fn.call(),
         ))
     }
@@ -159,9 +164,9 @@ where
     S: State,
 {
     fn from(value: Builder<Error<Stateless>, S, F>) -> Self {
-        Error(RawError::from_error(
+        Error(RawError::from_erased(
             value.state,
-            value.err.map(|e| e.erase()),
+            value.err.map(|e| e.0.into_erased()),
             value.context_fn.call(),
         ))
     }
@@ -310,32 +315,30 @@ where
     fn build_error(self) -> Self::Result<Error<Self::S>> {
         self.into()
     }
-
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
-        self.build_error().erase()
-    }
 }
 
-impl<S1, S, F> ErrorExt for Builder<Error<S1>, S, F>
+impl<S, F> ErrorExt for Builder<Error<Stateless>, S, F>
 where
-    S1: State + ?Sized,
     F: ContextFn,
-    S: State + ?Sized,
+    S: State,
 {
     type Result<E> = E;
     type S = S;
 
     fn build_error(self) -> Self::Result<Error<Self::S>> {
-        Builder {
-            err: self.err.map(|e| e.erase()),
-            state: self.state,
-            context_fn: self.context_fn,
-        }
-        .build_error()
+        self.into()
     }
+}
 
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
-        self.build_error().erase()
+impl<F> ErrorExt for Builder<Error<Stateless>, Stateless, F>
+where
+    F: ContextFn,
+{
+    type Result<E> = E;
+    type S = Stateless;
+
+    fn build_error(self) -> Self::Result<Error<Self::S>> {
+        self.into()
     }
 }
 
@@ -351,33 +354,29 @@ where
     fn build_error(self) -> Self::Result<Error<Self::S>> {
         self.map_err(Error::from)
     }
-
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
-        self.build_error().map_err(|err| err.erase())
-    }
 }
 
-impl<T, S1, S, F> ErrorExt for Result<T, Builder<Error<S1>, S, F>>
+impl<T, S, F> ErrorExt for Result<T, Builder<Error<Stateless>, S, F>>
 where
-    S1: State + ?Sized,
     F: ContextFn,
-    S: State + ?Sized,
+    S: State,
 {
     type Result<E> = Result<T, E>;
     type S = S;
 
     fn build_error(self) -> Self::Result<Error<Self::S>> {
-        self.map_err(|err| {
-            Builder {
-                err: err.err.map(|err| err.erase()),
-                state: err.state,
-                context_fn: err.context_fn,
-            }
-            .build_error()
-        })
+        self.map_err(|err| err.build_error())
     }
+}
 
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
-        self.build_error().map_err(|err| err.erase())
+impl<T, F> ErrorExt for Result<T, Builder<Error<Stateless>, Stateless, F>>
+where
+    F: ContextFn,
+{
+    type Result<E> = Result<T, E>;
+    type S = Stateless;
+
+    fn build_error(self) -> Self::Result<Error<Self::S>> {
+        self.map_err(|err| err.build_error())
     }
 }

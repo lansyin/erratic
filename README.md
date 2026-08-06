@@ -81,22 +81,22 @@ fn write(w: &mut Writer, data: &[u8]) -> Result<()> {
 
 The `?` operator covers the most common cases, regardless of whether the return type carries state:
 
-| Source Type        | Return Type | Explanation                                          |
-| :----------------- | :---------- | :--------------------------------------------------- |
-| `impl Error`       | `Error<_>`  | Wrap any standard error type.                        |
-| `Builder<..>`      | `Error<_>`  | Build an error from state, context, and/or source.   |
-| `Error<Stateless>` | `Error<S>`  | Cheaply convert a stateless error to a stateful one. |
+| Source Type        | Return Type   | Explanation                                          |
+| :----------------- | :------------ | :--------------------------------------------------- |
+| `impl Error`       | `Error<_>`    | Wrap any standard error type.                        |
+| `Builder<..>`      | `Error<_>`    | Build an error from state, context, and/or source.   |
+| `Error<Stateless>` | `Error<S>`    | Cheaply convert a stateless error to a stateful one. |
 
 States are meant to be handled explicitly. Several utility methods are provided:
 
 | Method          | Conversion                                    | Explanation                                 |
 | :-------------- | :-------------------------------------------- | :------------------------------------------ |
 | `extract_state` | `Error<S>` -> `Result<(S, Vacant<S>), Error>` | Take the state out, or propagate the error. |
-| `erase_error`   | `Error<S>` -> `impl Error`                    | Erase the error along with its state.       |
 | `map_state`     | `Error<S>` -> `Error<S2>`                     | Transform the state with a closure.         |
 | `lift_state`    | `Error<S>` -> `Error<S2>` where `S2: From<S>` | Transform the state via `From`.             |
+| `erase_state`   | `Error<S>` -> `Error<Stateless>`              | Erase the state while preserving the error. |
 
-## Default Formatting
+## Formatting
 
 If the error has a state and/or a context, it builds its message from them. Otherwise, it acts as an error container,
 inheriting the message from its source. When wrapped, the container itself will not be added as another source layer,
@@ -120,35 +120,6 @@ format with alternate or debug specifiers.
 | `{:#}`    | Display the full error chain.                             |
 | `{:?}`    | Display the full error chain with backtrace, if captured. |
 | `{:#?}`   | Display all information in a struct-like format.          |
-
-## Custom Formatting
-
-To customize the error message, use `FormatWith<F>` at the point of printing. Since the formatter is tied
-to type rather than value, the rest of the program can use the error as usual, without thinking about
-how it will be displayed.
-
-For example:
-
-```rust
-struct Arrow;
-impl Formatter for Arrow { /* .. */ }
-
-fn main() -> Result<(), Error<FormatWith<Arrow>>> {
-    executor::block_on(async_main())?;
-    Ok(())
-}
-async fn async_main() -> erratic::Result<()> {
-    // ..
-}
-```
-
-If `async_main` returns a chain of three errors, `Arrow` can format it as follows:
-
-```
-AppleNotFound: hoge
-├─▶ failed to forage for food
-└─▶ no such fruit
-```
 
 ## Backtrace
 
@@ -176,14 +147,14 @@ containing a vtable and potentially a state, source, and/or context.
 │ Align4Ref<ConstBody>╎00 ├───┤ ConstContext ├───┤ Literal │
 └─────────────────────╎───┘   └──────────────┘   └─────────┘
 ┌Error<S>─────────────╎───┐   ┌BoxedBody─────────────┬────────────────────┬────────┬─────────┐
-│ Align4Own<BoxedBody>╎01 ├───┤ Align4Ref<VTable>╎0H │ MaybeUninit<State> │ Source │ Context │
+│ Align4Own<BoxedBody>╎01 ├───┤ Align4Ref<VTable>╎ST │ MaybeUninit<State> │ Source │ Context │
 └─────────────────────╎───┘   └─────────┼──────────┼─┴───────────────┼────┴────────┴─────────┘
-┌Error<S>─────┬───────╎───┐   ┌VTable───┴──┬────╌  └──H=1:HasState───┘
+┌Error<S>─────┬───────╎───┐   ┌VTable───┴──┬────╌  └──ST=00:Uninit───┘
 │    State    │ 000000╎10 │   │ Drop::drop │ ···
 └─────────────┴───────╎───┘   └────────────┴────╌
 ```
 
-## Contributing
 
-Contributions are warmly welcomed! Whether you have a bug report, feature request, or
-an improvement in mind, feel free to open an issue or submit a pull request. Appreciate any thoughts!
+## Contributing
+Contributions are warmly welcomed! Whether you have a bug report, feature request, or 
+an improvement in mind, feel free to open an issue or submit a pull request. Appreciate any thoughts! 

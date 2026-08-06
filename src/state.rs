@@ -4,7 +4,6 @@ use core::{convert::Infallible, fmt::Debug, marker::PhantomData};
 use crate::{
     Error,
     context::{Context, Contextless},
-    fmt::Formatter,
     raw::{RawError, RawVacant},
 };
 
@@ -177,35 +176,4 @@ where
         };
         Debug::fmt(vacant, f)
     }
-}
-
-/// A variant of [`Stateless`], allows customizing the error message.
-///
-/// # Caveats
-///
-/// The formatter is tied to type rather than value. Converting the error to another state restores the default formatter.
-pub struct FormatWith<F>
-where
-    F: Formatter,
-{
-    _marker: PhantomData<fn(F)>,
-    _unsized: [()],
-}
-
-impl<F> sealed::Sealed for FormatWith<F> where F: Formatter {}
-
-impl<F> Debug for FormatWith<F>
-where
-    F: Formatter,
-{
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("FormatWith").finish()
-    }
-}
-
-impl<F> State for FormatWith<F>
-where
-    F: Formatter,
-{
-    type Repr = Infallible;
 }

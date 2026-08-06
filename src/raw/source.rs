@@ -1,9 +1,7 @@
 use alloc::boxed::Box;
 use core::{any::Any, error::Error};
 
-use crate::raw::RawError;
-
-use super::backtrace::WithBacktrace;
+use super::{ErasedRawError, backtrace::WithBacktrace};
 
 /// An error container that can be used as the source of [`RawError`].
 pub(super) trait Source: Any + Send + Sync + 'static {
@@ -105,36 +103,26 @@ impl Source for BoxedSource {
     }
 }
 
-pub(super) struct IndirectSource(RawError);
+pub(super) struct ErasedSource(pub ErasedRawError);
 
-impl IndirectSource {
-    pub(crate) fn try_new(raw: super::RawError) -> Result<Self, RawError> {
-        if raw.is_source_only() {
-            Ok(Self(raw))
-        } else {
-            Err(raw)
-        }
-    }
-}
-
-impl Source for IndirectSource {
+impl Source for ErasedSource {
     fn error_ref(&self) -> Option<&(dyn Error + Send + Sync + 'static)> {
-        self.0.source()
+        Some(self.0.error_ref())
     }
 
     fn error_mut(&mut self) -> Option<&mut (dyn Error + Send + Sync + 'static)> {
-        self.0.source_mut()
+        Some(self.0.error_mut())
     }
 
     fn into_boxed(self) -> Option<Box<dyn Error + Send + Sync + 'static>> {
-        self.0.into_source()
+        Some(self.0.into_boxed())
     }
 
     fn downcast_container(self, dst: &mut dyn Any) -> Result<(), Self>
     where
         Self: Sized,
     {
-        if let Some(dst) = dst.downcast_mut::<Option<RawError>>() {
+        if let Some(dst) = dst.downcast_mut::<Option<ErasedRawError>>() {
             dst.replace(self.0);
             Ok(())
         } else {

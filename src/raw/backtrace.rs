@@ -176,13 +176,13 @@ impl WithBacktrace {
 
 impl Debug for WithBacktrace {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "<Backtrace>")
+        write!(f, "<backtrace>")
     }
 }
 
 impl Display for WithBacktrace {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "<Backtrace>")
+        write!(f, "<backtrace>")
     }
 }
 

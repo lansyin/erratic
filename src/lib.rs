@@ -103,11 +103,11 @@
 //! | Method          | Conversion                                    | Explanation                                 |
 //! | :-------------- | :-------------------------------------------- | :------------------------------------------ |
 //! | `extract_state` | `Error<S>` -> `Result<(S, Vacant<S>), Error>` | Take the state out, or propagate the error. |
-//! | `erase_error`   | `Error<S>` -> `impl Error`                    | Erase the error along with its state.       |
 //! | `map_state`     | `Error<S>` -> `Error<S2>`                     | Transform the state with a closure.         |
 //! | `lift_state`    | `Error<S>` -> `Error<S2>` where `S2: From<S>` | Transform the state via `From`.             |
+//! | `erase_state`   | `Error<S>` -> `Error<Stateless>`              | Erase the state while preserving the error. |
 //!
-//! # Default Formatting
+//! # Formatting
 //!
 //! If the error has a state and/or a context, it builds its message from them. Otherwise, it acts as an error container,
 //! inheriting the message from its source. When wrapped, the container itself will not be added as another source layer,
@@ -131,38 +131,6 @@
 //! | `{:#}`    | Display the full error chain.                             |
 //! | `{:?}`    | Display the full error chain with backtrace, if captured. |
 //! | `{:#?}`   | Display all information in a struct-like format.          |
-//!
-//! # Custom Formatting
-//!
-//! To customize the error message, use `FormatWith<F>` at the point of printing. Since the formatter is tied
-//! to type rather than value, the rest of the program can use the error as usual, without thinking about
-//! how it will be displayed.
-//!
-//! For example:
-//!
-//! ```rust
-//! # use erratic::{Error, BuilderExt, state::FormatWith, fmt::Formatter};
-//! # mod executor { pub fn block_on<F>(_: F) -> erratic::Result<()> { Ok(()) } }
-//! struct Arrow;
-//! impl Formatter for Arrow { /* .. */ }
-//!
-//! fn main() -> Result<(), Error<FormatWith<Arrow>>> {
-//!     executor::block_on(async_main())?;
-//!     Ok(())
-//! }
-//! async fn async_main() -> erratic::Result<()> {
-//!     // ..
-//! # todo!();
-//! }
-//! ```
-//!
-//! If `async_main` returns a chain of three errors, `Arrow` can format it as follows:
-//!
-//! ```text
-//! AppleNotFound: hoge
-//! ├─▶ failed to forage for food
-//! └─▶ no such fruit
-//! ```
 //!
 //! # Backtrace
 //!
@@ -190,10 +158,10 @@
 //! │ Align4Ref<ConstBody>╎00 ├───┤ ConstContext ├───┤ Literal │
 //! └─────────────────────╎───┘   └──────────────┘   └─────────┘
 //! ┌Error<S>─────────────╎───┐   ┌BoxedBody─────────────┬────────────────────┬────────┬─────────┐
-//! │ Align4Own<BoxedBody>╎01 ├───┤ Align4Ref<VTable>╎0H │ MaybeUninit<State> │ Source │ Context │
+//! │ Align4Own<BoxedBody>╎01 ├───┤ Align4Ref<VTable>╎ST │ MaybeUninit<State> │ Source │ Context │
 //! └─────────────────────╎───┘   └─────────┼──────────┼─┴───────────────┼────┴────────┴─────────┘
-//! ┌Error<S>─────┬───────╎───┐   ┌VTable───┴──┬────╌  └──H=1:HasState───┘
-//! │    State    │ 000000╎10 │   │ Drop::drop │ ···  
+//! ┌Error<S>─────┬───────╎───┐   ┌VTable───┴──┬────╌  └──ST=00:Uninit───┘
+//! │    State    │ 000000╎10 │   │ Drop::drop │ ···
 //! └─────────────┴───────╎───┘   └────────────┴────╌
 //! ```
 //!
@@ -207,6 +175,7 @@ extern crate alloc;
 #[cfg(feature = "backtrace")]
 extern crate std;
 
+mod fmt;
 mod raw;
 mod rtti;
 
@@ -217,7 +186,6 @@ pub mod test_fixtures;
 
 pub mod builder;
 pub mod context;
-pub mod fmt;
 pub mod state;
 
 use alloc::boxed::Box;
@@ -231,9 +199,8 @@ use core::{
 use crate::{
     builder::Builder,
     context::{Context, ContextFn, Contextless, Identity, Printable},
-    fmt::Formatter,
-    raw::RawError,
-    state::{FormatWith, State, Stateless, Vacant},
+    raw::{ErasedRawError, RawError},
+    state::{State, Stateless, Vacant},
 };
 
 pub type Result<T, E = Error> = core::result::Result<T, E>;
@@ -275,13 +242,8 @@ where
     }
 
     /// Returns an opaque [`Error`][error::Error].
-    pub fn erase(self) -> impl error::Error + Send + Sync + 'static {
-        self.0.erase()
-    }
-
-    /// Returns a reference to an opaque [`Error`][error::Error].
-    pub fn erase_ref(&self) -> &(impl error::Error + Send + Sync + 'static) {
-        &self.0
+    pub fn erase_state(self) -> Error {
+        Error(self.0.erase_state())
     }
 
     /// Returns a reference to the context, if present.
@@ -442,8 +404,8 @@ where
         E: 'static,
         C: 'static,
     {
-        let (state, context, error) = self.0.into_parts::<C, E>();
-        (state.map(S::from_repr), context, error)
+        let (state, context, err) = self.into_parts_mapped::<C, E>();
+        (state.map(S::from_repr), context, err)
     }
 }
 
@@ -464,8 +426,8 @@ impl Error {
         E: 'static,
         C: 'static,
     {
-        let (_state, context, source) = self.0.into_parts::<C, E>();
-        (context, source)
+        let (_state, context, err) = self.into_parts_mapped::<C, E>();
+        (context, err)
     }
 
     /// Identity helper to aid type inference.
@@ -474,13 +436,31 @@ impl Error {
     }
 }
 
-impl<F> Error<FormatWith<F>>
+impl<S> Error<S>
 where
-    F: Formatter,
+    S: State + ?Sized,
 {
-    /// Discards the custom formatter.
-    pub fn into_stateless(self) -> Error {
-        Error(self.0)
+    fn into_parts_mapped<C, E>(self) -> (Option<S::Repr>, Option<C>, Option<E>)
+    where
+        E: 'static,
+        C: 'static,
+    {
+        if rtti::is_same_ty::<E, Error>() {
+            let (state, context, err) = self.0.into_parts::<C, ErasedRawError>();
+            let err = err
+                .map(|erased| match erased.try_into_stateless() {
+                    Ok(err) => Error::<Stateless>(err),
+                    Err(erased) => Error(RawError::from_erased(
+                        None,
+                        Some(erased),
+                        Contextless::new(),
+                    )),
+                })
+                .and_then(|err| rtti::concretize::<_, E>(err).ok());
+            (state, context, err)
+        } else {
+            self.0.into_parts::<C, E>()
+        }
     }
 }
 
@@ -517,15 +497,6 @@ where
 impl<S> From<Error> for Error<S>
 where
     S: State,
-{
-    fn from(value: Error) -> Self {
-        value.with_phantom_state()
-    }
-}
-
-impl<F> From<Error> for Error<FormatWith<F>>
-where
-    F: Formatter,
 {
     fn from(value: Error) -> Self {
         value.with_phantom_state()
@@ -598,34 +569,6 @@ impl Display for Error<Stateless> {
     }
 }
 
-impl<F> Debug for Error<FormatWith<F>>
-where
-    F: Formatter,
-{
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        F::format_debug(
-            f,
-            self.0.context(),
-            self.source(),
-            self.0.backtrace_opaque(),
-        )
-    }
-}
-
-impl<F> Display for Error<FormatWith<F>>
-where
-    F: Formatter,
-{
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        F::format_display(
-            f,
-            self.0.context(),
-            self.source(),
-            self.0.backtrace_opaque(),
-        )
-    }
-}
-
 /// Extension trait for working with the state.
 pub trait StateExt {
     type T;
@@ -652,6 +595,9 @@ pub trait StateExt {
     {
         self.map_state(S::from)
     }
+
+    /// Erases the state, returning an opaque error container.
+    fn erase_state(self) -> Self::Result<Self::T, Error>;
 }
 
 impl<S1> StateExt for Error<S1>
@@ -675,6 +621,10 @@ where
         S: State,
     {
         self.map_state(f)
+    }
+
+    fn erase_state(self) -> Self::Result<Self::T, Error> {
+        self.erase_state()
     }
 }
 
@@ -702,6 +652,10 @@ where
         S2: State,
     {
         self.map_err(|err| err.map_state(f))
+    }
+
+    fn erase_state(self) -> Self::Result<Self::T, Error> {
+        self.map_err(|err| err.erase_state())
     }
 }
 
@@ -780,9 +734,6 @@ pub trait ErrorExt: Sized {
 
     /// Materializes the final [`Error<Self::S>`].
     fn build_error(self) -> Self::Result<Error<Self::S>>;
-
-    /// Materializes and then erases the error, returning an opaque `impl Error`.
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static>;
 }
 
 impl<S> ErrorExt for Error<S>
@@ -794,10 +745,6 @@ where
 
     fn build_error(self) -> Self::Result<Error<Self::S>> {
         self
-    }
-
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
-        self.erase()
     }
 }
 
@@ -811,10 +758,6 @@ where
     fn build_error(self) -> Self::Result<Error<Self::S>> {
         self.map_err(Error::from)
     }
-
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
-        self.build_error().map_err(|err| err.erase())
-    }
 }
 
 impl<T, S> ErrorExt for Result<T, Error<S>>
@@ -826,9 +769,5 @@ where
 
     fn build_error(self) -> Self::Result<Error<Self::S>> {
         self
-    }
-
-    fn erase_error(self) -> Self::Result<impl error::Error + Send + Sync + 'static> {
-        self.map_err(|err| err.erase())
     }
 }
