@@ -133,7 +133,7 @@ macro_rules! mkctx {
 #[macro_export]
 macro_rules! mkerr {
     ($($key:ident=$value:expr),+ $(, $($fmt:literal $($args:tt)*)?)?) => {
-        $crate::__priv_mkerr!(@sort [,,] $($key=$value,)+ $($(context=$crate::mkctx!($fmt $($args)*),)?)?)
+        $crate::__priv_mkerr!(@sort [_] [] [,,] $($key=$value,)+ $($(context=$crate::mkctx!($fmt $($args)*),)?)?)
     };
     ($fmt:literal $($args:tt)*) => {{
         $crate::Error::from_context($crate::mkctx!($fmt $($args)*))
@@ -143,29 +143,32 @@ macro_rules! mkerr {
 #[macro_export]
 #[doc(hidden)]
 macro_rules! __priv_mkerr {
-    (@sort [$($_:expr)?, $($c:expr)?,  $($e:expr)?] state=$s:expr, $($k:ident=$v:expr,)*) => {{
+    // Note: dst:"default state type", dc:"default context", s="state", c="context", e="error"
+    (@sort [$dst:tt] [$($dc:expr)?] [$($_:expr)?, $($c:expr)?,  $($e:expr)?] state=$s:expr, $($k:ident=$v:expr,)*) => {{
         $( let _ = $_; $crate::macros::__priv::compile_error!("state can only be set once");)?
-        $crate::__priv_mkerr!(@sort [$s, $($c)?, $($e)?] $($k=$v,)*)
+        $crate::__priv_mkerr!(@sort [$dst] [$($dc)?] [$s, $($c)?, $($e)?] $($k=$v,)*)
     }};
-    (@sort [$($s:expr)?, $($_:expr)?,  $($e:expr)?] context=$c:expr, $($k:ident=$v:expr,)*) => {{
+    (@sort [$dst:tt] [$($dc:expr)?] [$($s:expr)?, $($_:expr)?,  $($e:expr)?] context=$c:expr, $($k:ident=$v:expr,)*) => {{
         $( let _ = $_; $crate::macros::__priv::compile_error!("context can only be set once. note: the format string counts as a context.");)?
-        $crate::__priv_mkerr!(@sort [$($s)?, $c, $($e)?] $($k=$v,)*)
+        $crate::__priv_mkerr!(@sort [$dst] [$($dc)?] [$($s)?, $c, $($e)?] $($k=$v,)*)
     }};
-    (@sort [$($s:expr)?, $($c:expr)?,  $($_:expr)?] error=$e:expr, $($k:ident=$v:expr,)*) => {{
+    (@sort [$dst:tt] [$($dc:expr)?] [$($s:expr)?, $($c:expr)?,  $($_:expr)?] error=$e:expr, $($k:ident=$v:expr,)*) => {{
         $( let _ = $_; $crate::macros::__priv::compile_error!("error can only be set once");)?
-        $crate::__priv_mkerr!(@sort [$($s)?, $($c)?, $e] $($k=$v,)*)
+        $crate::__priv_mkerr!(@sort [$dst] [$($dc)?] [$($s)?, $($c)?, $e] $($k=$v,)*)
     }};
-    (@sort [$($s:expr)?, $($c:expr)?,  $($e:expr)?]) => {{
+    (@sort [$dst:tt] [$($dc:expr)?] [$($s:expr)?, $($c:expr)?,  $($e:expr)?]) => {{
         let builder = ($crate::macros::__priv::None::<()>);
         $(let builder = builder.ok_or($e);)?
         $(let builder = $crate::BuilderExt::with_state(builder, $s);)?
+        $(let builder = $crate::BuilderExt::with_context(builder, $dc);)?
         $(let builder = $crate::BuilderExt::with_context(builder, $c);)?
-        $crate::__priv_mkerr!(@infer [$($s)?] builder.unwrap_err())
+        $crate::__priv_mkerr!(@infer [$dst] [$($s)?] builder.unwrap_err())
     }};
-    (@infer [] $builder:expr) => {
-        $crate::macros::__priv::Into::<$crate::Error<_>>::into($builder)
+    (@infer [$dst:tt] [] $builder:expr) => {
+        #[allow(unused_parens)]
+        $crate::macros::__priv::Into::<$crate::Error<$dst>>::into($builder)
     };
-    (@infer [$state:expr] $builder:expr) => {
+    (@infer [$dst:tt] [$state:expr] $builder:expr) => {
         $crate::ErrorExt::build_error($builder)
     };
 }
@@ -179,7 +182,7 @@ macro_rules! __priv_mkerr {
 macro_rules! mkres {
     ($($key:ident=$value:expr),+ $(, $($fmt:literal $($args:tt)*)?)?) => {
         $crate::macros::__priv::Err(
-            $crate::__priv_mkerr!(@sort [,,] $($key=$value,)+ $($(context=$crate::mkctx!($fmt $($args)*),)?)?)
+            $crate::__priv_mkerr!(@sort [_] [] [,,] $($key=$value,)+ $($(context=$crate::mkctx!($fmt $($args)*),)?)?)
         )
     };
     ($fmt:literal $($args:tt)*) => {
@@ -228,8 +231,8 @@ pub mod __priv_mksure {
 
 /// Returns an error if the given expression evaluates to false.
 ///
-/// For comparison expressions, the default error shows the values of both operands.
-/// If a source, context, or format string is given, the default message is attached as the source error.
+/// For comparison expressions, the default message shows the values of both operands.
+/// If a context or format string is given, the default message will not be generated.
 ///
 /// # Examples
 ///
@@ -243,26 +246,22 @@ pub mod __priv_mksure {
 ///
 /// fn read_png_header(filename: &str, buffer: &mut [u8]) -> Result<(), Error<State>> {
 ///     mksure!(buffer.len() > PNG_HEADER_SIZE)?;
-///     // Error: assertion failed (0 > 33): buffer.len() > PNG_HEADER_SIZE
+///     // assertion failed (0 > 33): buffer.len() > PNG_HEADER_SIZE
 ///
 ///     mksure!(buffer.len() > PNG_HEADER_SIZE, context = 501)?;
-///     // Error: 501
-///     // Source: assertion failed (0 > 33): buffer.len() > PNG_HEADER_SIZE
+///     // 501
 ///     
 ///     mksure!(!filename.ends_with(".png"), "expect a PNG file, found `{filename}`")?;
-///     // Error: expect a PNG file, found `foo.jpg`
-///     // Source: assertion failed: !filename.ends_with(".png")
+///     // expect a PNG file, found `foo.jpg`
 ///     
 ///     mksure!(!filename.ends_with(".png"), state = State::UnsupportedFormat)?;
-///     // Error: State::UnsupportedFormat
-///     // Source: assertion failed: !filename.ends_with(".png")
+///     // State::UnsupportedFormat
 ///
 ///     mksure!(!filename.ends_with(".png"),
 ///         state = State::UnsupportedFormat,
 ///         "expect a PNG file, found `{filename}`"
 ///     )?;
-///     // Error: State::UnsupportedFormat: expect a PNG file, found `foo.jpg`
-///     // Source: assertion failed: !filename.ends_with(".png")
+///     // State::UnsupportedFormat: expect a PNG file, found `foo.jpg`
 ///     
 ///     // ..
 ///     # todo!()
@@ -334,12 +333,15 @@ macro_rules! __priv_mksure {
         let lhs_value = (&lhs).select().from(&lhs);
         let rhs_value = (&rhs).select().from(&rhs);
 
-        let err: $crate::Error = match (lhs_value, rhs_value) {
+        match (lhs_value, rhs_value) {
             ($crate::macros::__priv::Some(lhs_value), $crate::macros::__priv::Some(rhs_value)) => {
-                $crate::mkerr!(
+                let dc = $crate::mkctx!(
                     "assertion failed ({}): {lhs_value:?} {} {rhs_value:?}",
-                    $crate::macros::__priv::stringify!(assertion failed: $lhs $op $rhs),
+                    $crate::macros::__priv::stringify!($lhs $op $rhs),
                     $crate::macros::__priv::stringify!($op)
+                );
+                $crate::Result::<(), _>::Err(
+                    $crate::__priv_mkerr!(@sort [($crate::state::Stateless)] [dc] [,,] $($key=$value,)* $(context=$crate::mkctx!($fmt $($args)*),)?)
                 )
             },
             _ => {
@@ -349,15 +351,14 @@ macro_rules! __priv_mksure {
                     const LITERAL: &'static str = $crate::macros::__priv::stringify!(assertion failed: $lhs $op $rhs);
                 }
 
-                $crate::Error::from_context($crate::context::Mkctx::__priv_new(|| {
+                let dc = $crate::context::Mkctx::__priv_new(|| {
                     $crate::macros::__priv::None
-                }, Literal))
+                }, Literal);
+                $crate::Result::<(), _>::Err(
+                    $crate::__priv_mkerr!(@sort [($crate::state::Stateless)] [dc] [,,] $($key=$value,)* $(context=$crate::mkctx!($fmt $($args)*),)?)
+                )
             }
-        };
-
-        $crate::__priv_mksure!(@check [$($key)*] [] {
-            $crate::__priv_mksure!(@mkres [err] [$($key=$value),*] [$($fmt $($args)*)?])
-        })
+        }
     }};
     (@fallback [$exp:expr] [$($key:ident=$value:expr),*] [$($fmt:literal $($args:tt)*)?]) => {'ret: {
         if $exp {
@@ -370,35 +371,14 @@ macro_rules! __priv_mksure {
             const LITERAL: &'static str = $crate::macros::__priv::stringify!(assertion failed: $exp);
         }
 
-        let err: $crate::Error = $crate::Error::from_context($crate::context::Mkctx::__priv_new(|| {
+        let dc = $crate::context::Mkctx::__priv_new(|| {
             $crate::macros::__priv::None
-        }, Literal));
+        }, Literal);
 
-        $crate::__priv_mksure!(@check [$($key)*] [] {
-            $crate::__priv_mksure!(@mkres [err] [$($key=$value),*] [$($fmt $($args)*)?])
-        })
+        $crate::Result::<(), _>::Err(
+            $crate::__priv_mkerr!(@sort [($crate::state::Stateless)] [dc] [,,] $($key=$value,)* $(context=$crate::mkctx!($fmt $($args)*),)?)
+        )
     }};
-    (@check [error $($key:ident)*] [$($stateful:ident)?] { $_:expr }) => {
-        $crate::macros::__priv::compile_error!("builder key `error` is not allowed in assertions")
-    };
-    (@check [state $($key:ident)*] [$($stateful:ident)?] { $mkres:expr }) => {
-        $crate::__priv_mksure!(@check [$($key)*] [STATEFUL] { $mkres })
-    };
-    (@check [$_:ident $($key:ident)*] [$($stateful:ident)?] { $mkres:expr }) => {
-        $crate::__priv_mksure!(@check [$($key)*] [$($stateful)?] { $mkres })
-    };
-    (@check [] [STATEFUL] { $mkres:expr }) => {
-        $mkres
-    };
-    (@check [] [] { $mkres:expr }) => {
-        $crate::macros::__priv::identity::<$crate::Result<()>>($mkres)
-    };
-    (@mkres [$err:ident] [$($key:ident=$value:expr),*] [$($fmt:literal $($args:tt)*)?]) => {
-        $crate::mkres!(error=$err, $($key=$value,)* $($fmt, $($args)*)?)
-    };
-    (@mkres [$err:ident] [] []) => {
-        $crate::macros::__priv::Ok($err)
-    }
 }
 
 #[cfg(test)]
@@ -617,15 +597,8 @@ mod tests {
         )
         .unwrap_err();
 
-        assert_eq!(err.chain().count(), 2);
+        assert_eq!(err.chain().count(), 1);
         assert_eq!(err.to_string(), "magic number must be greater than zero");
-        assert!(
-            err.root()
-                .unwrap()
-                .to_string()
-                .find("magic_number.is_positive()")
-                .is_some()
-        );
     }
 
     #[test]
@@ -633,9 +606,8 @@ mod tests {
         let magic_number = -123454321;
         let err = mksure!(magic_number > 0, "magic number must be greater than zero").unwrap_err();
 
-        assert_eq!(err.chain().count(), 2);
+        assert_eq!(err.chain().count(), 1);
         assert_eq!(err.to_string(), "magic number must be greater than zero");
-        assert!(err.root().unwrap().to_string().find("-123454321").is_some());
     }
 
     #[test]
@@ -648,12 +620,11 @@ mod tests {
         )
         .unwrap_err();
 
-        assert_eq!(err.chain().count(), 2);
+        assert_eq!(err.chain().count(), 1);
         assert_eq!(
             err.to_string(),
             format!("magic number must be greater than {lower_bound}")
         );
-        assert!(err.root().unwrap().to_string().find("-123454321").is_some());
     }
 
     #[test]
@@ -661,9 +632,11 @@ mod tests {
         let magic_number = -123454321;
         let err = mksure!(magic_number > 0, state = -1i32).unwrap_err();
 
-        assert_eq!(err.chain().count(), 2);
-        assert_eq!(err.to_string(), format!("-1"));
-        assert!(err.root().unwrap().to_string().find("-123454321").is_some());
+        assert_eq!(err.chain().count(), 1);
+        assert_eq!(
+            err.to_string(),
+            format!("-1: assertion failed (magic_number > 0): -123454321 > 0")
+        );
     }
 
     #[test]
@@ -671,9 +644,8 @@ mod tests {
         let magic_number = -123454321;
         let err = mksure!(magic_number > 0, context = 670).unwrap_err();
 
-        assert_eq!(err.chain().count(), 2);
+        assert_eq!(err.chain().count(), 1);
         assert_eq!(err.to_string(), format!("670"));
-        assert!(err.root().unwrap().to_string().find("-123454321").is_some());
     }
 
     #[test]
@@ -687,12 +659,11 @@ mod tests {
         )
         .unwrap_err();
 
-        assert_eq!(err.chain().count(), 2);
+        assert_eq!(err.chain().count(), 1);
         assert_eq!(
             err.to_string(),
             format!("-1: magic number must be greater than {lower_bound}")
         );
-        assert!(err.root().unwrap().to_string().find("-123454321").is_some());
     }
 
     #[test]
