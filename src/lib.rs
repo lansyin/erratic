@@ -237,7 +237,7 @@ where
         self.0.state().is_some()
     }
 
-    /// Returns an opaque [`Error`][error::Error].
+    /// Erases the state type, while keeping the error message unchanged.
     pub fn erase_state(self) -> Error {
         Error(self.0.erase_state())
     }
@@ -592,7 +592,7 @@ pub trait StateExt {
         self.map_state(S::from)
     }
 
-    /// Erases the state, returning an opaque error container.
+    /// Erases the state type, while keeping the error message unchanged.
     fn erase_state(self) -> Self::Result<Self::T, Error>;
 }
 
