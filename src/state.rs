@@ -136,7 +136,7 @@ where
     }
 
     /// Derives a contextless error from this vacant.
-    pub fn derive_contextless<S2>(self, state: S2) -> Error<S2>
+    pub fn derive_with_state<S2>(self, state: S2) -> Error<S2>
     where
         S2: State,
     {
@@ -151,7 +151,7 @@ where
     }
 
     /// Derives a stateless error from this vacant.
-    pub fn derive_stateless<C>(self, context: C) -> Error
+    pub fn derive_with_context<C>(self, context: C) -> Error
     where
         C: Context,
     {
@@ -172,8 +172,4 @@ where
         };
         Debug::fmt(vacant, f)
     }
-}
-
-pub trait StateFn {
-    type Ouptut: State;
 }
