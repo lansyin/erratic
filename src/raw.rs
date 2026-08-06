@@ -8,20 +8,20 @@ use core::{
     any::{Any, TypeId},
     convert::Infallible,
     error,
-    fmt::{Debug, Display},
+    fmt::{self, Debug, Display},
     mem::{self, ManuallyDrop, MaybeUninit},
     ops::{Deref, DerefMut},
     ptr::NonNull,
 };
 
 use crate::{
-    context::{self, Context, Empty, Printable},
-    fmt, match_else,
+    context::{self, Context, Printable, Value},
+    match_else,
     raw::{
         ptr::{Align4, Align4Own, Align4PtrCompat, Align4Ref, Metadata, Mut, Ref},
         source::{BoxedSource, ErasedSource, NoSource, Source, WithBacktraceSource},
     },
-    rtti,
+    render, rtti,
 };
 use backtrace::WithBacktrace;
 
@@ -138,14 +138,14 @@ impl RawError {
     {
         // Note: Explicitly check the fallback context first as we CANNOT return in the const block.
         #[allow(clippy::question_mark)]
-        if C::FALLBACK.is_none() {
+        if !matches!(C::VALUE, Value::Literal(_)) {
             return None;
         }
         // Note: Relies on const promotion to produce a new constant.
         let body: &'static Align4<ConstBody> = &const {
-            let literal = match C::FALLBACK {
-                Some(v) => v, // Note: As of Rust 1.96, unwrap_or_default is unavailable in const blocks.
-                None => "", // Note: This branch is never taken; it only exists to keep rustc happy.
+            let literal = match C::VALUE {
+                Value::Literal(lit) => lit,
+                Value::None | Value::Lazy(_) => "", // Note: This branch is never taken; it only exists to keep rustc happy.
             };
             Align4(ConstBody { context: literal })
         };
@@ -212,7 +212,7 @@ impl<S> RawError<S> {
             C: context::Context,
         {
             let has_state = state.is_some();
-            let has_context = !C::is_contextless();
+            let has_context = !matches!(C::VALUE, Value::None);
 
             if has_state || has_context {
                 return new_1(state, source, context);
@@ -241,7 +241,7 @@ impl<S> RawError<S> {
                 Ok(source) => new_2(state, source, context),
                 Err(source) => {
                     let has_source = source.error_ref().is_some();
-                    let has_context = !C::is_contextless();
+                    let has_context = !matches!(C::VALUE, Value::None);
 
                     match (state, has_context, has_source) {
                         (Some(state), false, false) => {
@@ -250,12 +250,15 @@ impl<S> RawError<S> {
                             });
                             new_2(Some(state), source, context)
                         }
-                        (None, true, false) => match context.try_into_repr() {
-                            None => match RawError::try_new_const::<C>() {
+                        (None, true, false) => match context.try_into_alt() {
+                            Ok(context) => match RawError::try_new_const::<C::Alt>() {
                                 Some(raw) => raw.with_phantom_state(),
-                                None => new_2(None, source, Empty::new()),
+                                None => new_2(None, source, context),
                             },
-                            Some(context) => new_2(None, source, context),
+                            Err(context) => match RawError::try_new_const::<C>() {
+                                Some(raw) => raw.with_phantom_state(),
+                                None => new_2(None, source, context),
+                            },
                         },
                         (state, _, _) => new_2(state, source, context),
                     }
@@ -269,13 +272,17 @@ impl<S> RawError<S> {
             E: Source + Send + Sync + 'static,
             C: context::Context,
         {
-            let context = context.try_into_repr();
-            let context_fallback = C::FALLBACK;
-
-            match (context, context_fallback) {
-                (Some(context), _) => RawError::new_boxed(state, source, context),
-                (None, Some(context)) => RawError::new_boxed(state, source, context),
-                (None, None) => RawError::new_boxed(state, source, Empty::new()),
+            match context.try_into_alt() {
+                Ok(context) => match C::Alt::VALUE {
+                    Value::None => RawError::new_boxed(state, source, NoContext),
+                    Value::Literal(context) => RawError::new_boxed(state, source, context),
+                    Value::Lazy(f) => RawError::new_boxed(state, source, f(context)),
+                },
+                Err(context) => match C::VALUE {
+                    Value::None => RawError::new_boxed(state, source, NoContext),
+                    Value::Literal(context) => RawError::new_boxed(state, source, context),
+                    Value::Lazy(f) => RawError::new_boxed(state, source, f(context)),
+                },
             }
         }
 
@@ -638,7 +645,7 @@ impl<S> RawError<S> {
                 let erased = ErasedRawError::from_typed(RawError {
                     inline_body: ManuallyDrop::new(body),
                 });
-                RawError::new(None::<Infallible>, Some(ErasedSource(erased)), Empty::new())
+                RawError::new(None::<Infallible>, Some(ErasedSource(erased)), NoContext)
             }
             SelectOwn::Boxed(mut body) => {
                 let vt = DynBody::vtable(body.borrow());
@@ -679,9 +686,9 @@ impl<S> Debug for RawError<S>
 where
     S: Debug,
 {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.select_ref() {
-            SelectRef::Const(body) => fmt::format_debug(
+            SelectRef::Const(body) => render::format_debug(
                 f,
                 None::<&()>,
                 Some(body.borrow().deref().context),
@@ -689,7 +696,7 @@ where
                 None::<(Infallible, _)>,
             ),
             SelectRef::Inline(_) => {
-                fmt::format_debug(f, self.state(), None::<&str>, None, None::<(Infallible, _)>)
+                render::format_debug(f, self.state(), None::<&str>, None, None::<(Infallible, _)>)
             }
             SelectRef::Boxed(body) => {
                 let vtable = DynBody::vtable(body.borrow());
@@ -703,9 +710,9 @@ impl<S> Display for RawError<S>
 where
     S: Debug,
 {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.select_ref() {
-            SelectRef::Const(_) | SelectRef::Inline(_) => fmt::format_display(
+            SelectRef::Const(_) | SelectRef::Inline(_) => render::format_display(
                 f,
                 self.state(),
                 self.context(),
@@ -756,7 +763,17 @@ where
     vtable: Align4Ref<'static, DynBodyVTable>, // Note: The vtable must be the first field as the other fields may be erased.
     state: MaybeUninit<S>,
     source: E,
-    context: helper::Exclude<C, Empty>,
+    context: helper::Exclude<C, NoContext>,
+}
+
+/// A zero-sized type used as context placeholder.
+#[derive(Debug)]
+pub struct NoContext;
+
+impl Display for NoContext {
+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Ok(())
+    }
 }
 
 mod helper {
@@ -830,9 +847,9 @@ struct DynBodyVTable {
     /// See [DynBody::into_boxed_error].
     into_boxed_error: unsafe fn(ErasedDynBody) -> Box<dyn error::Error + Send + Sync + 'static>,
     /// See [DynBody::debug].
-    debug: unsafe fn(Ref<'_, DynBody>, &mut core::fmt::Formatter<'_>) -> core::fmt::Result,
+    debug: unsafe fn(Ref<'_, DynBody>, &mut fmt::Formatter<'_>) -> fmt::Result,
     /// See [DynBody::display].
-    display: unsafe fn(Ref<'_, DynBody>, &mut core::fmt::Formatter<'_>) -> core::fmt::Result,
+    display: unsafe fn(Ref<'_, DynBody>, &mut fmt::Formatter<'_>) -> fmt::Result,
     /// See [DynBody::try_set_state].
     try_set_state: unsafe fn(Mut<DynBody>, &mut dyn Any) -> bool,
     /// See [DynBody::has_state].
@@ -1117,12 +1134,12 @@ where
         this: ErasedDynBody,
     ) -> Box<dyn error::Error + Send + Sync + 'static> {
         unsafe {
-            let this = ErasedDynBody::into_inner::<S, E, C>(this);
+            let this: Align4Own<DynBody<S, E, C>> = ErasedDynBody::into_inner::<S, E, C>(this);
             let has_state = matches!(
                 this.borrow().deref().state_access(),
                 StateAccess::Set | StateAccess::Freezed
             );
-            let has_context = !C::is_contextless();
+            let has_context = this.borrow().deref().context.get().is_some();
 
             match (has_state, has_context) {
                 (false, false) => {
@@ -1142,7 +1159,7 @@ where
     /// # Safety
     ///
     /// - `this` must be a valid `Mut` pointing to `DynBody<S, E, C>`.
-    unsafe fn debug(this: Ref<'_, DynBody>, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    unsafe fn debug(this: Ref<'_, DynBody>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let this = unsafe { this.cast::<Self>().deref() };
         <Self as Debug>::fmt(this, f)
     }
@@ -1152,10 +1169,7 @@ where
     /// # Safety
     ///
     /// - `this` must be a valid `Mut` pointing to `DynBody<S, E, C>`.
-    unsafe fn display(
-        this: Ref<'_, DynBody>,
-        f: &mut core::fmt::Formatter<'_>,
-    ) -> core::fmt::Result {
+    unsafe fn display(this: Ref<'_, DynBody>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let this = unsafe { this.cast::<Self>().deref() };
         <Self as Display>::fmt(this, f)
     }
@@ -1338,14 +1352,14 @@ impl<S, E, C> Drop for DynBody<S, E, C> {
     }
 }
 
-impl<S, E, C> core::fmt::Debug for DynBody<S, E, C>
+impl<S, E, C> fmt::Debug for DynBody<S, E, C>
 where
     S: Debug + Send + Sync + 'static,
     E: Source + Send + Sync + 'static,
     C: Debug + Display + Send + Sync + 'static,
 {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        fmt::format_debug(
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        render::format_debug(
             f,
             self.get_state_for_format(),
             self.context.get(),
@@ -1355,14 +1369,14 @@ where
     }
 }
 
-impl<S, E, C> core::fmt::Display for DynBody<S, E, C>
+impl<S, E, C> fmt::Display for DynBody<S, E, C>
 where
     S: Debug + Send + Sync + 'static,
     E: Source + Send + Sync + 'static,
     C: Debug + Display + Send + Sync + 'static,
 {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        fmt::format_display(
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        render::format_display(
             f,
             self.get_state_for_format(),
             self.context.get(),
@@ -1454,7 +1468,7 @@ impl RawVacant {
 }
 
 impl Debug for RawVacant {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let body_ref = self.0.borrow();
         let vt = DynBody::vtable(body_ref);
         let show_less = f.sign_minus();
@@ -1466,7 +1480,7 @@ impl Debug for RawVacant {
                 (vt.source)(body_ref).map(|v| v as &(dyn error::Error + 'static))
             });
 
-            fmt::format_debug_struct::<Infallible>(
+            render::format_debug_struct::<Infallible>(
                 f,
                 "Vacant",
                 None,
@@ -1545,7 +1559,7 @@ mod tests {
         const LITERAL: &'static str = "test context";
     }
 
-    type TestContext = Mkctx<fn() -> Option<String>, TestContextLiteral>;
+    type TestContext = Mkctx<TestContextLiteral>;
 
     // --- RawError kind() discrimination ---
 
@@ -1624,7 +1638,7 @@ mod tests {
     #[test]
     fn boxed_variant_downcast_source_wrong_type() {
         let err = RawError::new(None::<Infallible>, Some(TestError::FOO), Contextless::new());
-        let downcasted = err.downcast_source_ref::<core::fmt::Error>();
+        let downcasted = err.downcast_source_ref::<fmt::Error>();
         assert!(downcasted.is_none());
     }
 
@@ -1674,13 +1688,13 @@ mod tests {
         let (state, context, source) = err.into_parts::<&str, TestError>();
         assert_matches!(state, Some("state"));
         assert_matches!(source, Some(TestError::FOO));
-        assert_eq!(context, TestContext::FALLBACK);
+        assert_eq!(context, Some(TestContextLiteral::LITERAL));
     }
 
     #[test]
     fn boxed_variant_into_parts_context_downcasts() {
         let err = RawError::new(None::<Infallible>, Some(TestError::FOO), Contextless::new());
-        let (_, context, _) = err.into_parts::<Empty, String>();
+        let (_, context, _) = err.into_parts::<NoContext, String>();
         assert!(context.is_none());
     }
 
@@ -1689,14 +1703,14 @@ mod tests {
         let err = RawError::try_new_const::<TestContext>().unwrap();
         let (state, context, source) = err.into_parts::<&str, TestError>();
         assert!(source.is_none());
-        assert_eq!(context, TestContext::FALLBACK);
+        assert_eq!(context, Some(TestContextLiteral::LITERAL));
         assert_eq!(state, None);
     }
 
     #[test]
     fn inline_variant_into_parts() {
         let err = RawError::try_new_inline(42u16).unwrap();
-        let (state, context, source) = err.into_parts::<Empty, TestError>();
+        let (state, context, source) = err.into_parts::<NoContext, TestError>();
         assert!(source.is_none());
         assert!(context.is_none());
         assert_matches!(state, Some(42));
@@ -1721,7 +1735,7 @@ mod tests {
         }
 
         impl Display for DropWatch {
-            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 write!(f, "")
             }
         }

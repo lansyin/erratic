@@ -171,8 +171,8 @@ extern crate alloc;
 #[cfg(feature = "backtrace")]
 extern crate std;
 
-mod fmt;
 mod raw;
+mod render;
 mod rtti;
 
 #[doc(hidden)]
@@ -188,7 +188,7 @@ use alloc::boxed::Box;
 use core::{
     convert::Infallible,
     error,
-    fmt::{Debug, Display},
+    fmt::{self, Debug, Display},
     ops::{Deref, DerefMut},
 };
 
@@ -539,7 +539,7 @@ impl<S> Debug for Error<S>
 where
     S: State,
 {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Debug::fmt(&self.0, f)
     }
 }
@@ -548,19 +548,19 @@ impl<S> Display for Error<S>
 where
     S: State,
 {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Display::fmt(&self.0, f)
     }
 }
 
 impl Debug for Error<Stateless> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Debug::fmt(&self.0, f)
     }
 }
 
 impl Display for Error<Stateless> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Display::fmt(&self.0, f)
     }
 }

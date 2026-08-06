@@ -2,16 +2,16 @@ use alloc::boxed::Box;
 use core::{
     convert::Infallible,
     error::Error,
-    fmt::{Debug, Display},
+    fmt::{self, Debug, Display},
     mem::ManuallyDrop,
 };
 
 use crate::{
-    fmt,
     raw::{
         ConstBody, DynBody, ErasedDynBody, RawError, SelectOwn,
         ptr::{Align4Ref, ErasedAlign4PtrCompat},
     },
+    render,
 };
 
 pub(crate) struct ErasedRawError(ErasedRawErrorInner);
@@ -98,9 +98,9 @@ impl ErasedRawError {
 }
 
 impl Debug for ErasedRawErrorInner {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ErasedRawErrorInner::Const(body) => fmt::format_debug::<()>(
+            ErasedRawErrorInner::Const(body) => render::format_debug::<()>(
                 f,
                 None,
                 Some(&body.borrow().deref().context),
@@ -112,7 +112,7 @@ impl Debug for ErasedRawErrorInner {
                 let vt = DynBody::vtable(body);
                 unsafe { (vt.debug)(body, f) }
             }
-            ErasedRawErrorInner::Inline(body) => fmt::format_debug(
+            ErasedRawErrorInner::Inline(body) => render::format_debug(
                 f,
                 Some(body),
                 None::<Infallible>,
@@ -124,9 +124,9 @@ impl Debug for ErasedRawErrorInner {
 }
 
 impl Display for ErasedRawErrorInner {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ErasedRawErrorInner::Const(body) => fmt::format_display::<()>(
+            ErasedRawErrorInner::Const(body) => render::format_display::<()>(
                 f,
                 None,
                 Some(&body.borrow().deref().context),
@@ -138,7 +138,7 @@ impl Display for ErasedRawErrorInner {
                 let vt = DynBody::vtable(body);
                 unsafe { (vt.display)(body, f) }
             }
-            ErasedRawErrorInner::Inline(body) => fmt::format_display(
+            ErasedRawErrorInner::Inline(body) => render::format_display(
                 f,
                 Some(body),
                 None::<&Infallible>,

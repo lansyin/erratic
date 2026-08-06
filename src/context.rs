@@ -1,45 +1,42 @@
 //! Context helpers and traits.
-use core::fmt::{self, Debug, Display};
+use core::{
+    any::Any,
+    convert::{self, Infallible},
+    fmt::{Debug, Display},
+    marker::PhantomData,
+    result,
+};
 
 use alloc::string::String;
 
-use crate::rtti;
-
-mod sealed {
-    pub trait Sealed {}
+pub enum Value<Repr, Src = Repr> {
+    None,
+    Literal(&'static str),
+    Lazy(fn(Src) -> Repr),
 }
 
 /// A trait for types that can be used as an error context.
 ///
 /// Most types implement `Context::Repr = Self` via blanket impl.
-pub trait Context: sealed::Sealed + Sized {
-    const FALLBACK: Option<&'static str> = None;
-
+pub trait Context: Sized {
+    type Alt: Context;
     type Repr: Debug + Display + Send + Sync + 'static;
 
-    fn try_into_repr(self) -> Option<Self::Repr>;
+    const VALUE: Value<Self::Repr, Self>;
 
-    fn is_contextless() -> bool
-    where
-        Self: Sized,
-    {
-        rtti::is_same_ty::<Self::Repr, Empty>()
+    fn try_into_alt(self) -> result::Result<Self::Alt, Self> {
+        Err(self)
     }
 }
-
-impl<C> sealed::Sealed for C where C: Debug + Display + Send + Sync + 'static {}
 
 impl<C> Context for C
 where
     C: Debug + Display + Send + Sync + 'static,
 {
-    const FALLBACK: Option<&'static str> = None;
+    type Alt = Infallible;
+    type Repr = Self;
 
-    type Repr = C;
-
-    fn try_into_repr(self) -> Option<Self::Repr> {
-        Some(self)
-    }
+    const VALUE: Value<Self::Repr> = Value::Lazy(convert::identity);
 }
 
 /// A zero-sized context placeholder for [Builder][crate::Builder].
@@ -54,32 +51,11 @@ impl Contextless {
     }
 }
 
-impl sealed::Sealed for Contextless {}
-
 impl Context for Contextless {
-    type Repr = Empty;
+    type Alt = Infallible;
+    type Repr = Infallible;
 
-    fn try_into_repr(self) -> Option<Self::Repr> {
-        None
-    }
-}
-
-/// A zero-sized type used as the context storage for [`Contextless`].
-#[derive(Debug)]
-pub struct Empty {
-    _priv: (),
-}
-
-impl Empty {
-    pub(crate) const fn new() -> Self {
-        Self { _priv: () }
-    }
-}
-
-impl Display for Empty {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Ok(())
-    }
+    const VALUE: Value<Self::Repr, Self> = Value::None;
 }
 
 /// A trait for types representing string literals.
@@ -88,42 +64,67 @@ pub trait Literal {
 }
 
 /// A lazily evaluated context produced by [`mkctx!`](crate::mkctx).
-pub struct Mkctx<F, L>
-where
-    F: FnOnce() -> Option<String>,
-{
+pub struct Mkctx<L, F = ()> {
     format: F,
-    _literal: L,
+    _literal: PhantomData<L>,
 }
 
-impl<F, L> Mkctx<F, L>
-where
-    F: FnOnce() -> Option<String>,
-{
+impl<L, F> Mkctx<L, F> {
     #[doc(hidden)]
-    pub const fn __priv_new(format: F, _literal: L) -> Self {
-        Self { format, _literal }
+    pub const fn __priv_new(format: F) -> Self {
+        Self {
+            format,
+            _literal: PhantomData,
+        }
     }
 }
 
-impl<F, L> sealed::Sealed for Mkctx<F, L>
-where
-    F: FnOnce() -> Option<String>,
-    L: Literal,
-{
+impl<L> Mkctx<L> {
+    #[doc(hidden)]
+    pub const fn __priv_new_const() -> Self {
+        Self {
+            format: (),
+            _literal: PhantomData,
+        }
+    }
 }
 
-impl<F, L> Context for Mkctx<F, L>
+impl<L> Context for Mkctx<L>
 where
-    F: FnOnce() -> Option<String>,
     L: Literal,
 {
-    const FALLBACK: Option<&'static str> = Some(L::LITERAL);
-
+    type Alt = Infallible;
     type Repr = String;
 
-    fn try_into_repr(self) -> Option<Self::Repr> {
-        (self.format)()
+    const VALUE: Value<Self::Repr, Self> = Value::Literal(L::LITERAL);
+}
+
+impl<L, F> Context for Mkctx<L, F>
+where
+    F: Fn(&mut dyn Any),
+    L: Literal,
+{
+    type Alt = Mkctx<L>;
+    type Repr = String;
+
+    const VALUE: Value<Self::Repr, Self> = Value::Lazy(|this| {
+        let mut s = String::new();
+        (this.format)(&mut s);
+        s
+    });
+
+    fn try_into_alt(self) -> result::Result<Self::Alt, Self> {
+        let mut is_literal = false;
+        (self.format)(&mut is_literal);
+
+        if is_literal {
+            Ok(Self::Alt {
+                format: (),
+                _literal: PhantomData,
+            })
+        } else {
+            Err(self)
+        }
     }
 }
 

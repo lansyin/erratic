@@ -15,8 +15,8 @@ use core::{
 };
 
 use crate::{
-    fmt::Origin,
     raw::source::{Source, WithBacktraceSource},
+    render::Origin,
 };
 
 // TODO: Remove this workaround once Error::provide gets stabilized.

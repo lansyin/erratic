@@ -1,5 +1,9 @@
 //! State helpers and traits.
-use core::{convert::Infallible, fmt::Debug, marker::PhantomData};
+use core::{
+    convert::Infallible,
+    fmt::{self, Debug},
+    marker::PhantomData,
+};
 
 use crate::{
     Error,
@@ -67,7 +71,7 @@ pub struct Stateless(#[allow(unused)] [()]);
 impl sealed::Sealed for Stateless {}
 
 impl Debug for Stateless {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Stateless").finish()
     }
 }
@@ -170,7 +174,7 @@ impl<S> Debug for Vacant<S>
 where
     S: State,
 {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Some(vacant) = &self.inner else {
             return write!(f, "Vacant");
         };

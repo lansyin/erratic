@@ -3,7 +3,7 @@ use core::{convert::Infallible, error, fmt::Debug};
 
 use crate::{
     BuilderExt, Error, ErrorExt,
-    context::{Context, ContextFn, Contextless, Identity},
+    context::{Context, ContextFn, Contextless, Identity, Value},
     match_else,
     raw::RawError,
     state::{State, Stateless},
@@ -78,9 +78,13 @@ where
     S: State + ?Sized,
 {
     fn from(value: Builder<E, S, F>) -> Self {
-        match (value.state, value.err, F::Output::is_contextless()) {
-            (None, None, true) => unreachable!(),
-            (None, Some(err), true) => err.into(),
+        match (
+            value.state,
+            value.err,
+            !matches!(F::Output::VALUE, Value::None),
+        ) {
+            (None, None, false) => unreachable!(),
+            (None, Some(err), false) => err.into(),
             (state, err, _) => {
                 Error::<S>(RawError::from_error(state, err, value.context_fn.call()))
             }
@@ -100,9 +104,9 @@ where
     S: State,
 {
     fn from(value: Builder<E, Stateless, F>) -> Self {
-        match (value.err, F::Output::is_contextless()) {
-            (None, true) => unreachable!(),
-            (Some(err), true) => err.into(),
+        match (value.err, !matches!(F::Output::VALUE, Value::None)) {
+            (None, false) => unreachable!(),
+            (Some(err), false) => err.into(),
             (err, _) => Error(RawError::from_error(None, err, value.context_fn.call())),
         }
     }
@@ -115,10 +119,10 @@ where
     S: State,
 {
     fn from(value: Builder<Error<S>, Stateless, F>) -> Self {
-        match (value.err, F::Output::is_contextless()) {
-            (None, true) => unreachable!(),
-            (Some(err), true) => err,
-            (None, false) => Error(RawError::from_error(
+        match (value.err, !matches!(F::Output::VALUE, Value::None)) {
+            (None, false) => unreachable!(),
+            (Some(err), false) => err,
+            (None, true) => Error(RawError::from_error(
                 None,
                 None::<Infallible>,
                 value.context_fn.call(),

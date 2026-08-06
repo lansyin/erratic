@@ -5,13 +5,14 @@ pub mod __priv {
         string::{String, ToString},
     };
     pub use core::{
+        any::Any,
         compile_error,
         convert::{Infallible, Into, identity},
         fmt::Debug,
         format_args,
         option::Option::{self, None, Some},
         result::Result::{self, Err, Ok},
-        stringify,
+        stringify, unreachable,
     };
 }
 
@@ -84,15 +85,17 @@ macro_rules! mkctx {
             const LITERAL: &'static str = $fmt;
         }
 
-        $crate::context::Mkctx::__priv_new(|| -> $crate::macros::__priv::Option<$crate::macros::__priv::String> {
+        $crate::context::Mkctx::<Literal, _>::__priv_new(|out: &mut dyn $crate::macros::__priv::Any| {
             let args = $crate::macros::__priv::format_args!($fmt $($args)*);
 
-            if args.as_str().is_some() {
-                return $crate::macros::__priv::None;
+            if let Some(is_literal) = out.downcast_mut::<bool>() {
+                *is_literal = args.as_str().is_some();
+            } else if let Some(text) = out.downcast_mut::<String>() {
+                *text = $crate::macros::__priv::ToString::to_string(&args);
+            } else {
+                $crate::macros::__priv::unreachable!();
             }
-
-            $crate::macros::__priv::Some($crate::macros::__priv::ToString::to_string(&args))
-        }, Literal)
+        })
     }};
 }
 
@@ -348,14 +351,11 @@ macro_rules! __priv_mksure {
             },
             _ => {
                 struct Literal;
-
                 impl $crate::context::Literal for Literal {
                     const LITERAL: &'static str = $crate::macros::__priv::stringify!(assertion failed: $lhs $op $rhs);
                 }
+                let dc = $crate::context::Mkctx::<Literal>::__priv_new_const();
 
-                let dc = $crate::context::Mkctx::__priv_new(|| {
-                    $crate::macros::__priv::None
-                }, Literal);
                 $crate::Result::<(), _>::Err(
                     $crate::__priv_mkerr!(@sort [($crate::state::Stateless)] [dc] [,,] $($key=$value,)* $(context=$crate::mkctx!($fmt $($args)*),)?)
                 )
@@ -368,14 +368,10 @@ macro_rules! __priv_mksure {
         }
 
         struct Literal;
-
         impl $crate::context::Literal for Literal {
             const LITERAL: &'static str = $crate::macros::__priv::stringify!(assertion failed: $exp);
         }
-
-        let dc = $crate::context::Mkctx::__priv_new(|| {
-            $crate::macros::__priv::None
-        }, Literal);
+        let dc = $crate::context::Mkctx::<Literal>::__priv_new_const();
 
         $crate::Result::<(), _>::Err(
             $crate::__priv_mkerr!(@sort [($crate::state::Stateless)] [dc] [,,] $($key=$value,)* $(context=$crate::mkctx!($fmt $($args)*),)?)
@@ -526,8 +522,8 @@ mod tests {
 
         struct CallTracker;
 
-        impl core::fmt::Display for CallTracker {
-            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        impl fmt::Display for CallTracker {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 CALLED.store(true, Ordering::SeqCst);
                 write!(f, "tracked")
             }
@@ -554,22 +550,20 @@ mod tests {
     fn mkctx_plain_literal_does_not_allocate() {
         let ctx = mkctx!("hello");
         assert!(
-            ctx.try_into_repr().is_none(),
+            ctx.try_into_alt().is_ok(),
             "mkctx with a plain literal should not allocate"
         );
 
         let name = "world";
         let ctx = mkctx!("hello {}", name);
-        assert_eq!(
-            ctx.try_into_repr(),
-            Some("hello world".into()),
+        assert!(
+            ctx.try_into_alt().is_err(),
             "mkctx with format args should allocate"
         );
 
         let ctx = mkctx!("hello {name}");
-        assert_eq!(
-            ctx.try_into_repr(),
-            Some("hello world".into()),
+        assert!(
+            ctx.try_into_alt().is_err(),
             "mkctx with format args should allocate"
         );
     }
