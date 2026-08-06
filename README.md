@@ -5,7 +5,7 @@
 [![crates.io](https://img.shields.io/crates/v/erratic)](https://crates.io/crates/erratic)
 [![docs.rs](https://img.shields.io/docsrs/erratic)](https://docs.rs/erratic/latest/erratic/)
 
-This library provides `Error<S = Stateless>`, an error container with typed state,
+This library provides `Error<S = Stateless>`, an error type with typed state,
 enabling applications to handle errors uniformly across different scenarios.
 
 ## Quick Start
@@ -15,7 +15,7 @@ Compared to the latter, it occupies only 1 usize and eliminates allocations
 altogether when constructed from a literal string or a small state.
 
 ```rust
-fn say_hello(filename: &str) -> erratic::Result<()> {
+fn say_hi(filename: &str) -> erratic::Result<()> {
     File::open(filename)?.write_all(b"Hello, World!")?;
     Ok(())
 }
@@ -24,7 +24,7 @@ fn say_hello(filename: &str) -> erratic::Result<()> {
 ## Attaching Context
 
 When constructing an error, you can optionally attach a context to it. All helper macros support
-constructing context from a format string.
+constructing context from a displable value or format string.
 
 ```rust
 use erratic::*;

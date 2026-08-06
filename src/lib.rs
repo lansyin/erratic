@@ -1,4 +1,4 @@
-//! This library provides `Error<S = Stateless>`, an error container with typed state,
+//! This library provides `Error<S = Stateless>`, an error type with typed state,
 //! enabling applications to handle errors uniformly across different scenarios.
 //!
 //! # Quick Start
@@ -9,7 +9,7 @@
 //!
 //! ```
 //! # use std::{fs::File, io::Write};
-//! fn say_hello(filename: &str) -> erratic::Result<()> {
+//! fn say_hi(filename: &str) -> erratic::Result<()> {
 //!     File::open(filename)?.write_all(b"Hello, World!")?;
 //!     Ok(())
 //! }
@@ -18,7 +18,7 @@
 //! # Attaching Context
 //!
 //! When constructing an error, you can optionally attach a context to it. All helper macros support
-//! constructing context from a format string.
+//! constructing context from a displable value or format string.
 //!
 //! ```
 //! # use std::env;
