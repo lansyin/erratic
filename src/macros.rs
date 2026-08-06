@@ -111,10 +111,12 @@ macro_rules! mkctx {
 /// # fn foo() {
 /// # let filename = "";
 /// # let err = std::fmt::Error;
+/// # let url = "";
 /// let _: Error = mkerr!("404 not found");
 /// let _: Error = mkerr!("{filename} not found");
 /// let _: Error = mkerr!("{} not found", filename);
 /// let _: Error<State> = mkerr!(state = State::NotFound);
+/// let _: Error<State> = mkerr!(state = State::NotFound, context = url);
 /// let _: Error<State> = mkerr!(
 ///     state = State::NotFound,
 ///     error = err,
