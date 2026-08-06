@@ -1,4 +1,3 @@
-//! Trait for defining custom formatters.
 use core::{
     error,
     fmt::{self, Debug, Display},
