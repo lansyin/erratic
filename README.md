@@ -5,7 +5,7 @@
 [![crates.io](https://img.shields.io/crates/v/erratic)](https://crates.io/crates/erratic)
 [![docs.rs](https://img.shields.io/docsrs/erratic)](https://docs.rs/erratic/latest/erratic/)
 
-This library provides `Error<S = Stateless>`, an error type with **optional** dynamic dispatch,
+This library provides `Error<S = Stateless>`, an error container with typed state,
 enabling applications to handle errors uniformly across different scenarios.
 
 ## Quick Start
@@ -29,15 +29,16 @@ constructing context from a format string.
 ```rust
 use erratic::*;
 
-fn read_exact(r: &MuxReader, id: usize, buf: &mut [u8]) -> Result<()> {
-    mksure!(buf.len() > 0)?; // Displays operands on failure.
-    mksure!(id > 0, "{id} is reserved")?; // Explicit error message.
+fn connect_timeout() -> Result<u64> {
+    let raw = env::var("APP_TIMEOUT")
+        .with_context("APP_TIMEOUT is not set")?; // Accepts any displayable value.
+    mksure!(raw.len() > 0)?; // Displays operand values on failure.
 
-    let mut r = r.substream(id)
-        .with_context("no such substream")?; // Accepts any displayable value.
-    r.read_exact(buf)
-        .with_context(mkctx!("failed to read from {id}"))?; // Evaluates lazily.
-    Ok(())
+    let secs: u64 = raw.trim().parse::<u64>()
+        .with_context(mkctx!("invalid APP_TIMEOUT: {raw:?}"))?; // Evaluates lazily.
+    mksure!(secs > 0, "timeout must be positive: {secs}")?; // Explicit error message.
+
+    Ok(secs)
 }
 ```
 
@@ -134,9 +135,9 @@ formatting, unless the minus sign, e.g. `{:-?}`, is specified to suppress it.
 
 Type-wise, `Error<S>` is an internally tagged union, and it requires pointers to be aligned to 4 bytes,
 freeing up the lower 2 bits to encode its discriminant. Pointer tagging in this crate fully follows
-[strict provenance][strict_provenance], and is verified by Miri.
+[strict provenance][strict-provenance], and is verified by Miri.
 
-[strict_provenance]: https://doc.rust-lang.org/std/ptr/index.html#strict-provenance
+[strict-provenance]: https://doc.rust-lang.org/1.89.0/std/ptr/index.html#strict-provenance
 
 The error has three possible layouts. When constructed from a literal, it stores a pointer to the literal.
 When constructed from a small state, it stores the state inline. Otherwise, it points to a heap-allocated object
