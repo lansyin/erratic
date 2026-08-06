@@ -11,14 +11,10 @@ use crate::{
     raw::{RawError, RawVacant},
 };
 
-mod sealed {
-    pub trait Sealed {}
-}
-
 /// Associates an error state type with its stored representation.
 ///
 /// Most types implement `State::Repr = Self` via blanket impl.
-pub trait State: sealed::Sealed + Debug + Send + Sync + 'static {
+pub trait State: Debug + Send + Sync + 'static {
     /// The type used to store the state inside [`Error`].
     type Repr: Debug + Send + Sync + 'static;
 
@@ -37,8 +33,6 @@ pub trait State: sealed::Sealed + Debug + Send + Sync + 'static {
     where
         Self: Sized;
 }
-
-impl<T> sealed::Sealed for T where T: Debug + Send + Sync + 'static {}
 
 impl<T> State for T
 where
@@ -67,8 +61,6 @@ where
 
 /// Marker type indicating no meaningful state.
 pub struct Stateless(#[allow(unused)] [()]);
-
-impl sealed::Sealed for Stateless {}
 
 impl Debug for Stateless {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -180,4 +172,8 @@ where
         };
         Debug::fmt(vacant, f)
     }
+}
+
+pub trait StateFn {
+    type Ouptut: State;
 }
