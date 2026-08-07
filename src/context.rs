@@ -113,14 +113,16 @@ where
 
     const VALUE: Value<Self::Repr, Self> = Value::Lazy(|this| {
         match this.context {
-            MaybeEvaluated::Lazy(format) => match format() {
-                Some(context) => return context,
-                None => {}
-            },
-            MaybeEvaluated::Evaluated(evaluated) => match evaluated {
-                Some(context) => return context,
-                None => {}
-            },
+            MaybeEvaluated::Lazy(format) => {
+                if let Some(context) = format() {
+                    return context;
+                }
+            }
+            MaybeEvaluated::Evaluated(evaluated) => {
+                if let Some(context) = evaluated {
+                    return context;
+                }
+            }
         }
         match Self::Alt::VALUE {
             Value::Literal(context) => context.to_owned(),
