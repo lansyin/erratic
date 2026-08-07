@@ -328,7 +328,9 @@ where
         None
     }
 
-    /// Iterates over the error chain. If this error has its own context or state, it appears first;
+    /// Iterates over the error chain.
+    ///
+    /// If this error has its own context or state, it appears first;
     /// otherwise the chain starts from the source.
     pub fn chain(&self) -> impl Iterator<Item = &(dyn error::Error + 'static)> {
         self.0.chain()
