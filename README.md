@@ -5,7 +5,7 @@
 [![crates.io](https://img.shields.io/crates/v/erratic)](https://crates.io/crates/erratic)
 [![docs.rs](https://img.shields.io/docsrs/erratic)](https://docs.rs/erratic/latest/erratic/)
 
-This library provides `Error<S = Stateless>`, an error type with typed state,
+This crate provides `Error<S = Stateless>`, an error type with typed state,
 enabling applications to handle errors uniformly across different scenarios.
 
 ## Quick Start

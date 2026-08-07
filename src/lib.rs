@@ -1,4 +1,4 @@
-//! This library provides `Error<S = Stateless>`, an error type with typed state,
+//! This crate provides `Error<S = Stateless>`, an error type with typed state,
 //! enabling applications to handle errors uniformly across different scenarios.
 //!
 //! # Quick Start
