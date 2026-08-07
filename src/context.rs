@@ -94,7 +94,7 @@ where
     L: Literal,
 {
     type Alt = Infallible;
-    type Repr = String;
+    type Repr = Infallible;
 
     const VALUE: Value<Self::Repr, Self> = Value::Literal(L::LITERAL);
 }
