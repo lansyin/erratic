@@ -85,15 +85,13 @@ macro_rules! mkctx {
             const LITERAL: &'static str = $fmt;
         }
 
-        $crate::context::Mkctx::<Literal, _>::__priv_new(|out: &mut dyn $crate::macros::__priv::Any| {
+        $crate::context::Mkctx::<Literal, _>::__priv_new(|| {
             let args = $crate::macros::__priv::format_args!($fmt $($args)*);
 
-            if let Some(is_literal) = out.downcast_mut::<bool>() {
-                *is_literal = args.as_str().is_some();
-            } else if let Some(text) = out.downcast_mut::<String>() {
-                *text = $crate::macros::__priv::ToString::to_string(&args);
+            if args.as_str().is_some() {
+                $crate::macros::__priv::None
             } else {
-                $crate::macros::__priv::unreachable!();
+                $crate::macros::__priv::Some($crate::macros::__priv::ToString::to_string(&args))
             }
         })
     }};

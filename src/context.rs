@@ -1,13 +1,12 @@
 //! Context helpers and traits.
 use core::{
-    any::Any,
     convert::{self, Infallible},
     fmt::{Debug, Display},
     marker::PhantomData,
     result,
 };
 
-use alloc::string::String;
+use alloc::{borrow::ToOwned, string::String};
 
 pub enum Value<Repr, Src = Repr> {
     None,
@@ -65,15 +64,20 @@ pub trait Literal {
 
 /// A lazily evaluated context produced by [`mkctx!`](crate::mkctx).
 pub struct Mkctx<L, F = ()> {
-    format: F,
+    context: MaybeEvaluated<F>,
     _literal: PhantomData<L>,
+}
+
+enum MaybeEvaluated<F> {
+    Lazy(F),
+    Evaluated(Option<String>),
 }
 
 impl<L, F> Mkctx<L, F> {
     #[doc(hidden)]
     pub const fn __priv_new(format: F) -> Self {
         Self {
-            format,
+            context: MaybeEvaluated::Lazy(format),
             _literal: PhantomData,
         }
     }
@@ -83,7 +87,7 @@ impl<L> Mkctx<L> {
     #[doc(hidden)]
     pub const fn __priv_new_const() -> Self {
         Self {
-            format: (),
+            context: MaybeEvaluated::Evaluated(None),
             _literal: PhantomData,
         }
     }
@@ -101,25 +105,38 @@ where
 
 impl<L, F> Context for Mkctx<L, F>
 where
-    F: Fn(&mut dyn Any),
+    F: FnOnce() -> Option<String>,
     L: Literal,
 {
     type Alt = Mkctx<L>;
     type Repr = String;
 
     const VALUE: Value<Self::Repr, Self> = Value::Lazy(|this| {
-        let mut s = String::new();
-        (this.format)(&mut s);
-        s
+        match this.context {
+            MaybeEvaluated::Lazy(format) => match format() {
+                Some(context) => return context,
+                None => {}
+            },
+            MaybeEvaluated::Evaluated(evaluated) => match evaluated {
+                Some(context) => return context,
+                None => {}
+            },
+        }
+        match Self::Alt::VALUE {
+            Value::Literal(context) => context.to_owned(),
+            Value::Lazy(_) | Value::None => unreachable!(),
+        }
     });
 
-    fn try_into_alt(self) -> result::Result<Self::Alt, Self> {
-        let mut is_literal = false;
-        (self.format)(&mut is_literal);
+    fn try_into_alt(mut self) -> result::Result<Self::Alt, Self> {
+        self.context = match self.context {
+            context @ MaybeEvaluated::Evaluated(_) => context,
+            MaybeEvaluated::Lazy(format) => MaybeEvaluated::Evaluated(format()),
+        };
 
-        if is_literal {
+        if matches!(self.context, MaybeEvaluated::Evaluated(None)) {
             Ok(Self::Alt {
-                format: (),
+                context: MaybeEvaluated::Evaluated(None),
                 _literal: PhantomData,
             })
         } else {
