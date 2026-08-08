@@ -24,19 +24,19 @@ fn say_hi(filename: &str) -> erratic::Result<()> {
 ## Attaching Context
 
 When constructing an error, you can optionally attach a context to it. All helper macros support
-constructing context from a displable value or format string.
+constructing context from a format string.
 
 ```rust
 use erratic::*;
 
 fn connect_timeout() -> Result<u64> {
     let raw = env::var("APP_TIMEOUT")
-        .with_context("APP_TIMEOUT is not set")?; // Accepts any displayable value.
-    mksure!(raw.len() > 0)?; // Displays operand values on failure.
+        .with_context("APP_TIMEOUT is not set")?;
+    mksure!(raw.len() > 0)?; // Prints the operand values on failure.
 
     let secs: u64 = raw.trim().parse::<u64>()
         .with_context(mkctx!("invalid APP_TIMEOUT: {raw:?}"))?; // Evaluates lazily.
-    mksure!(secs > 0, "timeout must be positive: {secs}")?; // Explicit error message.
+    mksure!(secs > 0, "timeout must be positive: {secs}")?;
 
     Ok(secs)
 }
@@ -99,7 +99,7 @@ States are meant to be handled explicitly. Several utility methods are provided:
 
 ## Formatting
 
-If the error has a state and/or a context, it builds its message from them. Otherwise, it acts as an error container,
+If the error has a state and/or a context, it builds error message from them. Otherwise, it acts as an error container,
 inheriting the message from its source. When wrapped, the container itself will not be added as another source layer,
 preventing duplicate messages in the chain.
 
@@ -144,15 +144,15 @@ When constructed from a small state, it stores the state inline. Otherwise, it p
 containing a vtable and potentially a state, source, and/or context.
 
 ```plaintext
-┌Error<S>─────────────╎───┐   ┌ConstBody─────┐   ┌str──────┐
-│ Align4Ref<ConstBody>╎00 ├───┤ ConstContext ├───┤ Literal │
-└─────────────────────╎───┘   └──────────────┘   └─────────┘
-┌Error<S>─────────────╎───┐   ┌BoxedBody─────────────┬────────────────────┬────────┬─────────┐
+┌Error<State>─────────╎───┐   ┌ConstBody─────┐
+│ Align4Ref<ConstBody>╎00 ├───┤ &'static str │
+└─────────────────────╎───┘   └──────────────┘
+┌Error<State>─────────╎───┐   ┌BoxedBody─────────────┬────────────────────┬────────┬─────────┐
 │ Align4Own<BoxedBody>╎01 ├───┤ Align4Ref<VTable>╎ST │ MaybeUninit<State> │ Source │ Context │
-└─────────────────────╎───┘   └─────────┼──────────┼─┴───────────────┼────┴────────┴─────────┘
-┌Error<S>─────┬───────╎───┐   ┌VTable───┴──┬────╌  └──ST=00:Uninit───┘
-│    State    │ 000000╎10 │   │ Drop::drop │ ···
-└─────────────┴───────╎───┘   └────────────┴────╌
+└─────────────────────╎───┘   └─────────┼──────────┼─┴──────────────┼─────┴────────┴─────────┘
+┌Error<State>─┬───────╎───┐   ┌VTable───┴──┬─╌     │╭ ST=00:Uninit ╮│
+│    State    │ 000000╎10 │   │ Drop::drop │       ╰┤ ST=01:Active ├╯
+└─────────────┴───────╎───┘   └────────────┴─╌      ╰ ST=10:Erased ╯
 ```
 
 
