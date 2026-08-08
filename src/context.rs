@@ -11,6 +11,7 @@ use core::{
 
 use alloc::{borrow::ToOwned, string::String};
 
+/// A compile-time context recipe.
 pub enum Value<C: Context> {
     None,
     Literal(&'static str),
