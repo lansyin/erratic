@@ -15,7 +15,7 @@ use core::{
 };
 
 use crate::{
-    context::{self, Context, Printable, Value},
+    context::{Context, Printable, Value},
     match_else,
     raw::{
         ptr::{Align4, Align4Own, Align4PtrCompat, Align4Ref, Metadata, Mut, Ref},
@@ -136,8 +136,7 @@ impl RawError {
     where
         C: Context,
     {
-        // Note: Explicitly check the fallback context first as we CANNOT return in the const block.
-        #[allow(clippy::question_mark)]
+        // Note: Explicitly check the fallback context first as we CANNOT return early in the const block.
         if !matches!(C::VALUE, Value::Literal(_)) {
             return None;
         }
@@ -203,42 +202,58 @@ impl<S> RawError<S> {
     where
         S: Debug + Send + Sync + 'static,
         E: Source + Send + Sync + 'static,
-        C: context::Context,
+        C: Context,
     {
-        fn new_0<S, E, C>(state: Option<S>, source: E, context: C) -> RawError<S>
+        fn stage_0_select_context<S, E, C>(state: Option<S>, source: E, context: C) -> RawError<S>
         where
             S: Debug + Send + Sync + 'static,
             E: Source + Send + Sync + 'static,
-            C: context::Context,
+            C: Context,
+        {
+            match context.select() {
+                Ok(context) => stage_1_dedup_self(state, source, context),
+                Err(context) => stage_1_dedup_self(state, source, context),
+            }
+        }
+
+        fn stage_1_dedup_self<S, E, C>(state: Option<S>, source: E, context: C) -> RawError<S>
+        where
+            S: Debug + Send + Sync + 'static,
+            E: Source + Send + Sync + 'static,
+            C: Context<Alt = Infallible>,
         {
             let has_state = state.is_some();
             let has_context = !matches!(C::VALUE, Value::None);
 
             if has_state || has_context {
-                return new_1(state, source, context);
+                return stage_2_attach_backtrace_or_eliminate_alloc(state, source, context);
             }
 
             let Err(source) = match_else!(rtti::concretize::<_, ErasedSource>(source), Ok(ErasedSource(erased)) => {
                 let Err(erased) = match_else!(erased.try_into_stateless(), Ok(err) => {
-                    // Note: Backtrace capture (`new_1`) can be skipped here. When capture is active, any in-process
+                    // Note: Backtrace capture in stage 2 can be skipped here. When capture is active, any in-process
                     // `ErasedRawError` already carries a `WithBacktrace` in its chain, so returning
                     // the erased error directly preserves it.
                     return err.with_phantom_state();
                 });
-                return new_1(state, ErasedSource(erased), context)
+                return stage_2_attach_backtrace_or_eliminate_alloc(state, ErasedSource(erased), context)
             });
 
-            new_1(state, source, context)
+            stage_2_attach_backtrace_or_eliminate_alloc(state, source, context)
         }
 
-        fn new_1<S, E, C>(state: Option<S>, source: E, context: C) -> RawError<S>
+        fn stage_2_attach_backtrace_or_eliminate_alloc<S, E, C>(
+            state: Option<S>,
+            source: E,
+            context: C,
+        ) -> RawError<S>
         where
             S: Debug + Send + Sync + 'static,
             E: Source + Send + Sync + 'static,
-            C: context::Context,
+            C: Context<Alt = Infallible>,
         {
             match WithBacktrace::try_attach(source) {
-                Ok(source) => new_2(state, source, context),
+                Ok(source) => stage_3_evaluate_context(state, source, context),
                 Err(source) => {
                     let has_source = source.error_ref().is_some();
                     let has_context = !matches!(C::VALUE, Value::None);
@@ -248,49 +263,36 @@ impl<S> RawError<S> {
                             let Err(state) = match_else!(RawError::try_new_inline(state), Ok(this) => {
                                 return this;
                             });
-                            new_2(Some(state), source, context)
+                            stage_3_evaluate_context(Some(state), source, context)
                         }
-                        (None, true, false) => match context.try_into_alt() {
-                            Ok(context) => match RawError::try_new_const::<C::Alt>() {
-                                Some(raw) => raw.with_phantom_state(),
-                                None => new_2(None, source, context),
-                            },
-                            Err(context) => match RawError::try_new_const::<C>() {
-                                Some(raw) => raw.with_phantom_state(),
-                                None => new_2(None, source, context),
-                            },
+                        (None, true, false) => match RawError::try_new_const::<C>() {
+                            Some(raw) => raw.with_phantom_state(),
+                            None => stage_3_evaluate_context(None, source, context),
                         },
-                        (state, _, _) => new_2(state, source, context),
+                        (state, _, _) => stage_3_evaluate_context(state, source, context),
                     }
                 }
             }
         }
 
-        fn new_2<S, E, C>(state: Option<S>, source: E, context: C) -> RawError<S>
+        fn stage_3_evaluate_context<S, E, C>(state: Option<S>, source: E, context: C) -> RawError<S>
         where
             S: Debug + Send + Sync + 'static,
             E: Source + Send + Sync + 'static,
-            C: context::Context,
+            C: Context<Alt = Infallible>,
         {
-            match context.try_into_alt() {
-                Ok(context) => match C::Alt::VALUE {
-                    Value::None => RawError::new_boxed(state, source, NoContext),
-                    Value::Literal(context) => RawError::new_boxed(state, source, context),
-                    Value::Lazy(f) => RawError::new_boxed(state, source, f(context)),
-                },
-                Err(context) => match C::VALUE {
-                    Value::None => RawError::new_boxed(state, source, NoContext),
-                    Value::Literal(context) => RawError::new_boxed(state, source, context),
-                    Value::Lazy(f) => RawError::new_boxed(state, source, f(context)),
-                },
+            match C::VALUE {
+                Value::None => RawError::new_boxed(state, source, NoContext),
+                Value::Literal(context) => RawError::new_boxed(state, source, context),
+                Value::Lazy(f) => RawError::new_boxed(state, source, f(context)),
             }
         }
 
         let Some(source) = source else {
-            return new_0(state, NoSource, context);
+            return stage_0_select_context(state, NoSource, context);
         };
 
-        new_0(state, source, context)
+        stage_0_select_context(state, source, context)
     }
 
     #[cfg(test)]
@@ -328,7 +330,7 @@ impl<S> RawError<S> {
     where
         S: Debug + Send + Sync + 'static,
         E: error::Error + Send + Sync + 'static,
-        C: context::Context,
+        C: Context,
     {
         Self::new(state, source, context)
     }
@@ -337,7 +339,7 @@ impl<S> RawError<S> {
     pub fn from_erased<C>(state: Option<S>, source: Option<ErasedRawError>, context: C) -> Self
     where
         S: Debug + Send + Sync + 'static,
-        C: context::Context,
+        C: Context,
     {
         Self::new(state, source.map(ErasedSource), context)
     }
@@ -350,7 +352,7 @@ impl<S> RawError<S> {
     ) -> Self
     where
         S: Debug + Send + Sync + 'static,
-        C: context::Context,
+        C: Context,
     {
         Self::new(state, Some(BoxedSource(source)), context)
     }
@@ -1437,7 +1439,7 @@ impl RawVacant {
     pub fn derive<S, C>(self, state: Option<S>, context: C) -> RawError<S>
     where
         S: Debug + Send + Sync + 'static,
-        C: context::Context,
+        C: Context,
     {
         let vt = DynBody::vtable(self.0.borrow());
 

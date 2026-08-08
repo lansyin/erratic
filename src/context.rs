@@ -27,9 +27,33 @@ pub trait Context: Sized {
 
     const VALUE: Value<Self>;
 
-    fn try_into_alt(self) -> result::Result<Self::Alt, Self> {
-        Err(self)
+    fn select(self) -> result::Result<Self::Alt, Unique<Self>> {
+        Err(Unique(self))
     }
+}
+
+/// A context with its alternatives explicitly excluded.
+pub struct Unique<C: Context>(pub C);
+
+impl<C> Context for Unique<C>
+where
+    C: Context,
+{
+    type Alt = Infallible;
+
+    type Repr = C::Repr;
+
+    const VALUE: Value<Self> = match C::VALUE {
+        Value::None => Value::None,
+        Value::Literal(context) => Value::Literal(context),
+        Value::Lazy(_f) => Value::Lazy(|context: Self| -> Self::Repr {
+            // Note: Re-read the value as we cannot capture `_f` in const context.
+            let Value::Lazy(f) = C::VALUE else {
+                unreachable!()
+            };
+            f(context.0)
+        }),
+    };
 }
 
 impl<C> Context for C
@@ -134,7 +158,7 @@ where
         }
     });
 
-    fn try_into_alt(mut self) -> result::Result<Self::Alt, Self> {
+    fn select(mut self) -> result::Result<Self::Alt, Unique<Self>> {
         self.context = match self.context {
             context @ MaybeEvaluated::Evaluated(_) => context,
             MaybeEvaluated::Lazy(format) => MaybeEvaluated::Evaluated(format()),
@@ -146,7 +170,7 @@ where
                 _literal: PhantomData,
             })
         } else {
-            Err(self)
+            Err(Unique(self))
         }
     }
 }

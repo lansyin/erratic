@@ -206,7 +206,7 @@ pub mod __priv_mksure {
     }
 
     pub trait SelectAll {
-        fn select(&self) -> FromAll {
+        fn __erratic_select(&self) -> FromAll {
             FromAll
         }
     }
@@ -222,7 +222,7 @@ pub mod __priv_mksure {
     }
 
     pub trait SelectDebug {
-        fn select(&self) -> FromDebug {
+        fn __erratic_select(&self) -> FromDebug {
             FromDebug
         }
     }
@@ -331,8 +331,8 @@ macro_rules! __priv_mksure {
             break 'ret $crate::macros::__priv::Ok(());
         }
 
-        let lhs_value = (&lhs).select().from(&lhs);
-        let rhs_value = (&rhs).select().from(&rhs);
+        let lhs_value = (&lhs).__erratic_select().from(&lhs);
+        let rhs_value = (&rhs).__erratic_select().from(&rhs);
 
         match (lhs_value, rhs_value) {
             ($crate::macros::__priv::Some(lhs_value), $crate::macros::__priv::Some(rhs_value)) => {
@@ -546,20 +546,20 @@ mod tests {
     fn mkctx_plain_literal_does_not_allocate() {
         let ctx = mkctx!("hello");
         assert!(
-            ctx.try_into_alt().is_ok(),
+            ctx.select().is_ok(),
             "mkctx with a plain literal should not allocate"
         );
 
         let name = "world";
         let ctx = mkctx!("hello {}", name);
         assert!(
-            ctx.try_into_alt().is_err(),
+            ctx.select().is_err(),
             "mkctx with format args should allocate"
         );
 
         let ctx = mkctx!("hello {name}");
         assert!(
-            ctx.try_into_alt().is_err(),
+            ctx.select().is_err(),
             "mkctx with format args should allocate"
         );
     }
