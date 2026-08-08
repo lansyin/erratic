@@ -1,4 +1,7 @@
 //! Context helpers and traits.
+//!
+//! Disclaimer: Types in this module are not intended for direct use. They have no stability
+//! guarantees and may break without a major version bump.
 use core::{
     convert::{self, Infallible},
     fmt::{Debug, Display},
@@ -8,20 +11,20 @@ use core::{
 
 use alloc::{borrow::ToOwned, string::String};
 
-pub enum Value<Repr, Src = Repr> {
+pub enum Value<C: Context> {
     None,
     Literal(&'static str),
-    Lazy(fn(Src) -> Repr),
+    Lazy(fn(C) -> C::Repr),
 }
 
 /// A trait for types that can be used as an error context.
 ///
 /// Most types implement `Context::Repr = Self` via blanket impl.
 pub trait Context: Sized {
-    type Alt: Context;
+    type Alt: Context<Alt = Infallible>;
     type Repr: Debug + Display + Send + Sync + 'static;
 
-    const VALUE: Value<Self::Repr, Self>;
+    const VALUE: Value<Self>;
 
     fn try_into_alt(self) -> result::Result<Self::Alt, Self> {
         Err(self)
@@ -35,7 +38,7 @@ where
     type Alt = Infallible;
     type Repr = Self;
 
-    const VALUE: Value<Self::Repr> = Value::Lazy(convert::identity);
+    const VALUE: Value<Self> = Value::Lazy(convert::identity);
 }
 
 /// A zero-sized context placeholder for [Builder][crate::Builder].
@@ -54,7 +57,7 @@ impl Context for Contextless {
     type Alt = Infallible;
     type Repr = Infallible;
 
-    const VALUE: Value<Self::Repr, Self> = Value::None;
+    const VALUE: Value<Self> = Value::None;
 }
 
 /// A trait for types representing string literals.
@@ -100,7 +103,7 @@ where
     type Alt = Infallible;
     type Repr = Infallible;
 
-    const VALUE: Value<Self::Repr, Self> = Value::Literal(L::LITERAL);
+    const VALUE: Value<Self> = Value::Literal(L::LITERAL);
 }
 
 impl<L, F> Context for Mkctx<L, F>
@@ -111,7 +114,7 @@ where
     type Alt = Mkctx<L>;
     type Repr = String;
 
-    const VALUE: Value<Self::Repr, Self> = Value::Lazy(|this| {
+    const VALUE: Value<Self> = Value::Lazy(|this| {
         match this.context {
             MaybeEvaluated::Lazy(format) => {
                 if let Some(context) = format() {
