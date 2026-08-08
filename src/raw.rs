@@ -714,13 +714,9 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.select_ref() {
-            SelectRef::Const(_) | SelectRef::Inline(_) => render::format_display(
-                f,
-                self.state(),
-                self.context(),
-                None,
-                None::<(Infallible, _)>,
-            ),
+            SelectRef::Const(_) | SelectRef::Inline(_) => {
+                render::format_display(f, self.state(), self.context(), None)
+            }
             SelectRef::Boxed(body) => {
                 let vtable = DynBody::vtable(body.borrow());
                 unsafe { (vtable.display)(body.borrow(), f) }
@@ -1383,7 +1379,6 @@ where
             self.get_state_for_format(),
             self.context.get(),
             self.source.error_ref().map(|e| e as _),
-            WithBacktrace::search_debug(|| self.source.error_ref().map(|e| e as _)),
         )
     }
 }

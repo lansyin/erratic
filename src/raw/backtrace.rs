@@ -83,6 +83,10 @@ impl WithBacktrace {
             }
         }
 
+        if DISABLED.load(Ordering::Relaxed) {
+            return None;
+        }
+
         SEARCHING.set(true);
         let _reset_guard = DeferSetSearchingBacktrace(false);
 

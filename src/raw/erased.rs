@@ -126,25 +126,17 @@ impl Debug for ErasedRawErrorInner {
 impl Display for ErasedRawErrorInner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ErasedRawErrorInner::Const(body) => render::format_display::<()>(
-                f,
-                None,
-                Some(&body.borrow().deref().context),
-                None,
-                None::<(Infallible, _)>,
-            ),
+            ErasedRawErrorInner::Const(body) => {
+                render::format_display::<()>(f, None, Some(&body.borrow().deref().context), None)
+            }
             ErasedRawErrorInner::Boxed(body) => {
                 let body = body.borrow();
                 let vt = DynBody::vtable(body);
                 unsafe { (vt.display)(body, f) }
             }
-            ErasedRawErrorInner::Inline(body) => render::format_display(
-                f,
-                Some(body),
-                None::<&Infallible>,
-                None,
-                None::<(Infallible, _)>,
-            ),
+            ErasedRawErrorInner::Inline(body) => {
+                render::format_display(f, Some(body), None::<&Infallible>, None)
+            }
         }
     }
 }

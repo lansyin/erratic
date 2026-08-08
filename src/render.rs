@@ -135,7 +135,6 @@ pub(crate) fn format_display<S>(
     state: Option<&S>,
     context: Option<impl Display>,
     source: Option<&(dyn error::Error + 'static)>,
-    _backtrace: Option<(impl Debug + Display, Origin)>,
 ) -> fmt::Result
 where
     S: Debug + 'static,
