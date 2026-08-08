@@ -178,7 +178,7 @@ macro_rules! __priv_mkerr {
 
 /// Shorthand for constructing an error wrapped in `Result`, with its state type inferred.
 ///
-/// It accepts the same argument patterns as [`mkerr`].
+/// It accepts the same argument patterns as [`mkerr!`].
 #[macro_export]
 macro_rules! mkres {
     ($($key:ident=$value:expr),+ $(, $($fmt:literal $($args:tt)*)?)?) => {
