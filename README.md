@@ -81,20 +81,20 @@ fn write(w: &mut Writer, data: &[u8]) -> Result<()> {
 
 The `?` operator covers the most common cases, regardless of whether the return type carries state:
 
-| Source Type        | Return Type   | Explanation                                          |
-| :----------------- | :------------ | :--------------------------------------------------- |
-| `impl Error`       | `Error<_>`    | Wrap any standard error type.                        |
-| `Builder<..>`      | `Error<_>`    | Build an error from state, context, and/or source.   |
-| `Error<Stateless>` | `Error<S>`    | Cheaply convert a stateless error to a stateful one. |
+| Source Type        | Return Type   | Explanation                                           |
+| :----------------- | :------------ | :---------------------------------------------------- |
+| `impl Error`       | `Error<_>`    | Wraps any standard error type.                        |
+| `Builder<..>`      | `Error<_>`    | Builds an error from state, context, and/or source.   |
+| `Error<Stateless>` | `Error<S>`    | Cheaply converts a stateless error to a stateful one. |
 
 States are meant to be handled explicitly. Several utility methods are provided:
 
-| Method          | Conversion                                    | Explanation                                 |
-| :-------------- | :-------------------------------------------- | :------------------------------------------ |
-| `extract_state` | `Error<S>` -> `Result<(S, Vacant<S>), Error>` | Take the state out, or propagate the error. |
-| `map_state`     | `Error<S>` -> `Error<S2>`                     | Transform the state with a closure.         |
-| `lift_state`    | `Error<S>` -> `Error<S2>` where `S2: From<S>` | Transform the state via `From`.             |
-| `erase_state`   | `Error<S>` -> `Error<Stateless>`              | Erase the state while preserving the error. |
+| Method          | Conversion                                    | Explanation                                  |
+| :-------------- | :-------------------------------------------- | :------------------------------------------- |
+| `extract_state` | `Error<S>` -> `Result<(S, Vacant<S>), Error>` | Takes the state out, or propagate the error. |
+| `map_state`     | `Error<S>` -> `Error<S2>`                     | Transforms the state with a closure.         |
+| `lift_state`    | `Error<S>` -> `Error<S2>` where `S2: From<S>` | Transforms the state via `From`.             |
+| `erase_state`   | `Error<S>` -> `Error<Stateless>`              | Erases the state while preserving the error. |
 
 ## Formatting
 
@@ -116,10 +116,10 @@ format with alternate or debug specifiers.
 
 | Specifier | Explanation                                               |
 | :-------- | :-------------------------------------------------------- |
-| `{}`      | Display only the top-level error.                         |
-| `{:#}`    | Display the full error chain.                             |
-| `{:?}`    | Display the full error chain with backtrace, if captured. |
-| `{:#?}`   | Display all information in a struct-like format.          |
+| `{}`      | Displays only the top-level error.                         |
+| `{:#}`    | Displays the full error chain.                             |
+| `{:?}`    | Displays the full error chain with backtrace, if captured. |
+| `{:#?}`   | Displays all information in a struct-like format.          |
 
 ## Backtrace
 
