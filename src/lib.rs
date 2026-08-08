@@ -25,13 +25,12 @@
 //! use erratic::*;
 //!
 //! fn connect_timeout() -> Result<u64> {
-//!     let raw = env::var("APP_TIMEOUT")
-//!         .with_context("APP_TIMEOUT is not set")?;
+//!     let raw = env::var("APP_TIMEOUT").with_context("timeout is not set")?;
 //!     mksure!(raw.len() > 0)?; // Prints the operand values on failure.
 //!
 //!     let secs: u64 = raw.trim().parse::<u64>()
-//!         .with_context(mkctx!("invalid APP_TIMEOUT: {raw:?}"))?; // Evaluates lazily.
-//!     mksure!(secs > 0, "timeout must be positive: {secs}")?;
+//!         .with_context(mkctx!("invalid timeout: {raw}"))?; // Evaluates lazily.
+//!     mksure!(secs > 0, "timeout must be positive")?; // No alloc.
 //!
 //!     Ok(secs)
 //! }
