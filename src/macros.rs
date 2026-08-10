@@ -136,7 +136,7 @@ macro_rules! mkctx {
 #[macro_export]
 macro_rules! mkerr {
     ($($key:ident=$value:expr),+ $(, $($fmt:literal $($args:tt)*)?)?) => {
-        $crate::__priv_mkerr!(@sort [_] [] [,,] $($key=$value,)+ $($(context=$crate::mkctx!($fmt $($args)*),)?)?)
+        $crate::__priv_mkerr!(@sort [_] [,,] $($key=$value,)+ $($(context=$crate::mkctx!($fmt $($args)*),)?)?)
     };
     ($fmt:literal $($args:tt)*) => {{
         $crate::Error::from_context($crate::mkctx!($fmt $($args)*))
@@ -146,24 +146,23 @@ macro_rules! mkerr {
 #[macro_export]
 #[doc(hidden)]
 macro_rules! __priv_mkerr {
-    // Note: dst:"default state type", dc:"default context", s="state", c="context", e="error"
-    (@sort [$dst:tt] [$($dc:expr)?] [$($_:expr)?, $($c:expr)?,  $($e:expr)?] state=$s:expr, $($k:ident=$v:expr,)*) => {{
+    // Note: dst:"default state type", s="state", c="context", e="error"
+    (@sort [$dst:tt] [$($_:expr)?, $($c:expr)?,  $($e:expr)?] state=$s:expr, $($k:ident=$v:expr,)*) => {{
         $( let _ = $_; $crate::macros::__priv::compile_error!("state can only be set once");)?
-        $crate::__priv_mkerr!(@sort [$dst] [$($dc)?] [$s, $($c)?, $($e)?] $($k=$v,)*)
+        $crate::__priv_mkerr!(@sort [$dst] [$s, $($c)?, $($e)?] $($k=$v,)*)
     }};
-    (@sort [$dst:tt] [$($dc:expr)?] [$($s:expr)?, $($_:expr)?,  $($e:expr)?] context=$c:expr, $($k:ident=$v:expr,)*) => {{
+    (@sort [$dst:tt] [$($s:expr)?, $($_:expr)?,  $($e:expr)?] context=$c:expr, $($k:ident=$v:expr,)*) => {{
         $( let _ = $_; $crate::macros::__priv::compile_error!("context can only be set once. note: the format string counts as a context.");)?
-        $crate::__priv_mkerr!(@sort [$dst] [$($dc)?] [$($s)?, $c, $($e)?] $($k=$v,)*)
+        $crate::__priv_mkerr!(@sort [$dst] [$($s)?, $c, $($e)?] $($k=$v,)*)
     }};
-    (@sort [$dst:tt] [$($dc:expr)?] [$($s:expr)?, $($c:expr)?,  $($_:expr)?] error=$e:expr, $($k:ident=$v:expr,)*) => {{
+    (@sort [$dst:tt] [$($s:expr)?, $($c:expr)?,  $($_:expr)?] error=$e:expr, $($k:ident=$v:expr,)*) => {{
         $( let _ = $_; $crate::macros::__priv::compile_error!("error can only be set once");)?
-        $crate::__priv_mkerr!(@sort [$dst] [$($dc)?] [$($s)?, $($c)?, $e] $($k=$v,)*)
+        $crate::__priv_mkerr!(@sort [$dst] [$($s)?, $($c)?, $e] $($k=$v,)*)
     }};
-    (@sort [$dst:tt] [$($dc:expr)?] [$($s:expr)?, $($c:expr)?,  $($e:expr)?]) => {{
+    (@sort [$dst:tt] [$($s:expr)?, $($c:expr)?,  $($e:expr)?]) => {{
         let builder = ($crate::macros::__priv::None::<()>);
         $(let builder = builder.ok_or($e);)?
         $(let builder = $crate::BuilderExt::with_state(builder, $s);)?
-        $(let builder = $crate::BuilderExt::with_context(builder, $dc);)?
         $(let builder = $crate::BuilderExt::with_context(builder, $c);)?
         $crate::__priv_mkerr!(@infer [$dst] [$($s)?] builder.unwrap_err())
     }};
@@ -183,7 +182,7 @@ macro_rules! __priv_mkerr {
 macro_rules! mkres {
     ($($key:ident=$value:expr),+ $(, $($fmt:literal $($args:tt)*)?)?) => {
         $crate::macros::__priv::Err(
-            $crate::__priv_mkerr!(@sort [_] [] [,,] $($key=$value,)+ $($(context=$crate::mkctx!($fmt $($args)*),)?)?)
+            $crate::__priv_mkerr!(@sort [_] [,,] $($key=$value,)+ $($(context=$crate::mkctx!($fmt $($args)*),)?)?)
         )
     };
     ($fmt:literal $($args:tt)*) => {
@@ -233,40 +232,42 @@ pub mod __priv_mksure {
 /// Returns an error if the given expression evaluates to false.
 ///
 /// For comparison expressions, the default message shows the values of both operands.
-/// If a context or format string is given, the default message will not be generated.
+/// The default message is suppressed when any of a state, source, context, or format string is provided.
 ///
 /// # Examples
 ///
 /// ```
 /// # struct Value;
 /// # use erratic::*;
-/// const PNG_HEADER_SIZE: usize = 33;
-///
+/// # const PNG_HEADER_SIZE: usize = 33;
 /// #[derive(Debug)]
 /// enum State { UnsupportedFormat }
 ///
-/// fn read_png_header(filename: &str, buffer: &mut [u8]) -> Result<(), Error<State>> {
-///     mksure!(buffer.len() > PNG_HEADER_SIZE)?;
-///     // assertion failed (0 > 33): buffer.len() > PNG_HEADER_SIZE
+/// # fn read_png_header(filename: &str, buffer: &mut [u8]) -> Result<(), Error<State>> {
+/// mksure!(buffer.len() == PNG_HEADER_SIZE)?;
+/// // assertion failed (0 == 33): buffer.len() == PNG_HEADER_SIZE
 ///
-///     mksure!(buffer.len() > PNG_HEADER_SIZE, context = 501)?;
-///     // 501
-///     
-///     mksure!(!filename.ends_with(".png"), "expect a PNG file, found `{filename}`")?;
-///     // expect a PNG file, found `foo.jpg`
-///     
-///     mksure!(!filename.ends_with(".png"), state = State::UnsupportedFormat)?;
-///     // State::UnsupportedFormat
+/// mksure!(buffer.len() == PNG_HEADER_SIZE, context = 400)?;
+/// // 400
 ///
-///     mksure!(!filename.ends_with(".png"),
-///         state = State::UnsupportedFormat,
-///         "expect a PNG file, found `{filename}`"
-///     )?;
-///     // State::UnsupportedFormat: expect a PNG file, found `foo.jpg`
-///     
-///     // ..
-///     # todo!()
-/// }
+/// mksure!(filename.ends_with(".png"))?;
+/// // assertion failed: filename.ends_with(".png")
+///
+/// mksure!(filename.ends_with(".png"), "expect a PNG file, found `{filename}`")?;
+/// // expect a PNG file, found `foo.jpg`
+///
+/// mksure!(filename.ends_with(".png"), state = State::UnsupportedFormat)?;
+/// // UnsupportedFormat
+///
+/// mksure!(filename.ends_with(".png"),
+///     state = State::UnsupportedFormat,
+///     "expect a PNG file, found `{filename}`"
+/// )?;
+/// // UnsupportedFormat: expect a PNG file, found `foo.jpg`
+///
+/// // ..
+/// # todo!()
+/// # }
 /// ```
 #[macro_export]
 macro_rules! mksure {
@@ -320,7 +321,7 @@ macro_rules! __priv_mksure {
     (@cmp [$lhs:expr] [$op:tt] [$rhs:expr $(, $($fmt:literal $($args:tt)*)?)?]) => {
         $crate::__priv_mksure!(@cmp_impl [$lhs] [$op] [$rhs] [] [$($($fmt $($args)*)?)?])
     };
-    (@cmp_impl [$lhs:expr] [$op:tt] [$rhs:expr] [$($key:ident=$value:expr),*] [$($fmt:literal $($args:tt)*)?]) => {'ret: {
+    (@cmp_impl [$lhs:expr] [$op:tt] [$rhs:expr] [] []) => {'ret: {
         #[allow(unused_imports)]
         use $crate::macros::__priv_mksure::{SelectAll, SelectDebug};
 
@@ -337,12 +338,12 @@ macro_rules! __priv_mksure {
         match (lhs_value, rhs_value) {
             ($crate::macros::__priv::Some(lhs_value), $crate::macros::__priv::Some(rhs_value)) => {
                 let dc = $crate::mkctx!(
-                    "assertion failed ({}): {lhs_value:?} {} {rhs_value:?}",
+                    "assertion failed ({lhs_value:?} {} {rhs_value:?}): {}",
                     $crate::macros::__priv::stringify!($lhs $op $rhs),
                     $crate::macros::__priv::stringify!($op)
                 );
                 $crate::Result::<(), _>::Err(
-                    $crate::__priv_mkerr!(@sort [($crate::state::Stateless)] [dc] [,,] $($key=$value,)* $(context=$crate::mkctx!($fmt $($args)*),)?)
+                    $crate::__priv_mkerr!(@sort [($crate::state::Stateless)] [,,] context = dc,)
                 )
             },
             _ => {
@@ -351,14 +352,21 @@ macro_rules! __priv_mksure {
                     const LITERAL: &'static str = $crate::macros::__priv::stringify!(assertion failed: $lhs $op $rhs);
                 }
                 let dc = $crate::context::Mkctx::<Literal>::__priv_new_const();
-
                 $crate::Result::<(), _>::Err(
-                    $crate::__priv_mkerr!(@sort [($crate::state::Stateless)] [dc] [,,] $($key=$value,)* $(context=$crate::mkctx!($fmt $($args)*),)?)
+                    $crate::__priv_mkerr!(@sort [($crate::state::Stateless)] [,,] context = dc,)
                 )
             }
         }
     }};
-    (@fallback [$exp:expr] [$($key:ident=$value:expr),*] [$($fmt:literal $($args:tt)*)?]) => {'ret: {
+    (@cmp_impl [$lhs:expr] [$op:tt] [$rhs:expr] [$($key:ident=$value:expr),*] [$($fmt:literal $($args:tt)*)?]) => {'ret: {
+        if $lhs $op $rhs {
+            break 'ret $crate::macros::__priv::Ok(());
+        }
+        $crate::Result::<(), _>::Err(
+            $crate::__priv_mkerr!(@sort [($crate::state::Stateless)] [,,] $($key=$value,)* $(context=$crate::mkctx!($fmt $($args)*),)?)
+        )
+    }};
+    (@fallback [$exp:expr] [] []) => {'ret: {
         if $exp {
             break 'ret $crate::macros::__priv::Ok(());
         }
@@ -370,7 +378,15 @@ macro_rules! __priv_mksure {
         let dc = $crate::context::Mkctx::<Literal>::__priv_new_const();
 
         $crate::Result::<(), _>::Err(
-            $crate::__priv_mkerr!(@sort [($crate::state::Stateless)] [dc] [,,] $($key=$value,)* $(context=$crate::mkctx!($fmt $($args)*),)?)
+            $crate::__priv_mkerr!(@sort [($crate::state::Stateless)] [,,] context = dc,)
+        )
+    }};
+    (@fallback [$exp:expr] [$($key:ident=$value:expr),*] [$($fmt:literal $($args:tt)*)?]) => {'ret: {
+        if $exp {
+            break 'ret $crate::macros::__priv::Ok(());
+        }
+        $crate::Result::<(), _>::Err(
+            $crate::__priv_mkerr!(@sort [($crate::state::Stateless)] [,,] $($key=$value,)* $(context=$crate::mkctx!($fmt $($args)*),)?)
         )
     }};
 }
@@ -625,10 +641,7 @@ mod tests {
         let err = mksure!(magic_number > 0, state = -1i32).unwrap_err();
 
         assert_eq!(err.chain().count(), 1);
-        assert_eq!(
-            err.to_string(),
-            format!("-1: assertion failed (magic_number > 0): -123454321 > 0")
-        );
+        assert_eq!(err.to_string(), format!("-1"));
     }
 
     #[test]
@@ -665,5 +678,30 @@ mod tests {
             Ok(())
         }
         assert!(mksure_returns_error_().is_err());
+    }
+
+    #[test]
+    fn mksure_evaluates_expression_once() -> crate::Result<()> {
+        // No comparison expression, no explicit context.
+        {
+            let value = Some(1i32);
+            mksure!(value.unwrap().is_positive())?;
+        }
+        // Comparison expression, no explicit context.
+        {
+            let value = Some(1i32);
+            mksure!(value.unwrap() > 0)?;
+        }
+        // No comparison expression, explicit context.
+        {
+            let value = Some(1i32);
+            mksure!(value.unwrap().is_positive(), context = TestMessage::HOGE)?;
+        }
+        // Comparison expression, explicit context.
+        {
+            let value = Some(1i32);
+            mksure!(value.unwrap() > 0, context = TestMessage::HOGE)?;
+        }
+        Ok(())
     }
 }
