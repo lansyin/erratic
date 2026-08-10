@@ -23,10 +23,16 @@ pub mod __priv {
 /// ```
 /// # use erratic::match_else;
 /// # fn try_send(_: ()) -> Result<i32, ()> { unimplemented!() }
+/// # fn enqueue_local(_: ()) -> Result<i32, ()> { unimplemented!() }
 /// # fn foo(packet: ()) -> i32 {
 /// let Err(packet) = match_else!(try_send(packet), Ok(n) => {
 ///     return n;
 /// });
+/// let Ok(count) = match_else!(enqueue_local(packet), Err(err) => {
+///     eprintln!("failed to enqueue: {err:?}");
+///     return 0;
+/// });
+/// // ..
 /// # 0i32
 /// # }
 /// ```
@@ -112,12 +118,11 @@ macro_rules! mkctx {
 /// # fn foo() {
 /// # let filename = "";
 /// # let err = std::fmt::Error;
-/// # let url = "";
 /// let _: Error = mkerr!("404 not found");
 /// let _: Error = mkerr!("{filename} not found");
 /// let _: Error = mkerr!("{} not found", filename);
 /// let _: Error<State> = mkerr!(state = State::NotFound);
-/// let _: Error<State> = mkerr!(state = State::NotFound, context = url);
+/// let _: Error<State> = mkerr!(state = State::NotFound, context = filename);
 /// let _: Error<State> = mkerr!(
 ///     state = State::NotFound,
 ///     error = err,
