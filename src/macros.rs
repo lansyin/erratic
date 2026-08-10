@@ -311,6 +311,12 @@ macro_rules! __priv_mksure {
     ([$($lhs:tt)*] , $($rhs:tt)*) => {
         $crate::__priv_mksure!([$($lhs)*, $($rhs)*])
     };
+    ([$($lhs:tt)*] || $($rhs:tt)*) => {
+        $crate::__priv_mksure!([$($lhs)* || $($rhs)*])
+    };
+    ([$($lhs:tt)*] && $($rhs:tt)*) => {
+        $crate::__priv_mksure!([$($lhs)* && $($rhs)*])
+    };
     ([$($lhs:tt)*] $token:tt $($rhs:tt)*) => {
         $crate::__priv_mksure!([$($lhs)* $token] $($rhs)*)
     };
@@ -706,6 +712,35 @@ mod tests {
         {
             let value = Some(1i32);
             mksure!(value.unwrap() > 0, context = TestMessage::HOGE)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn mksure_compound_boolean_not_treated_as_single_comparison() -> crate::Result<()> {
+        // `a && b > c` == `a && (b > c)`.
+        {
+            let a = true;
+            let b = 3i32;
+            let c = 2i32;
+            // true && (3 > 2) == true
+            mksure!(a && b > c)?;
+        }
+        // `a || b > c` == `a || (b > c)`.
+        {
+            let a = false;
+            let b = 3i32;
+            let c = 2i32;
+            // false || (3 > 2) == true
+            mksure!(a || b > c)?;
+        }
+        // `||` short-circuits when `a` is already true.
+        {
+            let a = true;
+            let b = 1i32;
+            let c = 2i32;
+            // true || (1 > 2) == true
+            mksure!(a || b > c)?;
         }
         Ok(())
     }
