@@ -1,7 +1,4 @@
 //! Context helpers and traits.
-//!
-//! Disclaimer: Types in this module are not intended for direct use. They have no stability
-//! guarantees and may break without a major version bump.
 use core::{
     convert::{self, Infallible},
     fmt::{Debug, Display},
