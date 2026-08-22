@@ -1,7 +1,7 @@
 //! This crate provides `Error<S = Stateless>`, an error type with typed state,
 //! enabling applications to handle errors uniformly across different scenarios.
 //!
-//! ![splash](https://raw.githubusercontent.com/lansyin/erratic/e252d685dedcdadf57c8157ce6d0a69470dc713c/splash.svg)
+//! ![splash](https://raw.githubusercontent.com/lansyin/erratic/c384432ef0b892c98d3c303d0fc6c6322a8a8389/splash.svg)
 //!
 //! # Quick Start
 //!
