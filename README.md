@@ -111,15 +111,15 @@ preventing duplicate messages in the chain.
           | <error>"\n  -> "<chain>
 ```
 
-By default, only the top-level error is shown during formatting. To display the full error chain,
+By default, only the top-level error is shown during formatting. To print the full error chain,
 format with alternate or debug specifiers.
 
 | Specifier | Explanation                                               |
 | :-------- | :-------------------------------------------------------- |
-| `{}`      | Displays only the top-level error.                         |
-| `{:#}`    | Displays the full error chain.                             |
-| `{:?}`    | Displays the full error chain with backtrace, if captured. |
-| `{:#?}`   | Displays all information in a struct-like format.          |
+| `{}`      | Prints only the top-level error.                          |
+| `{:#}`    | Prints the full error chain.                              |
+| `{:?}`    | Prints the full error chain with backtrace, if captured.  |
+| `{:#?}`   | Prints all information in a struct-like format.           |
 
 ## Backtrace
 

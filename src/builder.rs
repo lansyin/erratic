@@ -70,6 +70,23 @@ impl Builder<Infallible, Stateless, Identity<Contextless>> {
     }
 }
 
+impl<E, F> Builder<E, Stateless, F>
+where
+    F: ContextFn,
+{
+    /// Converts to a builder of another state without providing the state value.
+    pub(crate) fn with_phantom_state<S>(self) -> Builder<E, S, F>
+    where
+        S: State + ?Sized,
+    {
+        Builder {
+            err: self.err,
+            state: None,
+            context_fn: self.context_fn,
+        }
+    }
+}
+
 // Builder Case #1: generic error; state -> state
 impl<E, S, F> From<Builder<E, S, F>> for Error<S>
 where
@@ -197,6 +214,28 @@ where
         })
     }
 
+    fn with_state_if<S, F>(self, state: S, f: F) -> Self::Result<Builder<Self::E, S, Self::F>>
+    where
+        S: State + Sized,
+        F: FnOnce(&Self::E) -> bool,
+    {
+        self.map_err(|err| {
+            if f(&err) {
+                Builder {
+                    err: Some(err),
+                    state: Some(S::into_repr(state)),
+                    context_fn: Identity(Contextless::new()),
+                }
+            } else {
+                Builder {
+                    err: Some(err),
+                    state: None,
+                    context_fn: Identity(Contextless::new()),
+                }
+            }
+        })
+    }
+
     fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
     where
         F: ContextFn,
@@ -228,6 +267,26 @@ where
             state: Some(state.into_repr()),
             err: self.err,
             context_fn: self.context_fn,
+        }
+    }
+
+    fn with_state_if<S, F>(self, state: S, f: F) -> Self::Result<Builder<Self::E, S, Self::F>>
+    where
+        S: State + Sized,
+        F: FnOnce(&Self::E) -> bool,
+    {
+        if self.err.as_ref().map(f).unwrap_or_default() {
+            Builder {
+                err: self.err,
+                state: Some(S::into_repr(state)),
+                context_fn: self.context_fn,
+            }
+        } else {
+            Builder {
+                err: self.err,
+                state: None,
+                context_fn: self.context_fn,
+            }
         }
     }
 
@@ -265,6 +324,28 @@ where
         })
     }
 
+    fn with_state_if<S, F>(self, state: S, f: F) -> Self::Result<Builder<Self::E, S, Self::F>>
+    where
+        S: State + Sized,
+        F: FnOnce(&Self::E) -> bool,
+    {
+        self.map_err(|builder| {
+            if builder.err.as_ref().map(f).unwrap_or_default() {
+                Builder {
+                    err: builder.err,
+                    state: Some(S::into_repr(state)),
+                    context_fn: builder.context_fn,
+                }
+            } else {
+                Builder {
+                    err: builder.err,
+                    state: None,
+                    context_fn: builder.context_fn,
+                }
+            }
+        })
+    }
+
     fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
     where
         F: ContextFn,
@@ -291,6 +372,19 @@ impl<T> BuilderExt for Option<T> {
         self.ok_or(Builder {
             state: Some(state.into_repr()),
             err: None,
+            context_fn: Identity(Contextless::new()),
+        })
+    }
+
+    /// Note: It's hard to define the semantics of this method on an `Option`, use `with_state` instead.
+    fn with_state_if<S, F>(self, state: S, _f: F) -> Self::Result<Builder<Self::E, S, Self::F>>
+    where
+        S: State + Sized,
+        F: FnOnce(&Self::E) -> bool,
+    {
+        self.ok_or(Builder {
+            err: None,
+            state: Some(S::into_repr(state)),
             context_fn: Identity(Contextless::new()),
         })
     }

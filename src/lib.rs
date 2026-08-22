@@ -117,15 +117,15 @@
 //!           | <error>"\n  -> "<chain>
 //! ```
 //!
-//! By default, only the top-level error is shown during formatting. To display the full error chain,
+//! By default, only the top-level error is shown during formatting. To print the full error chain,
 //! format with alternate or debug specifiers.
 //!
 //! | Specifier | Explanation                                               |
 //! | :-------- | :-------------------------------------------------------- |
-//! | `{}`      | Displays only the top-level error.                         |
-//! | `{:#}`    | Displays the full error chain.                             |
-//! | `{:?}`    | Displays the full error chain with backtrace, if captured. |
-//! | `{:#?}`   | Displays all information in a struct-like format.          |
+//! | `{}`      | Prints only the top-level error.                          |
+//! | `{:#}`    | Prints the full error chain.                              |
+//! | `{:?}`    | Prints the full error chain with backtrace, if captured.  |
+//! | `{:#?}`   | Prints all information in a struct-like format.           |
 //!
 //! # Backtrace
 //!
@@ -693,19 +693,22 @@ pub trait BuilderExt: Sized {
     where
         S: State + Sized;
 
+    /// Attaches a typed state if the previous error meets the given condition.
+    fn with_state_if<S, F>(self, state: S, f: F) -> Self::Result<Builder<Self::E, S, Self::F>>
+    where
+        S: State + Sized,
+        F: FnOnce(&Self::E) -> bool;
+
     /// Attaches a lazily-evaluated context.
     fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
     where
         F: ContextFn;
 }
 
-impl<T, S1> BuilderExt for Result<T, Error<S1>>
-where
-    S1: State + ?Sized,
-{
+impl<T> BuilderExt for Result<T, Error<Stateless>> {
     type Result<E> = Result<T, E>;
 
-    type E = Error<S1>;
+    type E = Error;
     type S = Stateless;
     type F = Identity<Contextless>;
 
@@ -714,6 +717,20 @@ where
         S: State,
     {
         self.map_err(|err| Builder::with_error(err).with_state(state))
+    }
+
+    fn with_state_if<S, F>(self, state: S, f: F) -> Self::Result<Builder<Self::E, S, Self::F>>
+    where
+        S: State + Sized,
+        F: FnOnce(&Self::E) -> bool,
+    {
+        self.map_err(|err| {
+            if f(&err) {
+                Builder::with_error(err).with_state(state)
+            } else {
+                Builder::with_error(err).with_phantom_state()
+            }
+        })
     }
 
     fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
