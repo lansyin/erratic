@@ -336,7 +336,7 @@
   fn interactive_login(&self) -> Result<()> {
       loop {
           let cred = cli::inquiry_credential();
-          match self.login().extract_state()? {
+          match self.login(cred).extract_state()? {
               Ok(_) => break
               Err((State::Unauthorized,_)) => continue,
   ```
