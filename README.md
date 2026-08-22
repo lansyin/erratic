@@ -5,6 +5,8 @@
 [![crates.io](https://img.shields.io/crates/v/erratic)](https://crates.io/crates/erratic)
 [![docs.rs](https://img.shields.io/docsrs/erratic)](https://docs.rs/erratic/latest/erratic/)
 
+![splash](./splash.svg)
+
 This crate provides `Error<S = Stateless>`, an error type with typed state,
 enabling applications to handle errors uniformly across different scenarios.
 
@@ -23,27 +25,24 @@ fn say_hi(filename: &str) -> erratic::Result<()> {
 
 ## Attaching Context
 
-When constructing an error, you can optionally attach a context to it. All helper macros support
+When constructing an error, you can attach a context to it. All helper macros support
 constructing context from a format string.
 
 ```rust
 use erratic::*;
 
-fn connect_timeout() -> Result<u64> {
-    let raw = env::var("APP_TIMEOUT").with_context("timeout is not set")?;
-    mksure!(raw.len() > 0)?; // Prints the operand values on failure.
+fn ringbuf(size: usize) -> Result<(Writer, Reader)> {
+    mksure!(size > MAX_CHUNK_SIZE)?; // Prints the operand values on failure.
 
-    let secs: u64 = raw.trim().parse::<u64>()
-        .with_context(mkctx!("invalid timeout: {raw}"))?; // Evaluates lazily.
-    mksure!(secs > 0, "timeout must be positive")?; // No alloc.
-
-    Ok(secs)
+    let pair = metrics::attach(rb::ringbuf(size))
+        .with_context("failed to attatch metrics")?;
+    Ok(pair)
 }
 ```
 
 ## Binding State
 
-When propagating domain errors, you can optionally attach a state to it. A small state
+When propagating domain errors, you can attach a state to it. A small state
 with no other components incurs no heap allocation.
 
 ```rust
@@ -52,11 +51,11 @@ use erratic::*;
 #[derive(Debug)]
 enum State { RetryLater } // Smaller than 1 usize.
 
-fn try_write(w: &mut Writer, data: &[u8]) -> Result<(), Error<State>> {
-    w.reserve_chunk(data.len())
+fn try_write(w: &mut Writer, chunk: &[u8]) -> Result<(), Error<State>> {
+    w.reserve_chunk(chunk.len())
         .ok()
         .with_state(State::RetryLater)?; // No alloc.
-    w.write(data)
+    w.write(chunk)
         .with_context(mkctx!("failed to write to {}", w.id))?;
     Ok(())
 }
@@ -67,8 +66,8 @@ This allows infrastructure errors to cross any number of layers with no extra al
 avoid the heap entirely, and both share the same `Error<S>` type.
 
 ```rust
-fn write(w: &mut Writer, data: &[u8]) -> Result<()> {
-    while let Err((state, _)) = try_write(w, data).extract_state()? {
+fn write(w: &mut Writer, chunk: &[u8]) -> Result<()> {
+    while let Err((state, _)) = try_write(w, chunk).extract_state()? {
         // Handle domain errors.                                  ^ Bubble up infra errors.
         match state {
             State::RetryLater => thread::yield_now(),
@@ -89,16 +88,16 @@ The `?` operator covers the most common cases, regardless of whether the return 
 
 States are meant to be handled explicitly. Several utility methods are provided:
 
-| Method          | Conversion                                    | Explanation                                  |
-| :-------------- | :-------------------------------------------- | :------------------------------------------- |
-| `extract_state` | `Error<S>` -> `Result<(S, Vacant<S>), Error>` | Takes the state out, or propagate the error. |
-| `map_state`     | `Error<S>` -> `Error<S2>`                     | Transforms the state with a closure.         |
-| `lift_state`    | `Error<S>` -> `Error<S2>` where `S2: From<S>` | Transforms the state via `From`.             |
-| `erase_state`   | `Error<S>` -> `Error<Stateless>`              | Erases the state while preserving the error. |
+| Method          | Conversion                                    | Explanation                                    |
+| :-------------- | :-------------------------------------------- | :--------------------------------------------- |
+| `extract_state` | `Error<S>` -> `Result<(S, Vacant<S>), Error>` | Takes the state out, or propagate the error.   |
+| `map_state`     | `Error<S>` -> `Error<S2>`                     | Transforms the state with a closure.           |
+| `lift_state`    | `Error<S>` -> `Error<S2>` where `S2: From<S>` | Transforms the state via `From`.               |
+| `erase_state`   | `Error<S>` -> `Error<Stateless>`              | Erases the state while keep message unchanged. |
 
 ## Formatting
 
-If the error has a state and/or a context, it builds error message from them. Otherwise, it acts as an error container,
+If the error has a state and/or a context, it builds error messages from them. Otherwise, it acts as an error container,
 inheriting the message from its source. When wrapped, the container itself will not be added as another source layer,
 preventing duplicate messages in the chain.
 
