@@ -139,6 +139,10 @@ impl<T> Align4PtrCompat<T> {
             )
         }
     }
+
+    pub const fn is_inlinable() -> bool {
+        Self::OFFSET_IN_STORE.is_some()
+    }
 }
 
 impl<T> Align4PtrCompat<T>

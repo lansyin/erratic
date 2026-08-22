@@ -335,6 +335,16 @@ where
         self.0.chain()
     }
 
+    /// Checks if the state type is small enough to be stored inline.
+    ///
+    /// Note: Allocations can still occur even when this function returns `true`.
+    /// For example, if the program is compiled with the `backtrace` feature and
+    /// runtime backtrace capture is enabled, or if the error contains a source
+    /// error or multiple components besides a single state.
+    pub const fn is_state_inlinable() -> bool {
+        RawError::<S::Repr>::is_state_inlineable()
+    }
+
     /// Returns the backtrace, if any.
     #[cfg_attr(docsrs, doc(cfg(feature = "backtrace")))]
     #[cfg(feature = "backtrace")]

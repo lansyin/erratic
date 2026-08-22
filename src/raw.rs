@@ -662,6 +662,10 @@ impl<S> RawError<S> {
         }
     }
 
+    pub const fn is_state_inlineable() -> bool {
+        Align4PtrCompat::<S>::is_inlinable()
+    }
+
     #[cfg(feature = "backtrace")]
     pub fn backtrace(&self) -> Option<&std::backtrace::Backtrace> {
         WithBacktrace::search(|| self.source().map(|v| v as _)).map(|(backtrace, _)| backtrace)
@@ -1872,4 +1876,9 @@ mod tests {
             );
         }
     }
+
+    const _: () = const {
+        assert!(RawError::<i8>::is_state_inlineable());
+        assert!(!RawError::<u128>::is_state_inlineable());
+    };
 }
