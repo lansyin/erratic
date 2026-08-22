@@ -337,12 +337,12 @@ where
 
     /// Checks if the state type is small enough to be stored inline.
     ///
-    /// Note: Allocations can still occur even when this function returns `true`.
-    /// For example, if the program is compiled with the `backtrace` feature and
-    /// runtime backtrace capture is enabled, or if the error contains a source
-    /// error or multiple components besides a single state.
+    /// Note: Allocations can still occur even when this function returns `true`, in the following cases:
+    ///
+    /// - The `backtrace` feature is enabled and runtime backtrace capture is active.
+    /// - The error contains additional context or a source error.
     pub const fn is_state_inlinable() -> bool {
-        RawError::<S::Repr>::is_state_inlineable()
+        RawError::<S::Repr>::is_state_inlinable()
     }
 
     /// Returns the backtrace, if any.

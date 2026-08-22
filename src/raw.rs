@@ -662,7 +662,7 @@ impl<S> RawError<S> {
         }
     }
 
-    pub const fn is_state_inlineable() -> bool {
+    pub const fn is_state_inlinable() -> bool {
         Align4PtrCompat::<S>::is_inlinable()
     }
 
@@ -1878,7 +1878,7 @@ mod tests {
     }
 
     const _: () = const {
-        assert!(RawError::<i8>::is_state_inlineable());
-        assert!(!RawError::<u128>::is_state_inlineable());
+        assert!(RawError::<i8>::is_state_inlinable());
+        assert!(!RawError::<u128>::is_state_inlinable());
     };
 }
