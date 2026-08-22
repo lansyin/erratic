@@ -5,8 +5,6 @@
 [![crates.io](https://img.shields.io/crates/v/erratic)](https://crates.io/crates/erratic)
 [![docs.rs](https://img.shields.io/docsrs/erratic)](https://docs.rs/erratic/latest/erratic/)
 
-![splash](./splash.svg)
-
 {{readme}}
 
 ## Contributing
