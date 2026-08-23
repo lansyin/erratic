@@ -74,6 +74,7 @@
           (
             code-target: box[
               #box(stroke: if preview { green })[
+                #set text(font: text.font, size: text.size)
                 #for el in rest {
                   el
                 }
