@@ -193,9 +193,24 @@ where
 
 /// A wrapper that wraps values as [`ContextFn`].
 #[derive(Debug)]
-pub struct Identity<C>(pub C)
+pub struct Identity<C>(C)
 where
     C: Context;
+
+impl<C> Identity<C>
+where
+    C: Context,
+{
+    pub(crate) fn new(context: C) -> Self {
+        Self(context)
+    }
+}
+
+impl Identity<Contextless> {
+    pub(crate) fn contextless() -> Self {
+        Self(Contextless::new())
+    }
+}
 
 impl<C> ContextFn for Identity<C>
 where

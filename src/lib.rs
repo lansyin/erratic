@@ -173,7 +173,7 @@ use crate::{
     builder::Builder,
     context::{Context, ContextFn, Contextless, Printable},
     raw::{ErasedRawError, RawError},
-    state::{Lazy, Derive, State, StateFn, Stateless, Vacant},
+    state::{Derive, Lazy, State, StateFn, Stateless, Vacant},
 };
 
 pub type Result<T, E = Error> = core::result::Result<T, E>;
@@ -677,7 +677,7 @@ pub trait BuilderExt: Sized {
     where
         C: Context,
     {
-        self.with_context_fn(context::Identity(context))
+        self.with_context_fn(context::Identity::new(context))
     }
 
     /// Attaches a lazily-evaluated context.

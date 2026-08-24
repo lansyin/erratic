@@ -32,7 +32,7 @@ impl Builder<Infallible, state::Identity<Stateless>, Stateless, context::Identit
             err: Some(err),
             state: state::Identity::phantom(),
             _state_ty: PhantomData,
-            context_fn: context::Identity(Contextless::new()),
+            context_fn: context::Identity::contextless(),
         }
     }
 
@@ -47,7 +47,7 @@ impl Builder<Infallible, state::Identity<Stateless>, Stateless, context::Identit
             err: None,
             state: state::Identity::new(state),
             _state_ty: PhantomData,
-            context_fn: context::Identity(Contextless::new()),
+            context_fn: context::Identity::contextless(),
         }
     }
 
@@ -62,7 +62,7 @@ impl Builder<Infallible, state::Identity<Stateless>, Stateless, context::Identit
             err: None,
             state: Lazy::new(f),
             _state_ty: PhantomData,
-            context_fn: context::Identity(Contextless::new()),
+            context_fn: context::Identity::contextless(),
         }
     }
 
@@ -77,7 +77,7 @@ impl Builder<Infallible, state::Identity<Stateless>, Stateless, context::Identit
             err: None,
             state: state::Identity::phantom(),
             _state_ty: PhantomData,
-            context_fn: context::Identity(context),
+            context_fn: context::Identity::new(context),
         }
     }
 
@@ -242,7 +242,7 @@ where
             err: Some(err),
             state: state::Identity::new(state),
             _state_ty: PhantomData,
-            context_fn: context::Identity(Contextless::new()),
+            context_fn: context::Identity::contextless(),
         })
     }
 
@@ -255,7 +255,7 @@ where
             err: Some(err),
             state: Lazy::new(f),
             _state_ty: PhantomData,
-            context_fn: context::Identity(Contextless::new()),
+            context_fn: context::Identity::contextless(),
         })
     }
 }
@@ -408,7 +408,7 @@ impl<T> BuilderExt for Option<T> {
             state: state::Identity::new(state),
             _state_ty: PhantomData,
             err: None,
-            context_fn: context::Identity(Contextless::new()),
+            context_fn: context::Identity::contextless(),
         })
     }
 
@@ -421,7 +421,7 @@ impl<T> BuilderExt for Option<T> {
             state: Lazy::new(f),
             _state_ty: PhantomData,
             err: None,
-            context_fn: context::Identity(Contextless::new()),
+            context_fn: context::Identity::contextless(),
         })
     }
 }
@@ -447,7 +447,7 @@ where
             err: Some(err),
             state: Derive::new(f),
             _state_ty: PhantomData,
-            context_fn: context::Identity(Contextless::new()),
+            context_fn: context::Identity::contextless(),
         })
     }
 }
