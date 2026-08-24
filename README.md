@@ -12,9 +12,8 @@ enabling applications to handle errors uniformly across different scenarios.
 
 ## Quick Start
 
-In most cases, `Error` can serve as a drop-in replacement for `Box<dyn Error>`.
-Compared to the latter, it occupies only 1 usize and eliminates allocations
-altogether when constructed from a literal string or a small state.
+In most cases, `Error` can serve as a drop-in replacement for `Box<dyn Error>`,
+with the `?` operator converting any standard error into `Error` automatically.
 
 ```rust
 fn say_hi(filename: &str) -> erratic::Result<()> {
@@ -25,24 +24,24 @@ fn say_hi(filename: &str) -> erratic::Result<()> {
 
 ## Attaching Context
 
-When constructing an error, you can attach a context to it. All helper macros support
-constructing context from a format string.
+When constructing an error, you can attach a context to it. Use `mkctx!` to
+construct a lazily-evaluated context from a format string.
 
 ```rust
 use erratic::*;
 
 fn ringbuf(size: usize) -> Result<(Writer, Reader)> {
-    mksure!(size > MAX_CHUNK_SIZE)?; // Prints the operand values on failure.
-
-    let pair = metrics::attach(rb::ringbuf(size))
-        .with_context("failed to attatch metrics")?;
+    let pair = rb::ringbuf(size)
+        .with_context(mkctx!("expected a power of two, found {size}"))?;
+    let pair = metrics::attach(pair)
+        .with_context("failed to attach metrics for ringbuf")?;
     Ok(pair)
 }
 ```
 
 ## Binding State
 
-When propagating domain errors, you can attach a state to it. A small state
+When propagating domain errors, you can attach a state to them. A small state
 with no other components incurs no heap allocation.
 
 ```rust
@@ -62,8 +61,8 @@ fn try_write(w: &mut Writer, chunk: &[u8]) -> Result<(), Error<State>> {
 ```
 
 When no runtime state is actually stored, errors can be cheaply converted between different state types.
-This allows infrastructure errors to cross any number of layers with no extra allocation, domain errors
-avoid the heap entirely, and both share the same `Error<S>` type.
+Infrastructure errors can thus cross any number of layers with no extra allocation, while each layer
+can pick the state type that suits it best.
 
 ```rust
 fn write(w: &mut Writer, chunk: &[u8]) -> Result<()> {
@@ -78,7 +77,7 @@ fn write(w: &mut Writer, chunk: &[u8]) -> Result<()> {
 }
 ```
 
-The `?` operator covers the most common cases, regardless of whether the return type carries state:
+The `?` operator covers the most common cases, regardless of whether the return type carries a state:
 
 | Source Type        | Return Type   | Explanation                                           |
 | :----------------- | :------------ | :---------------------------------------------------- |
@@ -90,7 +89,7 @@ States are meant to be handled explicitly. Several utility methods are provided:
 
 | Method          | Conversion                                    | Explanation                                      |
 | :-------------- | :-------------------------------------------- | :----------------------------------------------- |
-| `extract_state` | `Error<S>` -> `Result<(S, Vacant<S>), Error>` | Takes the state out, or propagate the error.     |
+| `extract_state` | `Error<S>` -> `Result<(S, Vacant<S>), Error>` | Takes the state out, or propagates the error.    |
 | `map_state`     | `Error<S>` -> `Error<S2>`                     | Transforms the state with a closure.             |
 | `lift_state`    | `Error<S>` -> `Error<S2>` where `S2: From<S>` | Transforms the state via `From`.                 |
 | `erase_state`   | `Error<S>` -> `Error<Stateless>`              | Erases the state, keeping the message unchanged. |
@@ -128,30 +127,6 @@ one already in the source chain. The backtrace will be appended after the error 
 formatting, unless the minus sign, e.g. `{:-?}`, is specified to suppress it.
 
 [backtrace-conf]: https://doc.rust-lang.org/std/backtrace/index.html#environment-variables
-
-## Representation
-
-Type-wise, `Error<S>` is an internally tagged union, and it requires pointers to be aligned to 4 bytes,
-freeing up the lower 2 bits to encode its discriminant. Pointer tagging in this crate fully follows
-[strict provenance][strict-provenance], and is verified by Miri.
-
-[strict-provenance]: https://doc.rust-lang.org/1.89.0/std/ptr/index.html#strict-provenance
-
-The error has three possible layouts. When constructed from a literal, it stores a pointer to the literal.
-When constructed from a small state, it stores the state inline. Otherwise, it points to a heap-allocated object
-containing a vtable and potentially a state, source, and/or context.
-
-```plaintext
-┌Error<State>─────────╎───┐   ┌ConstBody─────┐
-│ Align4Ref<ConstBody>╎00 ├───┤ &'static str │
-└─────────────────────╎───┘   └──────────────┘
-┌Error<State>─────────╎───┐   ┌BoxedBody─────────────┬────────────────────┬────────┬─────────┐
-│ Align4Own<BoxedBody>╎01 ├───┤ Align4Ref<VTable>╎ST │ MaybeUninit<State> │ Source │ Context │
-└─────────────────────╎───┘   └─────────┼──────────┼─┴──────────────┼─────┴────────┴─────────┘
-┌Error<State>─┬───────╎───┐   ┌VTable───┴──┬─╌     │╭ ST=00:Uninit ╮│
-│    State    │ 000000╎10 │   │ Drop::drop │       ╰┤ ST=01:Active ├╯
-└─────────────┴───────╎───┘   └────────────┴─╌      ╰ ST=10:Erased ╯
-```
 
 
 ## Contributing

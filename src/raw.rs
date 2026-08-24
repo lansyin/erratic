@@ -27,7 +27,7 @@ use backtrace::WithBacktrace;
 
 pub(crate) use erased::ErasedRawError;
 
-/// Triple-state error storage.
+/// Three-variant error storage.
 ///
 /// # Safety invariants
 ///
@@ -325,7 +325,7 @@ impl RawError {
 }
 
 impl<S> RawError<S> {
-    /// Constructs from an standard error.
+    /// Constructs from a standard error.
     pub fn from_error<E, C>(state: Option<S>, source: Option<E>, context: C) -> Self
     where
         S: Debug + Send + Sync + 'static,
@@ -498,12 +498,13 @@ impl<S> RawError<S> {
         }
     }
 
-    /// Consumes `self` and extracts the source error and paylaad by type.
+    /// Consumes `self` and extracts its components by type.
     ///
-    /// Returns `None` if the types do not match or no source/paylaad exists.
+    /// The corresponding element in the returned tuple is `None` if the
+    /// requested component does not exist or has a different type.
     ///
     /// # Existence Guarantee
-    /// It's guaranteed that at least one components exist.
+    /// It's guaranteed that at least one component exist.
     pub fn into_parts<C, E>(self) -> (Option<S>, Option<C>, Option<E>)
     where
         E: 'static,
@@ -768,7 +769,7 @@ where
     context: helper::Exclude<C, NoContext>,
 }
 
-/// A zero-sized type used as context placeholder.
+/// A zero-sized type used as a context placeholder.
 #[derive(Debug)]
 pub struct NoContext;
 
@@ -1176,7 +1177,7 @@ where
         <Self as Display>::fmt(this, f)
     }
 
-    /// Replace the state if type matches. `state_src` becomes `None` iff it succeeds and returns true.
+    /// Replaces the state if the type matches. `state_src` becomes `None` iff it succeeds and returns true.
     ///
     /// # Panics
     ///
@@ -1204,7 +1205,7 @@ where
         }
     }
 
-    /// Check if there is a state in the body.
+    /// Checks if there is a state in the body.
     ///
     /// # Safety
     ///

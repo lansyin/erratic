@@ -195,7 +195,7 @@ macro_rules! mkres {
     };
 }
 
-// Autoref specialization for mksure to printf operands.
+// Autoref specialization for mksure to print operands.
 // https://github.com/dtolnay/case-studies/tree/056fa5ca3d6cbfa4d8ee12bd37abd8a375029bcd/autoref-specialization
 #[doc(hidden)]
 pub mod __priv_mksure {
@@ -237,7 +237,7 @@ pub mod __priv_mksure {
 /// Returns an error if the given expression evaluates to false.
 ///
 /// For comparison expressions, the default message shows the values of both operands.
-/// The default message is suppressed when any of a state, source, context, or format string is provided.
+/// The default message is suppressed when any of a state, source, context, or a format string is provided.
 ///
 /// # Examples
 ///
@@ -258,17 +258,17 @@ pub mod __priv_mksure {
 /// mksure!(filename.ends_with(".png"))?;
 /// // assertion failed: filename.ends_with(".png")
 ///
-/// mksure!(filename.ends_with(".png"), "expect a PNG file, found `{filename}`")?;
-/// // expect a PNG file, found `foo.jpg`
+/// mksure!(filename.ends_with(".png"), "expected a PNG file, found `{filename}`")?;
+/// // expected a PNG file, found `foo.jpg`
 ///
 /// mksure!(filename.ends_with(".png"), state = State::UnsupportedFormat)?;
 /// // UnsupportedFormat
 ///
 /// mksure!(filename.ends_with(".png"),
 ///     state = State::UnsupportedFormat,
-///     "expect a PNG file, found `{filename}`"
+///     "expected a PNG file, found `{filename}`"
 /// )?;
-/// // UnsupportedFormat: expect a PNG file, found `foo.jpg`
+/// // UnsupportedFormat: expected a PNG file, found `foo.jpg`
 ///
 /// // ..
 /// # todo!()

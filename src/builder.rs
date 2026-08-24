@@ -376,7 +376,7 @@ impl<T> BuilderExt for Option<T> {
         })
     }
 
-    /// Note: It's hard to define the semantics of this method on an `Option`, use `with_state` instead.
+    /// Note: It's hard to define the semantics of this method on an `Option`; use `with_state` instead.
     fn with_state_if<S, F>(self, state: S, _f: F) -> Self::Result<Builder<Self::E, S, Self::F>>
     where
         S: State + Sized,

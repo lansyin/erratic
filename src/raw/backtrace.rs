@@ -128,7 +128,7 @@ impl WithBacktrace {
         }
     }
 
-    /// Take the error from this backtrace and put it in the dst.
+    /// Take the error from this backtrace and put it in `dst`.
     #[cfg(feature = "backtrace")]
     fn take_source_<E>(self, dst: &mut dyn Any) -> Result<(), Self>
     where

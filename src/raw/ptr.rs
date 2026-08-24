@@ -30,7 +30,7 @@ impl Metadata {
     }
 }
 
-/// An inline pointer-sized storage that having a metadata at the first byte.
+/// An inline pointer-sized storage that has metadata at the first byte.
 ///
 /// This type is guaranteed to be the same layout as `usize`.
 // Note: The repr/align attribute is required as it is used to compute the offset

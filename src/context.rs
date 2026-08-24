@@ -63,7 +63,7 @@ where
     const VALUE: Value<Self> = Value::Lazy(convert::identity);
 }
 
-/// A zero-sized context placeholder for [Builder][crate::Builder].
+/// A zero-sized context placeholder for [Builder][crate::builder::Builder].
 #[derive(Debug)]
 pub struct Contextless {
     _priv: (),

@@ -5,7 +5,7 @@ use core::{
 
 /// The origin of a backtrace.
 ///
-/// When printing an error chain structurally, as every level carries the same backtrace
+/// When printing an error chain structurally, since every level carries the same backtrace
 /// from the root, only print when the origin is `Captured` to avoid duplicates.
 #[cfg_attr(not(feature = "backtrace"), allow(dead_code))]
 #[derive(Debug, Clone, Copy)]

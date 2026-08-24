@@ -74,6 +74,7 @@
           (
             code-target: box[
               #box(stroke: if preview { green })[
+                // Pin the current font and size now, as the box is measured later.
                 #set text(font: text.font, size: text.size)
                 #for el in rest {
                   el
@@ -174,16 +175,8 @@
       scale(sub(p3, p1), tension / 6),
     )
 
-    // Special case: dip nearly-horizontal segments down so the line doesn't cover text.
-    let near-horizontal = calc.abs(p1.at(1) - p2.at(1)) <= 1pt
-    let dip-offset = if near-horizontal {
-      0em
-    } else {
-      0em
-    }
-
-    let c1 = (base-c1.at(0), base-c1.at(1) + dip-offset)
-    let c2 = (base-c2.at(0), base-c2.at(1) + dip-offset)
+    let c1 = (base-c1.at(0), base-c1.at(1))
+    let c2 = (base-c2.at(0), base-c2.at(1))
 
     components = (
       ..components,
