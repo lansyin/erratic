@@ -729,6 +729,50 @@ impl<T> BuilderExt for Result<T, Error> {
     }
 }
 
+// Combinators for builder case #4: erratic error; state+stateless -> state.
+impl<T, S1> BuilderExt for Result<T, Error<S1>>
+where
+    S1: State,
+{
+    type Result<E> = Result<T, E>;
+
+    type E = Error<S1>;
+    type S = Stateless;
+    type F = Identity<Contextless>;
+
+    /// Note: This method results in a builder with double states, which cannot be materialized
+    /// into an error. Use [`map_state`][StateExt::map_state] instead.
+    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F>>
+    where
+        S: State,
+    {
+        self.map_err(|err| Builder::with_error(err).with_state(state))
+    }
+
+    /// Note: This method results in a builder with double states, which cannot be materialized
+    /// into an error. Use [`map_state`][StateExt::map_state] instead.
+    fn with_state_if<S, F>(self, state: S, f: F) -> Self::Result<Builder<Self::E, S, Self::F>>
+    where
+        S: State + Sized,
+        F: FnOnce(&Self::E) -> bool,
+    {
+        self.map_err(|err| {
+            if f(&err) {
+                Builder::with_error(err).with_state(state)
+            } else {
+                Builder::with_error(err).with_phantom_state()
+            }
+        })
+    }
+
+    fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
+    where
+        F: ContextFn,
+    {
+        self.map_err(|err| Builder::with_error(err).with_context_fn(context_fn))
+    }
+}
+
 /// Extension trait for materializing or erasing an error.
 pub trait ErrorExt: Sized {
     type Result<E>;
