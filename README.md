@@ -55,7 +55,7 @@ fn try_write(w: &mut Writer, chunk: &[u8]) -> Result<(), Error<State>> {
         .ok()
         .with_state(State::RetryLater)?; // No alloc.
     w.write(chunk)
-        .with_context(mkctx!("failed to write to {}", w.id))?;
+        .with_context("failed to write a chunk")?;
     Ok(())
 }
 ```
@@ -67,7 +67,7 @@ can pick the state type that suits it best.
 ```rust
 fn write(w: &mut Writer, chunk: &[u8]) -> Result<()> {
     while let Err((state, _)) = try_write(w, chunk).extract_state()? {
-        // Handle domain errors.                                  ^ Bubble up infra errors.
+        // Handle domain errors.                                   ^ Bubble up infra errors.
         match state {
             State::RetryLater => thread::yield_now(),
             // ..
