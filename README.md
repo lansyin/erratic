@@ -79,11 +79,11 @@ fn write(w: &mut Writer, chunk: &[u8]) -> Result<()> {
 
 The `?` operator covers the most common cases, regardless of whether the return type carries a state:
 
-| Source Type        | Return Type   | Explanation                                           |
-| :----------------- | :------------ | :---------------------------------------------------- |
-| `impl Error`       | `Error<_>`    | Wraps any standard error type.                        |
-| `Builder<..>`      | `Error<_>`    | Builds an error from state, context, and/or source.   |
-| `Error<Stateless>` | `Error<S>`    | Cheaply converts a stateless error to a stateful one. |
+| Source Type        | Return Type   | Explanation                                                     |
+| :----------------- | :------------ | :-------------------------------------------------------------- |
+| `impl Error`       | `Error<_>`    | Wraps any standard error type.                                  |
+| `Builder<..>`      | `Error<_>`    | Builds an error from state, context, and/or source.             |
+| `Error<Stateless>` | `Error<_>`    | Cheaply converts a stateless error to one with a phantom state. |
 
 States are meant to be handled explicitly. Several utility methods are provided:
 
