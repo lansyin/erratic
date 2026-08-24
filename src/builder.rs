@@ -164,12 +164,12 @@ where
 // Signature: impl<S1, S, F, L> From<Builder<Error<S1>, S, F, L>> for Error
 
 // Builder Case #6: erratic error; stateless+stateless -> state; stateless+stateless -> stateless
-impl<S, F> From<Builder<Error<Stateless>, Stateless, F>> for Error<S>
+impl<S, F> From<Builder<Error, Stateless, F>> for Error<S>
 where
     F: ContextFn,
     S: State + ?Sized,
 {
-    fn from(value: Builder<Error<Stateless>, Stateless, F>) -> Self {
+    fn from(value: Builder<Error, Stateless, F>) -> Self {
         Error(RawError::from_erased(
             None,
             value.err.map(|e| e.0.into_erased()),
@@ -179,12 +179,12 @@ where
 }
 
 // Builder Case #7: generic error; stateless+state -> state
-impl<S, F> From<Builder<Error<Stateless>, S, F>> for Error<S>
+impl<S, F> From<Builder<Error, S, F>> for Error<S>
 where
     F: ContextFn,
     S: State,
 {
-    fn from(value: Builder<Error<Stateless>, S, F>) -> Self {
+    fn from(value: Builder<Error, S, F>) -> Self {
         Error(RawError::from_erased(
             value.state,
             value.err.map(|e| e.0.into_erased()),
@@ -415,7 +415,7 @@ where
     }
 }
 
-impl<S, F> ErrorExt for Builder<Error<Stateless>, S, F>
+impl<S, F> ErrorExt for Builder<Error, S, F>
 where
     F: ContextFn,
     S: State,
@@ -428,7 +428,7 @@ where
     }
 }
 
-impl<F> ErrorExt for Builder<Error<Stateless>, Stateless, F>
+impl<F> ErrorExt for Builder<Error, Stateless, F>
 where
     F: ContextFn,
 {
@@ -454,7 +454,7 @@ where
     }
 }
 
-impl<T, S, F> ErrorExt for Result<T, Builder<Error<Stateless>, S, F>>
+impl<T, S, F> ErrorExt for Result<T, Builder<Error, S, F>>
 where
     F: ContextFn,
     S: State,
@@ -467,7 +467,7 @@ where
     }
 }
 
-impl<T, F> ErrorExt for Result<T, Builder<Error<Stateless>, Stateless, F>>
+impl<T, F> ErrorExt for Result<T, Builder<Error, Stateless, F>>
 where
     F: ContextFn,
 {

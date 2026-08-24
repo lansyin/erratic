@@ -542,13 +542,13 @@ where
     }
 }
 
-impl Debug for Error<Stateless> {
+impl Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Debug::fmt(&self.0, f)
     }
 }
 
-impl Display for Error<Stateless> {
+impl Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Display::fmt(&self.0, f)
     }
@@ -693,7 +693,7 @@ pub trait BuilderExt: Sized {
         F: ContextFn;
 }
 
-impl<T> BuilderExt for Result<T, Error<Stateless>> {
+impl<T> BuilderExt for Result<T, Error> {
     type Result<E> = Result<T, E>;
 
     type E = Error;
