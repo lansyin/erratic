@@ -785,6 +785,7 @@ where
     }
 }
 
+/// Extension trait for deriving states from errors.
 pub trait DeriveExt {
     type Result<E>;
 
