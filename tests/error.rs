@@ -601,3 +601,17 @@ fn with_state_derived_ok_short_circuits() {
         .build_error();
     assert_eq!(built.unwrap(), 7);
 }
+
+#[test]
+fn regression_20260825_split_impls_break_inference() -> Result<()> {
+    let Ok(()) = match_else!(
+             match Result::<Result<(), io::Error>, ()>::Ok(Ok(())) {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(err)) => mkres!(error = err),
+                Err(_) => mkres!("foo"),
+            },
+        Err(err) => return mkres!(error = err, "send client hello"), // type annotations needed
+    );
+
+    Ok(())
+}

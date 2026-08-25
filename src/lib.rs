@@ -708,6 +708,9 @@ where
     S1: State + ?Sized,
     // Note: `?Sized` is for builder case #4: erratic error; state+stateless -> state.
     // It will break type inference if split `S1: State + ?Sized` into two impls of `S1: State` and `S2 = Stateless`.
+    // Check out `cargo test --test error -- regression_20260825_split_impls_break_inference` between:
+    // - d1764c68569022d3bc8ce2d676ba78effe65ca2c (type inference fails)
+    // - 59efdffd4ddc71e814a9cc65ef7a15bdcafe1162 (compiles)
 {
     type Result<E> = Result<T, E>;
 
