@@ -191,7 +191,7 @@ where
     }
 }
 
-/// An abstraction over how a state is produced.
+/// A wrapper that wraps values as [`ContextFn`]. See [`with_context`][crate::BuilderExt::with_context].
 #[derive(Debug)]
 pub struct Identity<C>(C)
 where
