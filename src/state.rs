@@ -126,7 +126,7 @@ where
     S: State,
     F: FnOnce() -> S,
 {
-    pub fn new(f: F) -> Self {
+    pub(crate) fn new(f: F) -> Self {
         Self { f }
     }
 }
@@ -156,7 +156,7 @@ where
     S: State,
     F: FnOnce(&E) -> Option<S>,
 {
-    pub fn new(f: F) -> Self {
+    pub(crate) fn new(f: F) -> Self {
         Self {
             f,
             _marker: PhantomData,
