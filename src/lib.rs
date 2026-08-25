@@ -703,10 +703,15 @@ pub trait BuilderExt: Sized {
         S: State;
 }
 
-impl<T> BuilderExt for Result<T, Error> {
+impl<T, S1> BuilderExt for Result<T, Error<S1>>
+where
+    S1: State + ?Sized,
+    // Note: `?Sized` is for builder case #4: erratic error; state+stateless -> state.
+    // It will break type inference if split `S1: State + ?Sized` into two impls of `S1: State` and `S2 = Stateless`.
+{
     type Result<E> = Result<T, E>;
 
-    type E = Error;
+    type E = Error<S1>;
     type X = state::Identity<Stateless>;
     type S = Stateless;
     type F = context::Identity<Contextless>;
@@ -735,51 +740,6 @@ impl<T> BuilderExt for Result<T, Error> {
     where
         F: FnOnce() -> S,
         S: State + Sized,
-    {
-        self.map_err(|err| Builder::with_error(err).with_state_fn(f))
-    }
-}
-
-// Combinators for builder case #4: erratic error; state+stateless -> state.
-impl<T, S1> BuilderExt for Result<T, Error<S1>>
-where
-    S1: State,
-{
-    type Result<E> = Result<T, E>;
-
-    type E = Error<S1>;
-    type X = state::Identity<Stateless>;
-    type S = Stateless;
-    type F = context::Identity<Contextless>;
-
-    fn with_context_fn<F>(
-        self,
-        context_fn: F,
-    ) -> Self::Result<Builder<Self::E, Self::X, Self::S, F>>
-    where
-        F: ContextFn,
-    {
-        self.map_err(|err| Builder::with_error(err).with_context_fn(context_fn))
-    }
-
-    /// Note: Calling this method on a stateful error results in a builder with double states,
-    /// which cannot be materialized into an error. Use [`map_state`][StateExt::map_state] instead.
-    fn with_state<S>(
-        self,
-        state: S,
-    ) -> Self::Result<Builder<Self::E, state::Identity<S>, S, Self::F>>
-    where
-        S: State,
-    {
-        self.map_err(|err| Builder::with_error(err).with_state(state))
-    }
-
-    /// Note: Calling this method on a stateful error results in a builder with double states,
-    /// which cannot be materialized into an error. Use [`map_state`][StateExt::map_state] instead.
-    fn with_state_fn<F, S>(self, f: F) -> Self::Result<Builder<Self::E, Lazy<F, S>, S, Self::F>>
-    where
-        S: State,
-        F: FnOnce() -> S,
     {
         self.map_err(|err| Builder::with_error(err).with_state_fn(f))
     }
