@@ -72,6 +72,7 @@ impl State for Stateless {
     type Repr = Infallible;
 }
 
+/// A potentially lazily evaluated or derived state.
 pub trait StateFn<E, S>
 where
     S: State + ?Sized,
@@ -79,6 +80,7 @@ where
     fn call(self, derive_from: Option<&E>) -> Option<<S as State>::Repr>;
 }
 
+/// A wrapper that wraps values as [`StateFn`].
 pub struct Identity<S>(pub Option<S::Repr>)
 where
     S: State + ?Sized;
@@ -110,6 +112,7 @@ where
     }
 }
 
+/// A lazily evaluated state.
 pub struct Lazy<F, S>
 where
     S: State,
@@ -138,6 +141,7 @@ where
     }
 }
 
+/// Derives a state from an error, if any.
 pub struct Derive<F, E, S>
 where
     S: State,

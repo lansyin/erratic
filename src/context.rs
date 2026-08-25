@@ -191,7 +191,7 @@ where
     }
 }
 
-/// A wrapper that wraps values as [`ContextFn`].
+/// An abstraction over how a state is produced.
 #[derive(Debug)]
 pub struct Identity<C>(C)
 where
