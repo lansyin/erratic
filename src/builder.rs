@@ -1,105 +1,115 @@
 //! Builder for constructing errors.
-use core::{convert::Infallible, error, fmt::Debug};
+use core::{convert::Infallible, error, fmt::Debug, marker::PhantomData};
 
 use crate::{
-    BuilderExt, Error, ErrorExt,
-    context::{Context, ContextFn, Contextless, Identity, Value},
+    BuilderExt, DeriveExt, Error, ErrorExt,
+    context::{self, Context, ContextFn, Contextless, Value},
     match_else,
     raw::RawError,
-    state::{State, Stateless},
+    state::{self, Derive, Lazy, State, StateFn, Stateless},
 };
 
 /// An intermediate builder for constructing an [`Error`].
 #[derive(Debug)]
-pub struct Builder<E, S, F>
+pub struct Builder<E, X, S, F>
 where
     F: ContextFn,
+    X: StateFn<E, S>,
     S: State + ?Sized,
 {
     err: Option<E>,
-    state: Option<S::Repr>,
+    state: X,
+    _state_ty: PhantomData<S>,
     context_fn: F,
 }
 
-impl Builder<Infallible, Stateless, Identity<Contextless>> {
+impl Builder<Infallible, state::Identity<Stateless>, Stateless, context::Identity<Contextless>> {
     /// Starts building an `Error` from a source error.
-    pub fn with_error<E>(err: E) -> Builder<E, Stateless, Identity<Contextless>> {
+    pub fn with_error<E>(
+        err: E,
+    ) -> Builder<E, state::Identity<Stateless>, Stateless, context::Identity<Contextless>> {
         Builder {
             err: Some(err),
-            state: None,
-            context_fn: Identity(Contextless::new()),
+            state: state::Identity::phantom(),
+            _state_ty: PhantomData,
+            context_fn: context::Identity(Contextless::new()),
         }
     }
 
     /// Starts building an `Error` with a state.
-    pub fn with_state<S>(state: S) -> Builder<Infallible, S, Identity<Contextless>>
+    pub fn with_state<S>(
+        state: S,
+    ) -> Builder<Infallible, state::Identity<S>, S, context::Identity<Contextless>>
     where
         S: State,
     {
         Builder {
             err: None,
-            state: Some(state.into_repr()),
-            context_fn: Identity(Contextless::new()),
+            state: state::Identity::new(state),
+            _state_ty: PhantomData,
+            context_fn: context::Identity(Contextless::new()),
+        }
+    }
+
+    pub fn with_state_fn<F, S>(
+        f: F,
+    ) -> Builder<Infallible, Lazy<F, S>, S, context::Identity<Contextless>>
+    where
+        S: State,
+        F: FnOnce() -> S,
+    {
+        Builder {
+            err: None,
+            state: Lazy::new(f),
+            _state_ty: PhantomData,
+            context_fn: context::Identity(Contextless::new()),
         }
     }
 
     /// Starts building an `Error` with a context.
-    pub fn with_context<C>(context: C) -> Builder<Infallible, Stateless, Identity<C>>
+    pub fn with_context<C>(
+        context: C,
+    ) -> Builder<Infallible, state::Identity<Stateless>, Stateless, context::Identity<C>>
     where
         C: Context,
     {
         Builder {
             err: None,
-            state: None,
-            context_fn: Identity(context),
+            state: state::Identity::phantom(),
+            _state_ty: PhantomData,
+            context_fn: context::Identity(context),
         }
     }
 
     /// Starts building an `Error` with a lazily evaluated context.
     ///
     /// The closure `context_fn` is called only when the error is materialized.
-    pub fn with_context_fn<F>(context_fn: F) -> Builder<Infallible, Stateless, F>
+    pub fn with_context_fn<F>(
+        context_fn: F,
+    ) -> Builder<Infallible, state::Identity<Stateless>, Stateless, F>
     where
         F: ContextFn,
     {
         Builder {
             err: None,
-            state: None,
+            state: state::Identity::phantom(),
+            _state_ty: PhantomData,
             context_fn,
         }
     }
 }
 
-impl<E, F> Builder<E, Stateless, F>
-where
-    F: ContextFn,
-{
-    /// Converts to a builder of another state without providing the state value.
-    pub(crate) fn with_phantom_state<S>(self) -> Builder<E, S, F>
-    where
-        S: State + ?Sized,
-    {
-        Builder {
-            err: self.err,
-            state: None,
-            context_fn: self.context_fn,
-        }
-    }
-}
-
 // Builder Case #1: generic error; state -> state
-impl<E, S, F> From<Builder<E, S, F>> for Error<S>
+impl<E, X, S, F> From<Builder<E, X, S, F>> for Error<S>
 where
-    F: ContextFn,
     E: error::Error + Send + Sync + 'static,
+    F: ContextFn,
+    X: StateFn<E, S>,
     S: State + ?Sized,
 {
-    fn from(value: Builder<E, S, F>) -> Self {
-        match (
-            value.state,
-            value.err,
-            !matches!(F::Output::VALUE, Value::None),
-        ) {
+    fn from(value: Builder<E, X, S, F>) -> Self {
+        let state = value.state.call(value.err.as_ref());
+        match (state, value.err, !matches!(F::Output::VALUE, Value::None)) {
             (None, None, false) => unreachable!(),
             (None, Some(err), false) => err.into(),
             (state, err, _) => {
@@ -114,13 +124,13 @@ where
 // Signature: impl<E, S, F> From<Builder<E, S, F>> for Error
 
 // Builder Case #3: generic error; stateless -> state
-impl<E, S, F> From<Builder<E, Stateless, F>> for Error<S>
+impl<E, S, F> From<Builder<E, state::Identity<Stateless>, Stateless, F>> for Error<S>
 where
     F: ContextFn,
     E: error::Error + Send + Sync + 'static,
     S: State,
 {
-    fn from(value: Builder<E, Stateless, F>) -> Self {
+    fn from(value: Builder<E, state::Identity<Stateless>, Stateless, F>) -> Self {
         match (value.err, !matches!(F::Output::VALUE, Value::None)) {
             (None, false) => unreachable!(),
             (Some(err), false) => err.into(),
@@ -130,12 +140,12 @@ where
 }
 
 // Builder Case #4: erratic error; state+stateless -> state
-impl<S, F> From<Builder<Error<S>, Stateless, F>> for Error<S>
+impl<S, F> From<Builder<Error<S>, state::Identity<Stateless>, Stateless, F>> for Error<S>
 where
     F: ContextFn,
     S: State,
 {
-    fn from(value: Builder<Error<S>, Stateless, F>) -> Self {
+    fn from(value: Builder<Error<S>, state::Identity<Stateless>, Stateless, F>) -> Self {
         match (value.err, !matches!(F::Output::VALUE, Value::None)) {
             (None, false) => unreachable!(),
             (Some(err), false) => err,
@@ -164,12 +174,12 @@ where
 // Signature: impl<S1, S, F, L> From<Builder<Error<S1>, S, F, L>> for Error
 
 // Builder Case #6: erratic error; stateless+stateless -> state; stateless+stateless -> stateless
-impl<S, F> From<Builder<Error, Stateless, F>> for Error<S>
+impl<S, F> From<Builder<Error, state::Identity<Stateless>, Stateless, F>> for Error<S>
 where
     F: ContextFn,
     S: State + ?Sized,
 {
-    fn from(value: Builder<Error, Stateless, F>) -> Self {
+    fn from(value: Builder<Error, state::Identity<Stateless>, Stateless, F>) -> Self {
         Error(RawError::from_erased(
             None,
             value.err.map(|e| e.0.into_erased()),
@@ -179,14 +189,16 @@ where
 }
 
 // Builder Case #7: generic error; stateless+state -> state
-impl<S, F> From<Builder<Error, S, F>> for Error<S>
+impl<X, S, F> From<Builder<Error, X, S, F>> for Error<S>
 where
     F: ContextFn,
+    X: StateFn<Error, S>,
     S: State,
 {
-    fn from(value: Builder<Error, S, F>) -> Self {
+    fn from(value: Builder<Error, X, S, F>) -> Self {
+        let state = value.state.call(value.err.as_ref());
         Error(RawError::from_erased(
-            value.state,
+            state,
             value.err.map(|e| e.0.into_erased()),
             value.context_fn.call(),
         ))
@@ -200,160 +212,164 @@ where
     type Result<E> = Result<T, E>;
 
     type E = E1;
+    type X = state::Identity<Stateless>;
     type S = Stateless;
-    type F = Identity<Contextless>;
+    type F = context::Identity<Contextless>;
 
-    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F>>
-    where
-        S: State + Sized,
-    {
-        self.map_err(|err| Builder {
-            err: Some(err),
-            state: Some(state.into_repr()),
-            context_fn: Identity(Contextless::new()),
-        })
-    }
-
-    fn with_state_if<S, F>(self, state: S, f: F) -> Self::Result<Builder<Self::E, S, Self::F>>
-    where
-        S: State + Sized,
-        F: FnOnce(&Self::E) -> bool,
-    {
-        self.map_err(|err| {
-            if f(&err) {
-                Builder {
-                    err: Some(err),
-                    state: Some(S::into_repr(state)),
-                    context_fn: Identity(Contextless::new()),
-                }
-            } else {
-                Builder {
-                    err: Some(err),
-                    state: None,
-                    context_fn: Identity(Contextless::new()),
-                }
-            }
-        })
-    }
-
-    fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
+    fn with_context_fn<F>(
+        self,
+        context_fn: F,
+    ) -> Self::Result<Builder<Self::E, Self::X, Self::S, F>>
     where
         F: ContextFn,
     {
         self.map_err(|err| Builder {
             err: Some(err),
-            state: None,
+            state: state::Identity::phantom(),
+            _state_ty: PhantomData,
             context_fn,
+        })
+    }
+
+    fn with_state<S>(
+        self,
+        state: S,
+    ) -> Self::Result<Builder<Self::E, state::Identity<S>, S, Self::F>>
+    where
+        S: State,
+    {
+        self.map_err(|err| Builder {
+            err: Some(err),
+            state: state::Identity::new(state),
+            _state_ty: PhantomData,
+            context_fn: context::Identity(Contextless::new()),
+        })
+    }
+
+    fn with_state_fn<F, S>(self, f: F) -> Self::Result<Builder<Self::E, Lazy<F, S>, S, Self::F>>
+    where
+        F: FnOnce() -> S,
+        S: State + Sized,
+    {
+        self.map_err(|err| Builder {
+            err: Some(err),
+            state: Lazy::new(f),
+            _state_ty: PhantomData,
+            context_fn: context::Identity(Contextless::new()),
         })
     }
 }
 
-impl<E1, S1, F1> BuilderExt for Builder<E1, S1, F1>
+impl<E1, X1, S1, F1> BuilderExt for Builder<E1, X1, S1, F1>
 where
     F1: ContextFn,
+    X1: StateFn<E1, S1>,
     S1: State + ?Sized,
 {
     type Result<E> = E;
 
     type E = E1;
+    type X = X1;
     type S = S1;
     type F = F1;
 
-    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F>>
-    where
-        S: State,
-    {
-        Builder {
-            state: Some(state.into_repr()),
-            err: self.err,
-            context_fn: self.context_fn,
-        }
-    }
-
-    fn with_state_if<S, F>(self, state: S, f: F) -> Self::Result<Builder<Self::E, S, Self::F>>
-    where
-        S: State + Sized,
-        F: FnOnce(&Self::E) -> bool,
-    {
-        if self.err.as_ref().map(f).unwrap_or_default() {
-            Builder {
-                err: self.err,
-                state: Some(S::into_repr(state)),
-                context_fn: self.context_fn,
-            }
-        } else {
-            Builder {
-                err: self.err,
-                state: None,
-                context_fn: self.context_fn,
-            }
-        }
-    }
-
-    fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
+    fn with_context_fn<F>(
+        self,
+        context_fn: F,
+    ) -> Self::Result<Builder<Self::E, Self::X, Self::S, F>>
     where
         F: ContextFn,
     {
         Builder {
             err: self.err,
             state: self.state,
+            _state_ty: self._state_ty,
             context_fn,
+        }
+    }
+
+    fn with_state<S>(
+        self,
+        state: S,
+    ) -> Self::Result<Builder<Self::E, state::Identity<S>, S, Self::F>>
+    where
+        S: State,
+    {
+        Builder {
+            state: state::Identity::new(state),
+            _state_ty: PhantomData,
+            err: self.err,
+            context_fn: self.context_fn,
+        }
+    }
+
+    fn with_state_fn<F, S>(self, f: F) -> Self::Result<Builder<Self::E, Lazy<F, S>, S, Self::F>>
+    where
+        F: FnOnce() -> S,
+        S: State + Sized,
+    {
+        Builder {
+            state: Lazy::new(f),
+            _state_ty: PhantomData,
+            err: self.err,
+            context_fn: self.context_fn,
         }
     }
 }
 
-impl<T, E1, S1, F1> BuilderExt for Result<T, Builder<E1, S1, F1>>
+impl<T, E1, X1, S1, F1> BuilderExt for Result<T, Builder<E1, X1, S1, F1>>
 where
     F1: ContextFn,
+    X1: StateFn<E1, S1>,
     S1: State + ?Sized,
 {
     type Result<E> = Result<T, E>;
 
     type E = E1;
+    type X = X1;
     type S = S1;
     type F = F1;
 
-    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F>>
-    where
-        S: State,
-    {
-        self.map_err(|err| Builder {
-            state: Some(state.into_repr()),
-            err: err.err,
-            context_fn: err.context_fn,
-        })
-    }
-
-    fn with_state_if<S, F>(self, state: S, f: F) -> Self::Result<Builder<Self::E, S, Self::F>>
-    where
-        S: State + Sized,
-        F: FnOnce(&Self::E) -> bool,
-    {
-        self.map_err(|builder| {
-            if builder.err.as_ref().map(f).unwrap_or_default() {
-                Builder {
-                    err: builder.err,
-                    state: Some(S::into_repr(state)),
-                    context_fn: builder.context_fn,
-                }
-            } else {
-                Builder {
-                    err: builder.err,
-                    state: None,
-                    context_fn: builder.context_fn,
-                }
-            }
-        })
-    }
-
-    fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
+    fn with_context_fn<F>(
+        self,
+        context_fn: F,
+    ) -> Self::Result<Builder<Self::E, Self::X, Self::S, F>>
     where
         F: ContextFn,
     {
-        self.map_err(|err| Builder {
-            err: err.err,
-            state: err.state,
+        self.map_err(|builder| Builder {
+            err: builder.err,
+            state: builder.state,
+            _state_ty: builder._state_ty,
             context_fn,
+        })
+    }
+
+    fn with_state<S>(
+        self,
+        state: S,
+    ) -> Self::Result<Builder<Self::E, state::Identity<S>, S, Self::F>>
+    where
+        S: State,
+    {
+        self.map_err(|builder| Builder {
+            state: state::Identity::new(state),
+            _state_ty: PhantomData,
+            err: builder.err,
+            context_fn: builder.context_fn,
+        })
+    }
+
+    fn with_state_fn<F, S>(self, f: F) -> Self::Result<Builder<Self::E, Lazy<F, S>, S, Self::F>>
+    where
+        F: FnOnce() -> S,
+        S: State + Sized,
+    {
+        self.map_err(|builder| Builder {
+            state: Lazy::new(f),
+            _state_ty: PhantomData,
+            err: builder.err,
+            context_fn: builder.context_fn,
         })
     }
 }
@@ -362,49 +378,141 @@ impl<T> BuilderExt for Option<T> {
     type Result<E> = Result<T, E>;
 
     type E = Infallible;
+    type X = state::Identity<Stateless>;
     type S = Stateless;
-    type F = Identity<Contextless>;
+    type F = context::Identity<Contextless>;
 
-    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F>>
-    where
-        S: State,
-    {
-        self.ok_or(Builder {
-            state: Some(state.into_repr()),
-            err: None,
-            context_fn: Identity(Contextless::new()),
-        })
-    }
-
-    /// Note: It's hard to define the semantics of this method on an `Option`; use `with_state` instead.
-    fn with_state_if<S, F>(self, state: S, _f: F) -> Self::Result<Builder<Self::E, S, Self::F>>
-    where
-        S: State + Sized,
-        F: FnOnce(&Self::E) -> bool,
-    {
-        self.ok_or(Builder {
-            err: None,
-            state: Some(S::into_repr(state)),
-            context_fn: Identity(Contextless::new()),
-        })
-    }
-
-    fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
+    fn with_context_fn<F>(
+        self,
+        context_fn: F,
+    ) -> Self::Result<Builder<Self::E, Self::X, Self::S, F>>
     where
         F: ContextFn,
     {
         self.ok_or(Builder {
             err: None,
-            state: None,
+            state: state::Identity::phantom(),
+            _state_ty: PhantomData,
             context_fn,
+        })
+    }
+
+    fn with_state<S>(
+        self,
+        state: S,
+    ) -> Self::Result<Builder<Self::E, state::Identity<S>, S, Self::F>>
+    where
+        S: State,
+    {
+        self.ok_or(Builder {
+            state: state::Identity::new(state),
+            _state_ty: PhantomData,
+            err: None,
+            context_fn: context::Identity(Contextless::new()),
+        })
+    }
+
+    fn with_state_fn<F, S>(self, f: F) -> Self::Result<Builder<Self::E, Lazy<F, S>, S, Self::F>>
+    where
+        F: FnOnce() -> S,
+        S: State + Sized,
+    {
+        self.ok_or(Builder {
+            state: Lazy::new(f),
+            _state_ty: PhantomData,
+            err: None,
+            context_fn: context::Identity(Contextless::new()),
         })
     }
 }
 
-impl<E1, S, F> ErrorExt for Builder<E1, S, F>
+impl<T, E1> DeriveExt for Result<T, E1>
+where
+    E1: error::Error + Send + Sync + 'static,
+{
+    type Result<E> = Result<T, E>;
+
+    type E = E1;
+    type F = context::Identity<Contextless>;
+
+    fn with_state_derived<F, S>(
+        self,
+        f: F,
+    ) -> Self::Result<Builder<Self::E, crate::state::Derive<F, Self::E, S>, S, Self::F>>
+    where
+        S: State,
+        F: FnOnce(&Self::E) -> Option<S>,
+    {
+        self.map_err(|err| Builder {
+            err: Some(err),
+            state: Derive::new(f),
+            _state_ty: PhantomData,
+            context_fn: context::Identity(Contextless::new()),
+        })
+    }
+}
+
+impl<E1, X1, S1, F1> DeriveExt for Builder<E1, X1, S1, F1>
+where
+    F1: ContextFn,
+    X1: StateFn<E1, S1>,
+    S1: State + ?Sized,
+{
+    type Result<E> = E;
+
+    type E = E1;
+    type F = F1;
+
+    fn with_state_derived<F, S>(
+        self,
+        f: F,
+    ) -> Self::Result<Builder<Self::E, Derive<F, Self::E, S>, S, Self::F>>
+    where
+        S: State,
+        F: FnOnce(&Self::E) -> Option<S>,
+    {
+        Builder {
+            err: self.err,
+            state: Derive::new(f),
+            _state_ty: PhantomData,
+            context_fn: self.context_fn,
+        }
+    }
+}
+
+impl<T, E1, X1, S1, F1> DeriveExt for Result<T, Builder<E1, X1, S1, F1>>
+where
+    F1: ContextFn,
+    X1: StateFn<E1, S1>,
+    S1: State + ?Sized,
+{
+    type Result<E> = Result<T, E>;
+
+    type E = E1;
+    type F = F1;
+
+    fn with_state_derived<F, S>(
+        self,
+        f: F,
+    ) -> Self::Result<Builder<Self::E, Derive<F, Self::E, S>, S, Self::F>>
+    where
+        S: State,
+        F: FnOnce(&Self::E) -> Option<S>,
+    {
+        self.map_err(|builder| Builder {
+            err: builder.err,
+            state: Derive::new(f),
+            _state_ty: PhantomData,
+            context_fn: builder.context_fn,
+        })
+    }
+}
+
+impl<E1, X, S, F> ErrorExt for Builder<E1, X, S, F>
 where
     E1: error::Error + Send + Sync + 'static,
     F: ContextFn,
+    X: StateFn<E1, S>,
     S: State + ?Sized,
 {
     type Result<E> = E;
@@ -415,9 +523,10 @@ where
     }
 }
 
-impl<S, F> ErrorExt for Builder<Error, S, F>
+impl<X, S, F> ErrorExt for Builder<Error, X, S, F>
 where
     F: ContextFn,
+    X: StateFn<Error, S>,
     S: State,
 {
     type Result<E> = E;
@@ -428,7 +537,7 @@ where
     }
 }
 
-impl<F> ErrorExt for Builder<Error, Stateless, F>
+impl<F> ErrorExt for Builder<Error, state::Identity<Stateless>, Stateless, F>
 where
     F: ContextFn,
 {
@@ -440,10 +549,11 @@ where
     }
 }
 
-impl<T, E1, S, F> ErrorExt for Result<T, Builder<E1, S, F>>
+impl<T, E1, X, S, F> ErrorExt for Result<T, Builder<E1, X, S, F>>
 where
     E1: error::Error + Send + Sync + 'static,
     F: ContextFn,
+    X: StateFn<E1, S>,
     S: State + ?Sized,
 {
     type Result<E> = Result<T, E>;
@@ -454,9 +564,10 @@ where
     }
 }
 
-impl<T, S, F> ErrorExt for Result<T, Builder<Error, S, F>>
+impl<T, X, S, F> ErrorExt for Result<T, Builder<Error, X, S, F>>
 where
     F: ContextFn,
+    X: StateFn<Error, S>,
     S: State,
 {
     type Result<E> = Result<T, E>;
@@ -467,7 +578,7 @@ where
     }
 }
 
-impl<T, F> ErrorExt for Result<T, Builder<Error, Stateless, F>>
+impl<T, F> ErrorExt for Result<T, Builder<Error, state::Identity<Stateless>, Stateless, F>>
 where
     F: ContextFn,
 {
@@ -476,5 +587,56 @@ where
 
     fn build_error(self) -> Self::Result<Error<Self::S>> {
         self.map_err(|err| err.build_error())
+    }
+}
+
+#[cfg(test)]
+mod _builder_cases_check {
+    use core::error;
+
+    use crate::{
+        Error,
+        builder::Builder,
+        context::{self, Contextless},
+        state::{self, State, StateFn, Stateless},
+    };
+
+    #[allow(dead_code)]
+    fn check_builder_cases<E, X, S>()
+    where
+        E: error::Error + Send + Sync + 'static,
+        X: StateFn<E, S>,
+        S: State,
+    {
+        // 1. From<Builder<E, S, F>> for Error<S>
+        let _: Error<S> = From::from(builder_fixture::<E, X, S>());
+        // 2. impl<E, S, F> From<Builder<E, S, F>> for Error
+        let _removed = ();
+        // 3. From<Builder<E, Identity<Stateless>, F>> for Error<S>
+        let _: Error = From::from(builder_fixture::<E, state::Identity<Stateless>, Stateless>());
+        // 4. From<Builder<Error<S>, Identity<Stateless>, F>> for Error<S>
+        let _: Error<S> = From::from(builder_fixture::<
+            Error<S>,
+            state::Identity<Stateless>,
+            Stateless,
+        >());
+        // 5. impl<S1, S, F, L> From<Builder<Error<S1>, S, F, L>> for Error
+        let _removed = ();
+        // 6. From<Builder<Error, Identity<Stateless>, F>> for Error<S>
+        let _: Error<S> = From::from(builder_fixture::<
+            Error,
+            state::Identity<Stateless>,
+            Stateless,
+        >());
+        // 7. From<Builder<Error, S, F>> for Error<S>
+        let _: Error<S> = From::from(builder_fixture::<Error, state::Identity<S>, S>());
+    }
+
+    fn builder_fixture<E, X, S>() -> Builder<E, X, S, context::Identity<Contextless>>
+    where
+        X: StateFn<E, S>,
+        S: State + ?Sized,
+    {
+        unimplemented!()
     }
 }

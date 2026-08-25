@@ -72,6 +72,104 @@ impl State for Stateless {
     type Repr = Infallible;
 }
 
+pub trait StateFn<E, S>
+where
+    S: State + ?Sized,
+{
+    fn call(self, derive_from: Option<&E>) -> Option<<S as State>::Repr>;
+}
+
+pub struct Identity<S>(pub Option<S::Repr>)
+where
+    S: State + ?Sized;
+
+impl<S> Identity<S>
+where
+    S: State + ?Sized,
+{
+    pub(crate) fn phantom() -> Self {
+        Self(None)
+    }
+}
+
+impl<S> Identity<S>
+where
+    S: State,
+{
+    pub(crate) fn new(state: S) -> Self {
+        Self(Some(S::into_repr(state)))
+    }
+}
+
+impl<E, S> StateFn<E, S> for Identity<S>
+where
+    S: State + ?Sized,
+{
+    fn call(self, _derive_from: Option<&E>) -> Option<S::Repr> {
+        Some(self.0?)
+    }
+}
+
+pub struct Lazy<F, S>
+where
+    S: State,
+    F: FnOnce() -> S,
+{
+    f: F,
+}
+
+impl<F, S> Lazy<F, S>
+where
+    S: State,
+    F: FnOnce() -> S,
+{
+    pub fn new(f: F) -> Self {
+        Self { f }
+    }
+}
+
+impl<F, E, S> StateFn<E, S> for Lazy<F, S>
+where
+    S: State,
+    F: FnOnce() -> S,
+{
+    fn call(self, _derive_from: Option<&E>) -> Option<S::Repr> {
+        Some(S::into_repr((self.f)()))
+    }
+}
+
+pub struct Derive<F, E, S>
+where
+    S: State,
+    F: FnOnce(&E) -> Option<S>,
+{
+    f: F,
+    _marker: PhantomData<fn(E)>,
+}
+
+impl<F, E, S> Derive<F, E, S>
+where
+    S: State,
+    F: FnOnce(&E) -> Option<S>,
+{
+    pub fn new(f: F) -> Self {
+        Self {
+            f,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<F, E, S> StateFn<E, S> for Derive<F, E, S>
+where
+    S: State,
+    F: FnOnce(&E) -> Option<S>,
+{
+    fn call(self, derive_from: Option<&E>) -> Option<S::Repr> {
+        Some(S::into_repr((self.f)(derive_from?)?))
+    }
+}
+
 /// An [`Error<S>`] with its state temporarily extracted.
 ///
 /// It maintains a compatible storage layout to support reattachment.

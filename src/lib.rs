@@ -171,9 +171,9 @@ use core::{
 
 use crate::{
     builder::Builder,
-    context::{Context, ContextFn, Contextless, Identity, Printable},
+    context::{Context, ContextFn, Contextless, Printable},
     raw::{ErasedRawError, RawError},
-    state::{State, Stateless, Vacant},
+    state::{Lazy, Derive, State, StateFn, Stateless, Vacant},
 };
 
 pub type Result<T, E = Error> = core::result::Result<T, E>;
@@ -649,6 +649,7 @@ pub trait BuilderExt: Sized {
     type Result<E>;
 
     type E;
+    type X: StateFn<Self::E, Self::S>;
     type S: State + ?Sized;
     type F: ContextFn;
 
@@ -669,63 +670,73 @@ pub trait BuilderExt: Sized {
     /// # }
     /// ```
     ///
-    fn with_context<C>(self, context: C) -> Self::Result<Builder<Self::E, Self::S, Identity<C>>>
+    fn with_context<C>(
+        self,
+        context: C,
+    ) -> Self::Result<Builder<Self::E, Self::X, Self::S, context::Identity<C>>>
     where
         C: Context,
     {
-        self.with_context_fn(Identity(context))
+        self.with_context_fn(context::Identity(context))
     }
 
-    /// Attaches a typed state.
-    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F>>
-    where
-        S: State + Sized;
-
-    /// Attaches a typed state if the previous error meets the given condition.
-    fn with_state_if<S, F>(self, state: S, f: F) -> Self::Result<Builder<Self::E, S, Self::F>>
-    where
-        S: State + Sized,
-        F: FnOnce(&Self::E) -> bool;
-
     /// Attaches a lazily-evaluated context.
-    fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
+    fn with_context_fn<F>(
+        self,
+        context_fn: F,
+    ) -> Self::Result<Builder<Self::E, Self::X, Self::S, F>>
     where
         F: ContextFn;
+
+    /// Lazily attaches a state.
+    fn with_state_fn<F, S>(self, f: F) -> Self::Result<Builder<Self::E, Lazy<F, S>, S, Self::F>>
+    where
+        F: FnOnce() -> S,
+        S: State;
+
+    /// Attaches a typed state.
+    fn with_state<S>(
+        self,
+        state: S,
+    ) -> Self::Result<Builder<Self::E, state::Identity<S>, S, Self::F>>
+    where
+        S: State;
 }
 
 impl<T> BuilderExt for Result<T, Error> {
     type Result<E> = Result<T, E>;
 
     type E = Error;
+    type X = state::Identity<Stateless>;
     type S = Stateless;
-    type F = Identity<Contextless>;
+    type F = context::Identity<Contextless>;
 
-    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F>>
+    fn with_context_fn<F>(
+        self,
+        context_fn: F,
+    ) -> Self::Result<Builder<Self::E, Self::X, Self::S, F>>
+    where
+        F: ContextFn,
+    {
+        self.map_err(|err| Builder::with_error(err).with_context_fn(context_fn))
+    }
+
+    fn with_state<S>(
+        self,
+        state: S,
+    ) -> Self::Result<Builder<Self::E, state::Identity<S>, S, Self::F>>
     where
         S: State,
     {
         self.map_err(|err| Builder::with_error(err).with_state(state))
     }
 
-    fn with_state_if<S, F>(self, state: S, f: F) -> Self::Result<Builder<Self::E, S, Self::F>>
+    fn with_state_fn<F, S>(self, f: F) -> Self::Result<Builder<Self::E, Lazy<F, S>, S, Self::F>>
     where
+        F: FnOnce() -> S,
         S: State + Sized,
-        F: FnOnce(&Self::E) -> bool,
     {
-        self.map_err(|err| {
-            if f(&err) {
-                Builder::with_error(err).with_state(state)
-            } else {
-                Builder::with_error(err).with_phantom_state()
-            }
-        })
-    }
-
-    fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
-    where
-        F: ContextFn,
-    {
-        self.map_err(|err| Builder::with_error(err).with_context_fn(context_fn))
+        self.map_err(|err| Builder::with_error(err).with_state_fn(f))
     }
 }
 
@@ -737,39 +748,96 @@ where
     type Result<E> = Result<T, E>;
 
     type E = Error<S1>;
+    type X = state::Identity<Stateless>;
     type S = Stateless;
-    type F = Identity<Contextless>;
+    type F = context::Identity<Contextless>;
 
-    /// Note: This method results in a builder with double states, which cannot be materialized
-    /// into an error. Use [`map_state`][StateExt::map_state] instead.
-    fn with_state<S>(self, state: S) -> Self::Result<Builder<Self::E, S, Self::F>>
+    fn with_context_fn<F>(
+        self,
+        context_fn: F,
+    ) -> Self::Result<Builder<Self::E, Self::X, Self::S, F>>
+    where
+        F: ContextFn,
+    {
+        self.map_err(|err| Builder::with_error(err).with_context_fn(context_fn))
+    }
+
+    /// Note: Calling this method on a stateful error results in a builder with double states,
+    /// which cannot be materialized into an error. Use [`map_state`][StateExt::map_state] instead.
+    fn with_state<S>(
+        self,
+        state: S,
+    ) -> Self::Result<Builder<Self::E, state::Identity<S>, S, Self::F>>
     where
         S: State,
     {
         self.map_err(|err| Builder::with_error(err).with_state(state))
     }
 
-    /// Note: This method results in a builder with double states, which cannot be materialized
-    /// into an error. Use [`map_state`][StateExt::map_state] instead.
-    fn with_state_if<S, F>(self, state: S, f: F) -> Self::Result<Builder<Self::E, S, Self::F>>
+    /// Note: Calling this method on a stateful error results in a builder with double states,
+    /// which cannot be materialized into an error. Use [`map_state`][StateExt::map_state] instead.
+    fn with_state_fn<F, S>(self, f: F) -> Self::Result<Builder<Self::E, Lazy<F, S>, S, Self::F>>
     where
-        S: State + Sized,
-        F: FnOnce(&Self::E) -> bool,
+        S: State,
+        F: FnOnce() -> S,
     {
-        self.map_err(|err| {
-            if f(&err) {
-                Builder::with_error(err).with_state(state)
-            } else {
-                Builder::with_error(err).with_phantom_state()
-            }
-        })
+        self.map_err(|err| Builder::with_error(err).with_state_fn(f))
     }
+}
 
-    fn with_context_fn<F>(self, context_fn: F) -> Self::Result<Builder<Self::E, Self::S, F>>
+pub trait DeriveExt {
+    type Result<E>;
+
+    type E;
+    type F: ContextFn;
+
+    /// Lazily derives a state from the error.
+    fn with_state_derived<F, S>(
+        self,
+        f: F,
+    ) -> Self::Result<Builder<Self::E, Derive<F, Self::E, S>, S, Self::F>>
     where
-        F: ContextFn,
+        S: State,
+        F: FnOnce(&Self::E) -> Option<S>;
+}
+
+impl<T> DeriveExt for Result<T, Error> {
+    type Result<E> = Result<T, E>;
+
+    type E = Error;
+    type F = context::Identity<Contextless>;
+
+    fn with_state_derived<F, S>(
+        self,
+        f: F,
+    ) -> Self::Result<Builder<Self::E, Derive<F, Self::E, S>, S, Self::F>>
+    where
+        S: State,
+        F: FnOnce(&Self::E) -> Option<S>,
     {
-        self.map_err(|err| Builder::with_error(err).with_context_fn(context_fn))
+        self.map_err(|err| Builder::with_error(err).with_state_derived(f))
+    }
+}
+
+// Combinators for builder case #4: erratic error; state+stateless -> state.
+impl<T, S1> DeriveExt for Result<T, Error<S1>>
+where
+    S1: State,
+{
+    type Result<E> = Result<T, E>;
+
+    type E = Error<S1>;
+    type F = context::Identity<Contextless>;
+
+    fn with_state_derived<F, S>(
+        self,
+        f: F,
+    ) -> Self::Result<Builder<Self::E, Derive<F, Self::E, S>, S, Self::F>>
+    where
+        S: State,
+        F: FnOnce(&Self::E) -> Option<S>,
+    {
+        self.map_err(|err| Builder::with_error(err).with_state_derived(f))
     }
 }
 

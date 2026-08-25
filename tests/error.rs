@@ -1,9 +1,13 @@
-use core::error;
+use core::{cell::Cell, error};
 
 #[cfg(test)]
 use erratic::test_fixtures::*;
 use erratic::{builder::Builder, *};
-use std::{assert_matches, mem};
+use std::{
+    assert_matches,
+    io::{self, ErrorKind},
+    mem,
+};
 
 #[test]
 fn from_error_round_trip() {
@@ -243,7 +247,7 @@ fn chain_wraps_source() {
 
 #[test]
 fn from_std_error_via_into() {
-    let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
+    let io_err = io::Error::new(ErrorKind::NotFound, "file missing");
     let err: Error = io_err.into();
     assert!(err.into_source().is_some());
 }
@@ -514,4 +518,86 @@ fn find_looks_up_error_chain() {
 
     // Should not find a type not in the chain
     assert!(err.find::<core::fmt::Error>().is_none());
+}
+
+#[derive(Debug, PartialEq)]
+enum IoState {
+    NotFound,
+}
+
+#[test]
+fn with_state_fn_attaches_state() {
+    let res: Result<(), io::Error> = Err(io::Error::new(ErrorKind::Other, "boom"));
+    let built: Result<(), Error<IoState>> = res.with_state_fn(|| IoState::NotFound).build_error();
+    let err = built.unwrap_err();
+    assert_eq!(err.state(), Some(&IoState::NotFound));
+    assert!(err.find::<io::Error>().is_some());
+}
+
+#[test]
+fn with_state_fn_evaluates_lazily() {
+    let calls = Cell::new(0u32);
+    let res: Result<(), io::Error> = Err(io::Error::new(ErrorKind::Other, "boom"));
+    let builder = res.with_state_fn(|| {
+        calls.set(calls.get() + 1);
+        IoState::NotFound
+    });
+    assert_eq!(calls.get(), 0);
+    let built: Result<(), Error<IoState>> = builder.build_error();
+    assert_eq!(calls.get(), 1);
+    built.unwrap_err();
+}
+
+#[test]
+fn with_state_fn_ok_short_circuits() {
+    let res: Result<u32, io::Error> = Ok(42);
+    let built: Result<u32, Error<IoState>> = res.with_state_fn(|| IoState::NotFound).build_error();
+    assert_eq!(built.unwrap(), 42);
+}
+
+#[test]
+fn with_state_fn_keeps_context() {
+    let res: Result<(), io::Error> = Err(io::Error::new(ErrorKind::Other, "boom"));
+    let built: Result<(), Error<IoState>> = res
+        .with_state_fn(|| IoState::NotFound)
+        .with_context(TestMessage::HOGE)
+        .build_error();
+    let err = built.unwrap_err();
+    assert_eq!(err.state(), Some(&IoState::NotFound));
+    let (_, context, _) = err.into_parts::<TestMessage, TestError>();
+    assert_matches!(context, Some(TestMessage::HOGE));
+}
+
+fn derive_io_state(err: &io::Error) -> Option<IoState> {
+    match err.kind() {
+        ErrorKind::NotFound => Some(IoState::NotFound),
+        _ => None,
+    }
+}
+
+#[test]
+fn with_state_derived_maps_io_not_found() {
+    let res: Result<(), io::Error> = Err(io::Error::new(ErrorKind::NotFound, "no such file"));
+    let built: Result<(), Error<IoState>> = res.with_state_derived(derive_io_state).build_error();
+    let err = built.unwrap_err();
+    assert_eq!(err.state(), Some(&IoState::NotFound));
+    assert!(err.find::<std::io::Error>().is_some());
+}
+
+#[test]
+fn with_state_derived_none_leaves_state_empty() {
+    let res: Result<(), io::Error> = Err(io::Error::new(ErrorKind::PermissionDenied, "denied"));
+    let built: Result<(), Error<IoState>> = res.with_state_derived(derive_io_state).build_error();
+    let err = built.unwrap_err();
+    assert!(err.state().is_none());
+    assert!(err.find::<std::io::Error>().is_some());
+}
+
+#[test]
+fn with_state_derived_ok_short_circuits() {
+    let res: Result<u32, io::Error> = Ok(7);
+    let built: Result<u32, Error<IoState>> = res
+        .with_state_derived(|_| Some(IoState::NotFound))
+        .build_error();
+    assert_eq!(built.unwrap(), 7);
 }
