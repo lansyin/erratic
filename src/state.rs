@@ -108,7 +108,7 @@ where
     S: State + ?Sized,
 {
     fn call(self, _derive_from: Option<&E>) -> Option<S::Repr> {
-        Some(self.0?)
+        self.0
     }
 }
 
