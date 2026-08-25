@@ -320,6 +320,8 @@
 )[#code-targets(
   targets: (
     interactive_login_line_1_ret: (1, "Result<()>"),
+    interactive_login_line_4_match: (4, "match"),
+    interactive_login_line_4_extract: (4, ".extract_state"),
     interactive_login_line_4_try: (4, "?"),
     interactive_login_line_6_state: (6, "State"),
     interactive_login_line_6_continue: (6, "continue"),
@@ -343,19 +345,20 @@
 )[#code-targets(
   targets: (
     login_line_1_ret: (1, "Error<State>"),
-    login_line_3_state: (3, "State"),
-    login_line_3_try: (3, "?"),
-    login_line_4_try: (4, "?"),
+    login_line_2_state: (2, "State::Unauthorized)?"),
+    login_line_3_state: (5, "State::Unauthorized))"),
+    login_line_3_try: (5, "?"),
+    login_line_4_try: (6, "?"),
   ),
   // preview: true,
 )[
   ```rs
   fn login(&self, cred: Cred) -> Result<(), Error<State>> {
+      mksure!(!cred.is_empty(), state = State::Unauthorized)?;
       let resp = self.client.request(LOGIN_URL, cred)
-          .with_state_if(State::Unauthorized, http::is_401)?;
+          .with_state_derived(
+            map_status!(401 => State::Unauthorized))?;
       self.persist_apikey(resp.body)?;
-      Ok(())
-  }
   ```
 ]])
 
@@ -366,10 +369,9 @@
 )[#code-targets(
   targets: (
     persist_apikey_line_1_ret: (1, "Result<()>"),
-    persist_apikey_line_3_return: (3, "return"),
-    persist_apikey_line_3_mkres: (3, "mkres!"),
+    persist_apikey_line_3_return: (3, "return mkres!(\"no database available\")"),
     persist_apikey_line_3_end: (3, ";"),
-    persist_apikey_line_5_try: (5, "?"),
+    persist_apikey_line_6_try: (6, ".with_context(\"unable to upsert apikey\")?"),
   ),
   // preview: true,
 )[
@@ -378,8 +380,8 @@
       let Some(conn) = self.db.get_conn() else {
           return mkres!("no database available");
       };
-      Ok(conn.upsert_apikey(key)?)
-  }
+      conn.upsert_apikey(key)
+          .with_context("unable to upsert apikey")?;
   ```
 ]])
 
@@ -417,70 +419,69 @@
 
 #place(right + bottom, dx: -20pt, dy: -20pt, block[
   #set align(left)
-  #stack(
-    dir: rtl,
-    spacing: .5em,
-    stack(
-      dir: btt,
-      spacing: 1.5em,
-      repr_area(title: "stack")[
-        #stack(
-          dir: btt,
-          spacing: .5em,
-          [
-            #repr_struct(
-              name: "Error",
-              comment: [#box(fill: rgb("#efffdd"))[tag]=10],
-              repr_field("state", comment: "< 1 usize"),
-              repr_field(
-                "pad",
-                comment: "6 bits",
-                fill: rgb("#ffffff00"),
-              ),
-              repr_field(
-                "tag",
-                comment: "2 bits",
-                fill: rgb("#efffdd"),
-              ),
-            ) #label("error_tag10")
-          ],
-          [
-            #repr_struct(
-              name: "Error",
-              comment: [#box(fill: rgb("#efffdd"))[tag]=01],
-              [#repr_field("ptr", comment: "align=4") #label("error_tag01_ptr")],
-              repr_field(
-                "tag",
-                comment: "2 bits",
-                fill: rgb("#efffdd"),
-              ),
-            ) #label("error_tag01")
-          ],
-        )
-      ],
-      block[
-        #box[#line(stroke: rgb("#ff7ddfdd"), length: 16pt)] #text(size: .9em, "No alloc.") \
-        #box[#line(stroke: rgb("#74c0ffdd"), length: 16pt)] #text(size: .9em, "Alloc once.") \
-        #box[#line(stroke: rgb("#ff9249dd"), length: 16pt)] #text(size: .9em, "Alloc on demand.") \
-      ],
-    ),
-    repr_area(title: "heap")[
+  #let heap = repr_area(title: "heap")[
+    #repr_struct(
+      name: "BoxedBody",
+      comment: "Unused fields collapse to ZSTs.",
+      repr_field("vtable", comment: "align=4"),
+      repr_field("tag", comment: "2 bits", fill: rgb("#ddffef")),
+      repr_field("state", comment: [#box(fill: rgb("#ddffef"))[tag]ged]),
+      repr_field("error"),
+      repr_field("context"),
+    )
+    #label("boxed_body")
+  ]
+  #let stack_error_tag01 = repr_area(title: "stack")[
+    #repr_struct(
+      name: "Error",
+      comment: [#box(fill: rgb("#efffdd"))[tag]=01],
+      [#repr_field("ptr", comment: "align=4") #label("error_tag01_ptr")],
+      repr_field("tag", comment: "2 bits", fill: rgb("#efffdd")),
+    ) #label("error_tag01")
+  ]
+  #let stack_error_tag10 = repr_area(title: "stack")[
+    #stack(dir: ttb, spacing: .5em, [
       #repr_struct(
-        name: "BoxedBody",
-        comment: "Unused fields collapse to ZST.",
-        repr_field("vtable", comment: "align=4"),
-        repr_field(
-          "tag",
-          comment: "2 bits",
-          fill: rgb("#ddffef"),
-        ),
-        repr_field("state", comment: [#box(fill: rgb("#ddffef"))[tag]ged]),
-        repr_field("error"),
-        repr_field("context"),
-      )
-      #label("boxed_body")
-    ],
+        name: "Error",
+        comment: [#box(fill: rgb("#efffdd"))[tag]=10],
+        repr_field("state", comment: "< 1 usize"),
+        repr_field("pad", comment: "6 bits", fill: rgb("#ffffff00")),
+        repr_field("tag", comment: "2 bits", fill: rgb("#efffdd")),
+      ) #label("error_tag10")
+    ])
+  ]
+  #let line_anno = block[
+    #box[#line(stroke: rgb("#ff7ddfdd"), length: 16pt)] #text(size: .9em, "No alloc.") \
+    #box[#line(stroke: rgb("#74c0ffdd"), length: 16pt)] #text(size: .9em, "Alloc once.") \
+    #box[#line(stroke: rgb("#ff9249dd"), length: 16pt)] #text(size: .9em, "Alloc on demand.") \
+  ]
+  #let sample_grid = grid(
+    gutter: .5em,
+    columns: (auto, auto),
+    [], line_anno,
+    [], stack_error_tag10,
+    stack_error_tag01, heap,
   )
+
+  #context {
+    let size_sample_grid = measure(sample_grid)
+    box(width: size_sample_grid.width)[
+      #stack(
+        dir: ttb,
+        grid(
+          gutter: 1em,
+          columns: (1fr, auto),
+          box[], line_anno,
+          box[], stack_error_tag10,
+        ),
+        grid(
+          gutter: .5em,
+          columns: (auto, auto),
+          stack_error_tag01, heap,
+        ),
+      )
+    ]
+  }
 ])
 
 #place(right + bottom, dx: -20pt, dy: -20pt, block[
@@ -491,6 +492,8 @@
 
 #context {
   let interactive_login_line_1_ret = bottom_ends("interactive_login_line_1_ret")
+  let interactive_login_line_4_extract = bottom_ends("interactive_login_line_4_extract")
+  let interactive_login_line_4_match = bottom_ends("interactive_login_line_4_match")
   let interactive_login_line_4_try = bottom_ends("interactive_login_line_4_try")
   let interactive_login_line_6_state = bottom_ends("interactive_login_line_6_state")
   let interactive_login_line_6_continue = bottom_ends("interactive_login_line_6_continue")
@@ -499,28 +502,31 @@
   let login_line_3_state = bottom_ends("login_line_3_state")
   let login_line_4_try = bottom_ends("login_line_4_try")
   let persist_apikey_line_1_ret = bottom_ends("persist_apikey_line_1_ret")
+  let login_line_2_state = bottom_ends("login_line_2_state")
   let persist_apikey_line_3_return = bottom_ends("persist_apikey_line_3_return")
   let persist_apikey_line_3_end = bottom_ends("persist_apikey_line_3_end")
-  let persist_apikey_line_5_try = bottom_ends("persist_apikey_line_5_try")
+  let persist_apikey_line_6_try = bottom_ends("persist_apikey_line_6_try")
 
-  let persist_apikey_line_3_mkres_top = edge_center("persist_apikey_line_3_mkres", align: top)
+  let persist_apikey_line_3_return_top = edge_center("persist_apikey_line_3_return", align: top)
   let error_tag00_bottom = edge_center("error_tag00", align: bottom)
   let error_tag00_ptr_top = edge_center("error_tag00_ptr", align: top)
   let static_str_bottom = edge_center("static_str", align: bottom)
   let static_str_ptr_top = edge_center("static_str_ptr", align: top)
   let str_head_bottom = edge_center("str_head", align: bottom)
 
-  let persist_apikey_line_5_try_right = edge_center("persist_apikey_line_5_try", align: right)
+  let persist_apikey_line_6_try_right = edge_center("persist_apikey_line_6_try", align: right)
   let error_tag01_left_top = edge_center("error_tag01", align: left + top)
-  let error_tag01_ptr_left = edge_center("error_tag01_ptr", align: left)
-  let boxed_body_right = edge_center("boxed_body", align: right)
+  let error_tag01_right = edge_center("error_tag01", align: right)
+  let boxed_body_left = edge_center("boxed_body", align: left)
 
+  let login_line_3_state_right = edge_center("login_line_3_state", align: right)
+  let login_line_2_state_right = edge_center("login_line_2_state", align: right)
   let login_line_3_try_right = edge_center("login_line_3_try", align: right)
   let error_tag10_left_top = edge_center("error_tag10", align: left + top)
 
-  place(left + top, dx: 1pt, dy: 0.15em, spline(
+  place(left + top, dx: 0.0pt, dy: 0.17em, spline(
     points: (
-      persist_apikey_line_5_try,
+      persist_apikey_line_6_try,
       persist_apikey_line_1_ret,
       login_line_4_try,
       login_line_1_ret,
@@ -530,11 +536,10 @@
     stroke: rgb("#74c0ffdd"),
     // tension: 1,
   ))
-  place(left + top, dx: 0pt, dy: 0.05em, spline(
+  place(left + top, dx: -0.2pt, dy: 0.05em, spline(
     points: (
       persist_apikey_line_3_return,
-      persist_apikey_line_3_end,
-      persist_apikey_line_1_ret.rev(),
+      persist_apikey_line_1_ret,
       login_line_4_try,
       login_line_1_ret,
       interactive_login_line_4_try.rev(),
@@ -543,21 +548,33 @@
     stroke: rgb("#ff7ddfdd"),
     // tension: 1,
   ))
-  place(left + top, dx: 0pt, dy: 0.25em, spline(
+  place(left + top, dx: 0pt, dy: 0.29em, spline(
     points: (
       login_line_3_state,
-      login_line_3_try,
       login_line_1_ret.rev(),
+      interactive_login_line_4_match,
       interactive_login_line_6_state,
       interactive_login_line_6_continue,
     ).join(),
     stroke: rgb("#ff9249dd"),
     // tension: 1,
   ))
+  place(left + top, dx: 0pt, dy: 0.29em, spline(
+    points: (
+      login_line_2_state,
+      login_line_1_ret.rev(),
+    )
+      .join()
+      .slice(0, -1),
+    stroke: rgb("#ff9249dd"),
+    // tension: 1,
+  ))
 
   place(left + top, wire(
-    persist_apikey_line_3_mkres_top,
+    persist_apikey_line_3_return_top,
     error_tag00_bottom,
+    comment: [#text(font: "DejaVu Sans Mono", size: .75em, "Context") only],
+    comment_pos: .75,
   ))
   place(left + top, wire(
     error_tag00_ptr_top,
@@ -569,24 +586,23 @@
   ))
 
   place(left + top, wire(
-    persist_apikey_line_5_try_right,
+    persist_apikey_line_6_try_right,
     error_tag01_left_top,
+    comment: text(font: "DejaVu Sans Mono", size: .75em, "Error & Context"),
   ))
   place(left + top, wire(
-    error_tag01_ptr_left,
-    boxed_body_right,
+    error_tag01_right,
+    boxed_body_left,
   ))
 
   place(left + top, wire(
     login_line_3_try_right,
     error_tag01_left_top,
-    comment: [on #text(font: "DejaVu Sans Mono", size: .75em, "Result")],
-    comment_pos: 0.65,
+    comment: text(font: "DejaVu Sans Mono", size: .75em, "State & Error"),
   ))
   place(left + top, wire(
-    login_line_3_try_right,
+    login_line_2_state_right,
     error_tag10_left_top,
-    comment: [on #text(font: "DejaVu Sans Mono", size: .75em, "Option")],
-    comment_pos: 0.7,
+    comment: [#text(font: "DejaVu Sans Mono", size: .75em, "State") only],
   ))
 }
