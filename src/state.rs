@@ -80,7 +80,7 @@ where
     fn call(self, derive_from: Option<&E>) -> Option<<S as State>::Repr>;
 }
 
-/// A wrapper that wraps values as [`StateFn`].
+/// A wrapper that wraps values as [`StateFn`]. See [`with_state`][crate::BuilderExt::with_state].
 pub struct Identity<S>(pub Option<S::Repr>)
 where
     S: State + ?Sized;
@@ -112,7 +112,7 @@ where
     }
 }
 
-/// A lazily evaluated state.
+/// A lazily evaluated state. See [`with_state_fn`][crate::BuilderExt::with_state_fn].
 pub struct Lazy<F, S>
 where
     S: State,
@@ -141,7 +141,7 @@ where
     }
 }
 
-/// Derives a state from an error, if any.
+/// Derives a state from an error, if any. See [`with_state_derived`][crate::DeriveExt::with_state_derived].
 pub struct Derive<F, E, S>
 where
     S: State,
