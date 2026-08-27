@@ -1631,6 +1631,60 @@ mod tests {
         assert_eq!(err.state(), Some(&42i128));
     }
 
+    // --- is_source_only ---
+
+    #[test]
+    fn is_source_only_accuracy() {
+        // 1. Only a source: source-only.
+        let err = RawError::new(None::<Infallible>, Some(TestError::FOO), Contextless::new());
+        assert!(err.is_source_only());
+
+        // 2. Only a context: not source-only.
+        // Note: `String` is a lazy context, forcing the boxed variant.
+        let err = RawError::new(None::<Infallible>, None::<Infallible>, String::from("ctx"));
+        assert!(
+            err.get_alloc_fingerprint().is_some(),
+            "expected a boxed variant"
+        );
+        assert!(!err.is_source_only());
+
+        // 3. Only a state: not source-only.
+        // Note: `u128` is too large for the inline variant, forcing the boxed variant.
+        let err = RawError::new(Some(42u128), None::<Infallible>, Contextless::new());
+        assert!(
+            err.get_alloc_fingerprint().is_some(),
+            "expected a boxed variant"
+        );
+        assert!(!err.is_source_only());
+
+        // 3.5. Only a state, erased: a frozen state still counts, so not source-only.
+        let err = RawError::new(Some(42u128), None::<Infallible>, Contextless::new());
+        let err = err.erase_state();
+        assert!(!err.is_source_only());
+
+        // 4. A source and a state: not source-only.
+        let err = RawError::new(Some(42u128), Some(TestError::FOO), Contextless::new());
+        assert!(!err.is_source_only());
+
+        // 5. A source and a state, erased: not source-only.
+        let err = RawError::new(Some(42u128), Some(TestError::FOO), Contextless::new());
+        let err = err.erase_state();
+        assert!(!err.is_source_only());
+
+        // 6. A context and a state: not source-only.
+        let err = RawError::new(Some(42u128), None::<Infallible>, String::from("ctx"));
+        assert!(
+            err.get_alloc_fingerprint().is_some(),
+            "expected a boxed variant"
+        );
+        assert!(!err.is_source_only());
+
+        // 7. A context and a state, erased: not source-only.
+        let err = RawError::new(Some(42u128), None::<Infallible>, String::from("ctx"));
+        let err = err.erase_state();
+        assert!(!err.is_source_only());
+    }
+
     // --- Layer elimination ---
 
     #[test]
