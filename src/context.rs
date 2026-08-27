@@ -30,7 +30,7 @@ pub trait Context: Sized {
 }
 
 /// A context with its alternatives explicitly excluded.
-pub struct Unique<C: Context>(pub C);
+pub struct Unique<C: Context>(C);
 
 impl<C> Context for Unique<C>
 where

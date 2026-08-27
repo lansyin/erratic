@@ -82,7 +82,7 @@ where
 }
 
 /// A wrapper that wraps values as [`StateFn`]. See [`with_state`][crate::BuilderExt::with_state].
-pub struct Identity<S>(pub Option<S::Repr>)
+pub struct Identity<S>(Option<S::Repr>)
 where
     S: State + ?Sized;
 
