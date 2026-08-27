@@ -354,7 +354,9 @@ fn vacant_try_with_state_converts_i8_to_i16() {
     // force the boxed variant, where the `i8` state lives in a reusable `Ministate`.
     let err: Error<i8> = mkerr!(state = 42i8, error = TestError::FOO);
 
-    let (state, vacant) = err.extract_state().expect("state extraction should succeed");
+    let (state, vacant) = err
+        .extract_state()
+        .expect("state extraction should succeed");
     assert_eq!(state, 42i8);
 
     // Convert `Error<i8>` into `Error<i16>` by reusing the existing storage.

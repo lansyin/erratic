@@ -1,4 +1,7 @@
-//! Builder for constructing errors.
+//! Auxiliary types and traits for combinators.
+//!
+//! Disclaimer: Types in this module should not be used directly. They are auxiliary and may change
+//! without a major version bump.
 use core::{convert::Infallible, error, fmt::Debug, marker::PhantomData};
 
 use crate::{
@@ -8,6 +11,9 @@ use crate::{
     raw::RawError,
     state::{self, Derive, Lazy, State, StateFn, Stateless},
 };
+
+/// A placeholder type for builders without a source error.
+pub enum Errorless {}
 
 /// An intermediate builder for constructing an [`Error`].
 #[derive(Debug)]
@@ -23,7 +29,7 @@ where
     context_fn: F,
 }
 
-impl Builder<Infallible, state::Identity<Stateless>, Stateless, context::Identity<Contextless>> {
+impl Builder<Errorless, state::Identity<Stateless>, Stateless, context::Identity<Contextless>> {
     /// Starts building an `Error` from a source error.
     pub fn with_error<E>(
         err: E,
@@ -39,7 +45,7 @@ impl Builder<Infallible, state::Identity<Stateless>, Stateless, context::Identit
     /// Starts building an `Error` with a state.
     pub fn with_state<S>(
         state: S,
-    ) -> Builder<Infallible, state::Identity<S>, S, context::Identity<Contextless>>
+    ) -> Builder<Errorless, state::Identity<S>, S, context::Identity<Contextless>>
     where
         S: State,
     {
@@ -53,7 +59,7 @@ impl Builder<Infallible, state::Identity<Stateless>, Stateless, context::Identit
 
     pub fn with_state_fn<F, S>(
         f: F,
-    ) -> Builder<Infallible, Lazy<F, S>, S, context::Identity<Contextless>>
+    ) -> Builder<Errorless, Lazy<F, S>, S, context::Identity<Contextless>>
     where
         S: State,
         F: FnOnce() -> S,
@@ -69,7 +75,7 @@ impl Builder<Infallible, state::Identity<Stateless>, Stateless, context::Identit
     /// Starts building an `Error` with a context.
     pub fn with_context<C>(
         context: C,
-    ) -> Builder<Infallible, state::Identity<Stateless>, Stateless, context::Identity<C>>
+    ) -> Builder<Errorless, state::Identity<Stateless>, Stateless, context::Identity<C>>
     where
         C: Context,
     {
@@ -86,7 +92,7 @@ impl Builder<Infallible, state::Identity<Stateless>, Stateless, context::Identit
     /// The closure `context_fn` is called only when the error is materialized.
     pub fn with_context_fn<F>(
         context_fn: F,
-    ) -> Builder<Infallible, state::Identity<Stateless>, Stateless, F>
+    ) -> Builder<Errorless, state::Identity<Stateless>, Stateless, F>
     where
         F: ContextFn,
     {
@@ -119,6 +125,26 @@ where
     }
 }
 
+// Companion impl for Builder Case #1.
+impl<X, S, F> From<Builder<Errorless, X, S, F>> for Error<S>
+where
+    F: ContextFn,
+    X: StateFn<Errorless, S>,
+    S: State + ?Sized,
+{
+    fn from(value: Builder<Errorless, X, S, F>) -> Self {
+        let state = value.state.call(value.err.as_ref());
+        match (state, value.err, !matches!(F::Output::VALUE, Value::None)) {
+            (None, None, false) => unreachable!(),
+            (state, None, _) => Error::<S>(RawError::from_error(
+                state,
+                None::<Infallible>,
+                value.context_fn.call(),
+            )),
+        }
+    }
+}
+
 // Builder Case #2: generic error; state -> stateless
 // Removed as it has no meaningful use case.
 // Signature: impl<E, S, F> From<Builder<E, S, F>> for Error
@@ -135,6 +161,24 @@ where
             (None, false) => unreachable!(),
             (Some(err), false) => err.into(),
             (err, _) => Error(RawError::from_error(None, err, value.context_fn.call())),
+        }
+    }
+}
+
+// Companion impl for Builder Case #3.
+impl<S, F> From<Builder<Errorless, state::Identity<Stateless>, Stateless, F>> for Error<S>
+where
+    F: ContextFn,
+    S: State,
+{
+    fn from(value: Builder<Errorless, state::Identity<Stateless>, Stateless, F>) -> Self {
+        match (value.err, !matches!(F::Output::VALUE, Value::None)) {
+            (None, false) => unreachable!(),
+            (None, true) => Error(RawError::from_error(
+                None,
+                None::<Infallible>,
+                value.context_fn.call(),
+            )),
         }
     }
 }
@@ -188,7 +232,7 @@ where
     }
 }
 
-// Builder Case #7: generic error; stateless+state -> state
+// Builder Case #7: erratic error; stateless+state -> state
 impl<X, S, F> From<Builder<Error, X, S, F>> for Error<S>
 where
     F: ContextFn,
@@ -377,7 +421,7 @@ where
 impl<T> BuilderExt for Option<T> {
     type Result<E> = Result<T, E>;
 
-    type E = Infallible;
+    type E = Errorless;
     type X = state::Identity<Stateless>;
     type S = Stateless;
     type F = context::Identity<Contextless>;
@@ -454,6 +498,7 @@ where
 
 impl<E1, X1, S1, F1> DeriveExt for Builder<E1, X1, S1, F1>
 where
+    E1: error::Error,
     F1: ContextFn,
     X1: StateFn<E1, S1>,
     S1: State + ?Sized,
@@ -482,6 +527,7 @@ where
 
 impl<T, E1, X1, S1, F1> DeriveExt for Result<T, Builder<E1, X1, S1, F1>>
 where
+    E1: error::Error,
     F1: ContextFn,
     X1: StateFn<E1, S1>,
     S1: State + ?Sized,
@@ -523,6 +569,20 @@ where
     }
 }
 
+impl<X, S, F> ErrorExt for Builder<Errorless, X, S, F>
+where
+    F: ContextFn,
+    X: StateFn<Errorless, S>,
+    S: State + ?Sized,
+{
+    type Result<E> = E;
+    type S = S;
+
+    fn build_error(self) -> Self::Result<Error<Self::S>> {
+        self.into()
+    }
+}
+
 impl<X, S, F> ErrorExt for Builder<Error, X, S, F>
 where
     F: ContextFn,
@@ -554,6 +614,20 @@ where
     E1: error::Error + Send + Sync + 'static,
     F: ContextFn,
     X: StateFn<E1, S>,
+    S: State + ?Sized,
+{
+    type Result<E> = Result<T, E>;
+    type S = S;
+
+    fn build_error(self) -> Self::Result<Error<Self::S>> {
+        self.map_err(Error::from)
+    }
+}
+
+impl<T, X, S, F> ErrorExt for Result<T, Builder<Errorless, X, S, F>>
+where
+    F: ContextFn,
+    X: StateFn<Errorless, S>,
     S: State + ?Sized,
 {
     type Result<E> = Result<T, E>;
@@ -608,9 +682,9 @@ mod _builder_cases_check {
         X: StateFn<E, S>,
         S: State,
     {
-        // 1. From<Builder<E, S, F>> for Error<S>
+        // 1. From<Builder<E, X, S, F>> for Error<S>
         let _: Error<S> = From::from(builder_fixture::<E, X, S>());
-        // 2. impl<E, S, F> From<Builder<E, S, F>> for Error
+        // 2. From<Builder<E, S, F>> for Error
         let _removed = ();
         // 3. From<Builder<E, Identity<Stateless>, F>> for Error<S>
         let _: Error = From::from(builder_fixture::<E, state::Identity<Stateless>, Stateless>());
@@ -620,7 +694,7 @@ mod _builder_cases_check {
             state::Identity<Stateless>,
             Stateless,
         >());
-        // 5. impl<S1, S, F, L> From<Builder<Error<S1>, S, F, L>> for Error
+        // 5. From<Builder<Error<S1>, S, F, L>> for Error
         let _removed = ();
         // 6. From<Builder<Error, Identity<Stateless>, F>> for Error<S>
         let _: Error<S> = From::from(builder_fixture::<

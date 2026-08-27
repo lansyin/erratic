@@ -771,46 +771,6 @@ pub trait DeriveExt {
         F: FnOnce(&Self::E) -> Option<S>;
 }
 
-impl<T> DeriveExt for Result<T, Error> {
-    type Result<E> = Result<T, E>;
-
-    type E = Error;
-    type F = context::Identity<Contextless>;
-
-    fn with_state_derived<F, S>(
-        self,
-        f: F,
-    ) -> Self::Result<Builder<Self::E, Derive<F, Self::E, S>, S, Self::F>>
-    where
-        S: State,
-        F: FnOnce(&Self::E) -> Option<S>,
-    {
-        self.map_err(|err| Builder::with_error(err).with_state_derived(f))
-    }
-}
-
-// Combinators for builder case #4: erratic error; state+stateless -> state.
-impl<T, S1> DeriveExt for Result<T, Error<S1>>
-where
-    S1: State,
-{
-    type Result<E> = Result<T, E>;
-
-    type E = Error<S1>;
-    type F = context::Identity<Contextless>;
-
-    fn with_state_derived<F, S>(
-        self,
-        f: F,
-    ) -> Self::Result<Builder<Self::E, Derive<F, Self::E, S>, S, Self::F>>
-    where
-        S: State,
-        F: FnOnce(&Self::E) -> Option<S>,
-    {
-        self.map_err(|err| Builder::with_error(err).with_state_derived(f))
-    }
-}
-
 /// Extension trait for materializing or erasing an error.
 pub trait ErrorExt: Sized {
     type Result<E>;

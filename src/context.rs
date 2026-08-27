@@ -1,4 +1,7 @@
-//! Context helpers and traits.
+//! Auxiliary types and traits for context.
+//!
+//! Disclaimer: Types in this module should not be used directly. They are auxiliary and may change
+//! without a major version bump.
 use core::{
     convert::{self, Infallible},
     fmt::{Debug, Display},
