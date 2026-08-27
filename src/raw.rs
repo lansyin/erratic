@@ -1176,11 +1176,9 @@ impl RawVacant {
         (vt.try_set_state)(self.0.borrow_mut(), &mut payload);
         match payload {
             Some(state) => Err((self, state)),
-            None => {
-                return Ok(RawError {
-                    boxed_body: ManuallyDrop::new(self.0),
-                });
-            }
+            None => Ok(RawError {
+                boxed_body: ManuallyDrop::new(self.0),
+            }),
         }
     }
 
