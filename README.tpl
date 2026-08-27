@@ -1,7 +1,7 @@
 # Erratic /ɪˈrætɪk/
 
 [![license](https://img.shields.io/badge/license-MIT-hotpink)](https://github.com/lansyin/erratic)
-[![MSRV](https://img.shields.io/badge/MSRV-Rust_1.89-lightcoral)](https://github.com/lansyin/erratic/blob/main/Cargo.toml#L5)
+[![MSRV](https://img.shields.io/badge/MSRV-Rust_1.91-lightcoral)](https://github.com/lansyin/erratic/blob/main/Cargo.toml#L5)
 [![crates.io](https://img.shields.io/crates/v/erratic)](https://crates.io/crates/erratic)
 [![docs.rs](https://img.shields.io/docsrs/erratic)](https://docs.rs/erratic/latest/erratic/)
 

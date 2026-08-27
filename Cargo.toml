@@ -2,7 +2,7 @@
 name = "erratic"
 version = "0.25.1"
 edition = "2024"
-rust-version = "1.89.0"
+rust-version = "1.91.0"
 authors = ["Little Lan <lansyin@foxmail.com>"]
 categories = ["rust-patterns", "no-std"]
 description = "Composable, minimal-overhead error handling with typed state. "
