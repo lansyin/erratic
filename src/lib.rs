@@ -358,6 +358,8 @@ where
     }
 
     /// Converts to another state via a closure.
+    ///
+    /// The underlying state storage is reused when possible. See [`try_with_state`][state::Vacant::try_with_state].
     pub fn map_state<F, S2>(self, f: F) -> Error<S2>
     where
         F: FnOnce(S) -> S2,
@@ -367,10 +369,10 @@ where
             return err.with_phantom_state();
         });
         let state = f(state);
-        let Err(vacant) = match_else!(rtti::concretize::<_, Vacant<S2>>(vacant), Ok(vacant) => {
-            return vacant.with_state(state);
-        });
-        vacant.derive(state, Contextless::new())
+        match vacant.try_with_state(state) {
+            Ok(err) => err,
+            Err((vacant, state)) => vacant.derive(state, Contextless::new()),
+        }
     }
 
     /// Converts to another state via the `From` trait.
@@ -566,12 +568,16 @@ pub trait StateExt {
         Self::S: Sized;
 
     /// Converts to another state via a closure.
+    ///
+    /// The underlying state storage is reused when possible. See [`try_with_state`][state::Vacant::try_with_state].
     fn map_state<F, S>(self, f: F) -> Self::Result<Self::T, Error<S>>
     where
         F: FnOnce(Self::S) -> S,
         S: State;
 
     /// Converts to another state via the `From` trait.
+    ///
+    /// The underlying state storage is reused when possible. See [`try_with_state`][state::Vacant::try_with_state].
     fn lift_state<S>(self) -> Self::Result<Self::T, Error<S>>
     where
         S: State,

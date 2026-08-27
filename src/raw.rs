@@ -1,25 +1,29 @@
+mod align4;
 mod backtrace;
 mod erased;
+mod exclude;
 mod ptr;
 mod source;
+mod state;
 
 use alloc::{boxed::Box, format};
 use core::{
-    any::{Any, TypeId},
+    any::{self, Any, TypeId},
     convert::Infallible,
     error,
     fmt::{self, Debug, Display},
     mem::{self, ManuallyDrop, MaybeUninit},
     ops::{Deref, DerefMut},
-    ptr::NonNull,
 };
 
 use crate::{
     context::{Context, Printable, Value},
     match_else,
     raw::{
-        ptr::{Align4, Align4Own, Align4PtrCompat, Align4Ref, Metadata, Mut, Ref},
+        align4::{Align4, Align4Own, Align4PtrCompat, Align4Ref, Metadata},
+        ptr::{Mut, Ref},
         source::{BoxedSource, ErasedSource, NoSource, Source, WithBacktraceSource},
+        state::{Metastate, Ministate, StatefulState, StatefulStateMut, Store},
     },
     render, rtti,
 };
@@ -29,22 +33,26 @@ pub(crate) use erased::ErasedRawError;
 
 /// Three-variant error storage.
 ///
-/// # Safety invariants
+/// # Safety Invariants
 ///
-/// All three union variants share the invariant that the first byte's lowest 2 bits
-/// encode the discriminant:
-///   - `00`: [`const_body`](RawError::const_body) (static string literal)
-///   - `01`: [`boxed_body`](RawError::boxed_body) (heap-allocated [`DynBody`])
-///   - `10`: [`inline_body`](RawError::inline_body) (inline [`Align4PtrCompat`])
-///
-/// The discriminant is written at construction and must never be modified afterward.
+/// The least significant 2 bits of its first byte must contain a [`Metadata`].
+/// The metadata indicates the discriminant of the union and cannot be changed.
 #[repr(C)]
 pub(crate) union RawError<S = Infallible>
 where
     S: 'static,
 {
+    /// # Safety Invariants
+    ///
+    /// The least significant 2 bits of the first byte must be `00`.
     const_body: ManuallyDrop<Align4Ref<'static, ConstBody>>,
+    /// # Safety Invariants
+    ///
+    /// The least significant 2 bits of the first byte must be `01`.
     boxed_body: ManuallyDrop<ErasedDynBody>,
+    /// # Safety Invariants
+    ///
+    /// The least significant 2 bits of the first byte must be `10`.
     inline_body: ManuallyDrop<Align4PtrCompat<S>>,
 }
 
@@ -80,16 +88,20 @@ impl<S> RawError<S> {
     const KIND_BOXED: Metadata = Metadata::_1;
     const KIND_INLINE: Metadata = Metadata::_2;
 
-    /// Reads the 2-bit discriminant from the first byte of the union.
+    /// Reads the discriminant of the union.
+    ///
+    /// # Safety Invariants
+    ///
+    /// The returned [`Metadata`] indicates the correct variant of `self`
     fn kind(&self) -> Metadata {
-        // # Safety: All three union variants have `repr(C)` layout, and their first field
-        // is `Align4Ptr`/`Align4PtrCompat`, all of which store the metadata at offset 0.
+        // Safety: By [`Self`]'s invariants, the least significant 2 bits of the first byte
+        // contains a [`Metadata`].
         unsafe { Metadata((&raw const (*self) as *const u8).read() & Metadata::MASK) }
     }
 
     /// Selects a shared reference to the active union variant.
     fn select_ref(&self) -> SelectRef<'_, S> {
-        // # Safety: `RawError::kind` always returns a valid discriminant.
+        // Safety: `RawError::kind` returns the correct discriminant of `self`.
         unsafe {
             match self.kind() {
                 Self::KIND_CONST => SelectRef::Const(&self.const_body),
@@ -102,7 +114,7 @@ impl<S> RawError<S> {
 
     /// Selects a mutable reference to the active union variant.
     fn select_mut(&mut self) -> SelectMut<'_, S> {
-        // # Safety: `RawError::kind` always returns a valid discriminant.
+        // Safety: `RawError::kind` returns the correct discriminant of `self`.
         unsafe {
             match self.kind() {
                 Self::KIND_CONST => SelectMut::Const(&mut self.const_body),
@@ -118,7 +130,7 @@ impl<S> RawError<S> {
         let kind = self.kind();
         let mut this = ManuallyDrop::new(self);
 
-        // # Safety: `RawError::kind` always returns a valid discriminant.
+        // Safety: `RawError::kind` returns the correct discriminant of `self`.
         unsafe {
             match kind {
                 Self::KIND_CONST => SelectOwn::Const(ManuallyDrop::take(&mut this.const_body)),
@@ -165,14 +177,13 @@ impl<S> RawError<S> {
         })
     }
 
-    /// Check if the [`RawError`] contains only a source.
+    /// Checks if the [`RawError`] contains only a source.
     fn is_source_only(&self) -> bool {
         match self.select_ref() {
             SelectRef::Const(_) | SelectRef::Inline(_) => false,
             SelectRef::Boxed(body) => {
-                let vt = DynBody::vtable(body.borrow());
-                // Safety: The body pointer is confirmed valid.
-                unsafe { (vt.is_source_only)(body.borrow()) }
+                let vt = body.vtable();
+                (vt.is_source_only)(body.borrow())
             }
         }
     }
@@ -183,18 +194,63 @@ impl<S> RawError<S> {
         E: Source + Send + Sync + 'static,
         C: Debug + Display + Send + Sync + 'static,
     {
-        let (vtable, state) = DynBody::<S, E, C>::vtable_from_state(state);
+        /// # Safety
+        ///
+        /// `metastate` must be the correct state of `state`.
+        unsafe fn staged_0_build_state<S, St, E, C>(
+            metastate: Metastate,
+            state: St,
+            source: E,
+            context: C,
+        ) -> RawError<S>
+        where
+            St: Store,
+            E: Source + Send + Sync + 'static,
+            C: Debug + Display + Send + Sync + 'static,
+        {
+            let mut vtable = Align4Ref::new(
+                &const { Align4(DynBodyVTable::new::<St, E, C>()) },
+                Metadata::_0,
+            );
+            unsafe {
+                // Safety: By `staged_0_build_state`'s invariants, `metastate` is the correct state of `state`.
+                state::Discriminator::set(&mut vtable, metastate);
+            }
 
-        RawError::<S> {
-            boxed_body: ManuallyDrop::new(ErasedDynBody::from_typed(Align4Own::from_boxed(
-                Box::new(Align4(DynBody::<S, E, C> {
-                    vtable,
-                    state,
+            RawError::<S> {
+                boxed_body: ManuallyDrop::new(ErasedDynBody::from_typed(Align4Own::from_boxed(
+                    Box::new(Align4(DynBody::<St, E, C> {
+                        vtable,
+                        state,
+                        source,
+                        context: exclude::Exclude::new(context),
+                    })),
+                    RawError::<S>::KIND_BOXED,
+                ))),
+            }
+        }
+
+        let Some(state) = state else {
+            return unsafe {
+                // Safety: `MaybeUninit::<Infallible>` always has a metastate of `Empty`.
+                staged_0_build_state(
+                    Metastate::Empty,
+                    MaybeUninit::<Infallible>::uninit(),
                     source,
-                    context: helper::Exclude::new(context),
-                })),
-                RawError::<S>::KIND_BOXED,
-            ))),
+                    context,
+                )
+            };
+        };
+        let Err(state) = match_else!(Ministate::try_new(state), Ok(ministate) => {
+            return unsafe {
+                // Safety: A fresh `ministate` has a metastate of `Present`.
+                staged_0_build_state(Metastate::Present, ManuallyDrop::new(ministate), source, context)
+            };
+        });
+
+        unsafe {
+            // Safety: An initialized `MaybeUninit` has a metastate of `Present`.
+            staged_0_build_state(Metastate::Present, MaybeUninit::new(state), source, context)
         }
     }
 
@@ -361,11 +417,7 @@ impl<S> RawError<S> {
     pub fn context(&self) -> Option<&(dyn Printable + Send + Sync + 'static)> {
         match self.select_ref() {
             SelectRef::Const(body) => Some(&body.borrow().deref().context),
-            SelectRef::Boxed(body) => unsafe {
-                let vtable = DynBody::vtable(body.borrow());
-                // Safety: The body pointer is confirmed valid.
-                (vtable.context)(body.borrow()).map(|v| v as _)
-            },
+            SelectRef::Boxed(body) => (body.vtable().context)(body.borrow()).map(|v| v as _),
             SelectRef::Inline(_body) => None,
         }
     }
@@ -375,11 +427,7 @@ impl<S> RawError<S> {
         match self.select_ref() {
             SelectRef::Const(_body) => None,
             SelectRef::Inline(_body) => None,
-            SelectRef::Boxed(body) => unsafe {
-                let vtable = DynBody::vtable(body.borrow());
-                // Safety: The body pointer is confirmed valid.
-                (vtable.source)(body.borrow())
-            },
+            SelectRef::Boxed(body) => (body.vtable().source)(body.borrow()),
         }
     }
 
@@ -388,11 +436,7 @@ impl<S> RawError<S> {
         match self.select_mut() {
             SelectMut::Const(_body) => None,
             SelectMut::Inline(_body) => None,
-            SelectMut::Boxed(body) => unsafe {
-                let vtable = DynBody::vtable(body.borrow());
-                // Safety: The body pointer is confirmed valid.
-                (vtable.source_mut)(body.borrow_mut())
-            },
+            SelectMut::Boxed(body) => (body.vtable().source_mut)(body.borrow_mut()),
         }
     }
 
@@ -426,17 +470,10 @@ impl<S> RawError<S> {
                 rtti::concretize_ref::<_, C>(&body.borrow().deref().context).ok()
             }
             SelectRef::Inline(_body) => None,
-            SelectRef::Boxed(body) => unsafe {
-                let vtable = DynBody::vtable(body.borrow());
-                let mut result = None::<&C>;
-                // Safety: The body pointer is confirmed valid.
-                (vtable.downcast_context_ref)(
-                    body.borrow(),
-                    TypeId::of::<C>(),
-                    NonNull::from(&mut result).cast(),
-                );
-                result
-            },
+            SelectRef::Boxed(body) => {
+                (body.vtable().downcast_context_ref)(body.borrow(), TypeId::of::<C>())
+                    .and_then(|c| c.downcast_ref::<C>())
+            }
         }
     }
 
@@ -448,17 +485,10 @@ impl<S> RawError<S> {
         match self.select_mut() {
             SelectMut::Const(_body) => None,
             SelectMut::Inline(_body) => None,
-            SelectMut::Boxed(body) => unsafe {
-                let vtable = DynBody::vtable(body.borrow());
-                let mut result = None::<&mut C>;
-                // Safety: The body pointer is confirmed valid.
-                (vtable.downcast_context_mut)(
-                    body.borrow_mut(),
-                    TypeId::of::<C>(),
-                    NonNull::from(&mut result).cast(),
-                );
-                result
-            },
+            SelectMut::Boxed(body) => {
+                (body.vtable().downcast_context_mut)(body.borrow_mut(), TypeId::of::<C>())
+                    .and_then(|c| c.downcast_mut::<C>())
+            }
         }
     }
 
@@ -466,22 +496,10 @@ impl<S> RawError<S> {
     pub fn state(&self) -> Option<&S> {
         match self.select_ref() {
             SelectRef::Const(_body) => None,
-            SelectRef::Inline(_body) => unsafe {
-                // Safety: Access `InlineBody::value` is safe.
-                Some(self.inline_body.borrow_value())
-            },
-            SelectRef::Boxed(body) => unsafe {
-                let vtable = DynBody::vtable(body.borrow());
-                let mut state = None::<&S>;
-                // Safety: The body and state pointers are confirmed valid.
-                (vtable.state)(
-                    body.borrow(),
-                    TypeId::of::<S>(),
-                    NonNull::from(&mut state).cast(),
-                );
-
-                state
-            },
+            SelectRef::Inline(body) => Some(body.borrow_value()),
+            SelectRef::Boxed(body) => {
+                (body.vtable().state)(body.borrow()).and_then(|state| state.downcast_ref::<S>())
+            }
         }
     }
 
@@ -490,11 +508,7 @@ impl<S> RawError<S> {
         match self.select_own() {
             SelectOwn::Const(_body) => None,
             SelectOwn::Inline(_body) => None,
-            SelectOwn::Boxed(body) => unsafe {
-                let vtable = DynBody::vtable(body.borrow());
-                // Safety: The body pointer is confirmed valid.
-                (vtable.into_source)(body)
-            },
+            SelectOwn::Boxed(body) => (body.vtable().into_source)(body),
         }
     }
 
@@ -504,7 +518,7 @@ impl<S> RawError<S> {
     /// requested component does not exist or has a different type.
     ///
     /// # Existence Guarantee
-    /// It's guaranteed that at least one component exist.
+    /// It's guaranteed that at least one component exists.
     pub fn into_parts<C, E>(self) -> (Option<S>, Option<C>, Option<E>)
     where
         E: 'static,
@@ -512,27 +526,30 @@ impl<S> RawError<S> {
     {
         match self.select_own() {
             SelectOwn::Const(body) => {
-                // Safety: The project to context is inbound.
+                // Safety: The context projection is valid.
                 let context = rtti::concretize::<_, C>(body.borrow().deref().context).ok();
                 (None, context, None)
             }
             SelectOwn::Inline(body) => (Some(body.into_value()), None, None),
-            SelectOwn::Boxed(body) => unsafe {
-                let vtable = DynBody::vtable(body.borrow());
+            SelectOwn::Boxed(body) => {
                 let mut state: Option<S> = None;
                 let mut context: Option<C> = None;
                 let mut err: Option<E> = None;
+                let mut state_extractor = |value: &mut dyn Any| {
+                    if let Some(dst) = value.downcast_mut::<Option<S>>() {
+                        mem::swap(&mut state, dst);
+                    }
+                };
 
-                // Safety: The body, state, context, and error pointers are confirmed valid.
-                (vtable.into_parts)(
+                (body.vtable().into_parts)(
                     body,
                     &mut err as &mut dyn Any,
                     &mut context as &mut dyn Any,
-                    &mut state as &mut dyn Any,
+                    &mut state_extractor,
                 );
 
                 (state, context, err)
-            },
+            }
         }
     }
 
@@ -542,45 +559,23 @@ impl<S> RawError<S> {
                 const_body: ManuallyDrop::new(body),
             }),
             SelectOwn::Inline(body) => Ok((body.into_value(), None)),
-            SelectOwn::Boxed(body) => unsafe {
-                let vt = DynBody::vtable(body.borrow());
+            SelectOwn::Boxed(body) => {
+                let vt = body.vtable();
                 let mut state_dst = None::<S>;
-                // Safety: The body, state pointers are confirmed valid.
-                let re = (vt.extract_state)(body, &mut state_dst as &mut dyn Any);
+                let mut state_extractor = |value: &mut dyn Any| {
+                    if let Some(dst) = value.downcast_mut::<Option<S>>() {
+                        mem::swap(&mut state_dst, dst);
+                    }
+                };
 
-                match (state_dst, re) {
-                    (Some(state), Ok(vacant)) => Ok((state, Some(vacant))),
-                    (None, Err(body)) => Err(RawError {
+                let body = (vt.extract_state)(body, &mut state_extractor);
+
+                match state_dst {
+                    Some(state) => Ok((state, Some(RawVacant(body)))),
+                    None => Err(RawError {
                         boxed_body: ManuallyDrop::new(body),
                     }),
-                    (None, Ok(_)) | (Some(_), Err(_)) => {
-                        unreachable!() // Note: `state_dst` becomes `Some` iff `extract_state` returns `Ok`. 
-                    }
                 }
-            },
-        }
-    }
-
-    // Sets the state if the underlying storage type is compatible.
-    #[allow(dead_code)]
-    pub fn try_set_state(&mut self, state: S) -> Result<(), S> {
-        match self.select_mut() {
-            SelectMut::Const(_body) => Err(state),
-            SelectMut::Inline(body) => {
-                body.replace_value(state);
-                Ok(())
-            }
-            SelectMut::Boxed(body) => {
-                let vtable = DynBody::vtable(body.borrow());
-                let mut state = Some(state);
-
-                unsafe {
-                    if (vtable.try_set_state)(body.borrow_mut(), &mut state as &mut dyn Any) {
-                        return Ok(());
-                    }
-                }
-
-                Err(state.unwrap())
             }
         }
     }
@@ -613,7 +608,7 @@ impl<S> RawError<S> {
         }
     }
 
-    /// Converts into a boxed error, eliminating reallocations if possible.
+    /// Converts into a boxed error, avoiding reallocation when possible.
     pub fn into_boxed_error(self) -> Box<dyn error::Error + Send + Sync + 'static>
     where
         S: Debug,
@@ -621,11 +616,7 @@ impl<S> RawError<S> {
         match self.select_own() {
             SelectOwn::Const(body) => (body.borrow().deref().context).into(),
             SelectOwn::Inline(body) => format!("{:?}", body.borrow_value()).into(),
-            SelectOwn::Boxed(body) => unsafe {
-                let vtable = DynBody::vtable(body.borrow());
-                // Safety: The body pointer is confirmed valid.
-                (vtable.into_boxed_error)(body)
-            },
+            SelectOwn::Boxed(body) => (body.vtable().into_boxed_error)(body),
         }
     }
 
@@ -651,11 +642,8 @@ impl<S> RawError<S> {
                 RawError::new(None::<Infallible>, Some(ErasedSource(erased)), NoContext)
             }
             SelectOwn::Boxed(mut body) => {
-                let vt = DynBody::vtable(body.borrow());
-                // Safety: The body pointer is confirmed valid.
-                unsafe {
-                    (vt.erase_state)(body.borrow_mut());
-                }
+                let vt = body.vtable();
+                (vt.erase_state)(body.borrow_mut());
                 RawError {
                     boxed_body: ManuallyDrop::new(body),
                 }
@@ -678,10 +666,11 @@ impl<S> Drop for RawError<S> {
         match self.kind() {
             Self::KIND_CONST => {}
             Self::KIND_INLINE => unsafe {
-                // Safety: The variant hasn't been moved out, as `self` remains owned and not forgotten.
+                // Safety: The inline variant is active.
                 ManuallyDrop::drop(&mut self.inline_body);
             },
             Self::KIND_BOXED => unsafe {
+                // Safety: The boxed variant is active; taking it out runs the vtable's drop glue.
                 let _body = ManuallyDrop::take(&mut self.boxed_body);
             },
             _ => unreachable!(),
@@ -697,18 +686,19 @@ where
         match self.select_ref() {
             SelectRef::Const(body) => render::format_debug(
                 f,
-                None::<&()>,
+                None,
                 Some(body.borrow().deref().context),
                 None,
                 None::<(Infallible, _)>,
             ),
-            SelectRef::Inline(_) => {
-                render::format_debug(f, self.state(), None::<&str>, None, None::<(Infallible, _)>)
-            }
-            SelectRef::Boxed(body) => {
-                let vtable = DynBody::vtable(body.borrow());
-                unsafe { (vtable.debug)(body.borrow(), f) }
-            }
+            SelectRef::Inline(_) => render::format_debug(
+                f,
+                self.state().map(|s| s as &dyn Debug),
+                None::<&str>,
+                None,
+                None::<(Infallible, _)>,
+            ),
+            SelectRef::Boxed(body) => (body.vtable().debug)(body.borrow(), f),
         }
     }
 }
@@ -719,13 +709,13 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.select_ref() {
-            SelectRef::Const(_) | SelectRef::Inline(_) => {
-                render::format_display(f, self.state(), self.context(), None)
-            }
-            SelectRef::Boxed(body) => {
-                let vtable = DynBody::vtable(body.borrow());
-                unsafe { (vtable.display)(body.borrow(), f) }
-            }
+            SelectRef::Const(_) | SelectRef::Inline(_) => render::format_display(
+                f,
+                self.state().map(|s| s as &dyn Debug),
+                self.context(),
+                None,
+            ),
+            SelectRef::Boxed(body) => (body.vtable().display)(body.borrow(), f),
         }
     }
 }
@@ -745,28 +735,24 @@ struct ConstBody {
     context: &'static str,
 }
 
-/// Heap-allocated error body with type-erased source and context.
-///
-/// The concrete types `E`, `C` are only known at construction time and at
-/// the monomorphized vtable function sites. The `RawError` stores the body as
-/// `DynBody<S, (), ()>`. The `S` can also be erased when the state is
-/// extracted.
-///
-/// # Safety
-///
-/// The `vtable` pointer must point to a `DynBodyVTable` that was monomorphized
-/// for the same `S`, `E`, `C` as the stored data.
+/// Heap-allocated error body with type-erased state, source and context.
 #[repr(C)]
-struct DynBody<S = Infallible, E = (), C = ()>
+struct DynBody<S = MaybeUninit<Infallible>, E = (), C = ()>
 where
-    S: 'static,
-    E: 'static,
-    C: 'static,
+    S: Store,
 {
-    vtable: Align4Ref<'static, DynBodyVTable>, // Note: The vtable must be the first field as the other fields may be erased.
-    state: MaybeUninit<S>,
+    /// # Safety Invariants
+    ///
+    /// [`Self::vtable`] must be the first field, since the remaining fields are replaced
+    /// by ZSTs during type erasure. [`Self::vtable`] must be the exclusive [`Discriminator`]
+    /// for [`Self::state`].
+    vtable: Align4Ref<'static, DynBodyVTable>,
+    /// # Safety Invariants
+    ///
+    /// [`Self::state`] should be tracked by [`Self::vtable`] exclusively.
+    state: S,
     source: E,
-    context: helper::Exclude<C, NoContext>,
+    context: exclude::Exclude<C, NoContext>,
 }
 
 /// A zero-sized type used as a context placeholder.
@@ -779,111 +765,57 @@ impl Display for NoContext {
     }
 }
 
-mod helper {
-    use core::marker::PhantomData;
-
-    use crate::rtti;
-
-    pub(super) struct Exclude<T, X> {
-        value: T,
-        _marker: PhantomData<X>,
-    }
-
-    impl<T, X> Exclude<T, X>
-    where
-        T: 'static,
-        X: 'static,
-    {
-        pub fn new(value: T) -> Self {
-            Self {
-                value,
-                _marker: PhantomData,
-            }
-        }
-
-        pub fn get(&self) -> Option<&T> {
-            if rtti::is_same_ty::<T, X>() {
-                None
-            } else {
-                Some(&self.value)
-            }
-        }
-
-        pub fn get_mut(&mut self) -> Option<&mut T> {
-            if rtti::is_same_ty::<T, X>() {
-                None
-            } else {
-                Some(&mut self.value)
-            }
-        }
-
-        pub fn into_inner(self) -> Option<T> {
-            if rtti::is_same_ty::<T, X>() {
-                None
-            } else {
-                Some(self.value)
-            }
-        }
-    }
-}
-
 /// Virtual function table for type-erased operations on [`DynBody`].
-///
-/// Each function pointer is monomorphized for the concrete `S`, `E`, `C`.
-///
-/// # Safety
-///
-/// All function pointers must be valid for the concrete types stored in the `DynBody`.
-/// The `Ref`/`Mut`/`Align4Own` arguments must point to a `DynBody` whose type parameters
-/// match the monomorphization that produced the function pointer.
 struct DynBodyVTable {
+    /// The `TypeId` of the concrete type corresponding to this vtable.
+    body_id: TypeId,
     /// See [DynBody::drop].
-    drop: unsafe fn(ManuallyDrop<Align4Own<DynBody>>),
+    drop: fn(ManuallyDrop<Align4Own<DynBody>>),
     /// See [DynBody::into_source].
-    into_source: unsafe fn(ErasedDynBody) -> Option<Box<dyn error::Error + Send + Sync + 'static>>,
+    into_source: fn(ErasedDynBody) -> Option<Box<dyn error::Error + Send + Sync + 'static>>,
     /// See [DynBody::into_backtrace].
-    into_backtrace: unsafe fn(ErasedDynBody) -> Option<WithBacktrace>,
+    into_backtrace: fn(ErasedDynBody) -> Option<WithBacktrace>,
     /// See [DynBody::into_parts].
-    into_parts: unsafe fn(ErasedDynBody, &mut dyn Any, &mut dyn Any, &mut dyn Any),
+    into_parts: fn(ErasedDynBody, &mut dyn Any, &mut dyn Any, &mut dyn FnMut(&mut dyn Any)),
     /// See [DynBody::extract_state].
-    extract_state: unsafe fn(ErasedDynBody, &mut dyn Any) -> Result<RawVacant, ErasedDynBody>,
+    extract_state: fn(ErasedDynBody, &mut dyn FnMut(&mut dyn Any)) -> ErasedDynBody,
     /// See [DynBody::into_boxed_error].
-    into_boxed_error: unsafe fn(ErasedDynBody) -> Box<dyn error::Error + Send + Sync + 'static>,
+    into_boxed_error: fn(ErasedDynBody) -> Box<dyn error::Error + Send + Sync + 'static>,
     /// See [DynBody::debug].
-    debug: unsafe fn(Ref<'_, DynBody>, &mut fmt::Formatter<'_>) -> fmt::Result,
+    debug: fn(Ref<'_, DynBody>, &mut fmt::Formatter<'_>) -> fmt::Result,
     /// See [DynBody::display].
-    display: unsafe fn(Ref<'_, DynBody>, &mut fmt::Formatter<'_>) -> fmt::Result,
+    display: fn(Ref<'_, DynBody>, &mut fmt::Formatter<'_>) -> fmt::Result,
     /// See [DynBody::try_set_state].
-    try_set_state: unsafe fn(Mut<DynBody>, &mut dyn Any) -> bool,
+    try_set_state: fn(Mut<DynBody>, &mut dyn Any) -> bool,
     /// See [DynBody::has_state].
-    has_state: unsafe fn(Ref<'_, DynBody>) -> bool,
+    has_state: fn(Ref<'_, DynBody>) -> bool,
     /// See [DynBody::erase_state].
-    erase_state: unsafe fn(Mut<DynBody>),
+    erase_state: fn(Mut<DynBody>),
     /// See [DynBody::is_source_only].
-    is_source_only: unsafe fn(Ref<'_, DynBody>) -> bool,
+    is_source_only: fn(Ref<'_, DynBody>) -> bool,
     /// See [DynBody::source].
-    source: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn error::Error + Send + Sync + 'static)>,
+    source: fn(Ref<'_, DynBody>) -> Option<&(dyn error::Error + Send + Sync + 'static)>,
     /// See [DynBody::source_mut].
-    source_mut:
-        unsafe fn(Mut<'_, DynBody>) -> Option<&mut (dyn error::Error + Send + Sync + 'static)>,
+    source_mut: fn(Mut<'_, DynBody>) -> Option<&mut (dyn error::Error + Send + Sync + 'static)>,
     /// See [DynBody::state].
-    state: unsafe fn(Ref<'_, DynBody>, TypeId, NonNull<()>),
+    state: fn(Ref<'_, DynBody>) -> Option<&dyn Any>,
     /// See [DynBody::context].
-    context: unsafe fn(Ref<'_, DynBody>) -> Option<&(dyn Printable + Send + Sync + 'static)>,
+    context: fn(Ref<'_, DynBody>) -> Option<&(dyn Printable + Send + Sync + 'static)>,
     /// See [DynBody::downcast_context_ref].
-    downcast_context_ref: unsafe fn(Ref<'_, DynBody>, TypeId, NonNull<()>),
+    downcast_context_ref: fn(Ref<'_, DynBody>, TypeId) -> Option<&(dyn Any + 'static)>,
     /// See [DynBody::downcast_context_mut].
-    downcast_context_mut: unsafe fn(Mut<'_, DynBody>, TypeId, NonNull<()>),
+    downcast_context_mut: fn(Mut<'_, DynBody>, TypeId) -> Option<&mut (dyn Any + 'static)>,
 }
 
 impl DynBodyVTable {
     const fn new<S, E, C>() -> Self
     where
-        S: Debug + Send + Sync + 'static,
+        S: Store,
         E: Source + Send + Sync + 'static,
         C: Debug + Display + Send + Sync + 'static,
     {
         DynBodyVTable {
+            body_id: any::TypeId::of::<DynBody<S, E, C>>(),
             drop: DynBody::<S, E, C>::drop,
             into_source: DynBody::<S, E, C>::into_source,
             into_backtrace: DynBody::<S, E, C>::into_backtrace,
@@ -906,196 +838,122 @@ impl DynBodyVTable {
     }
 }
 
-impl<S, E, C> DynBody<S, E, C> {
-    const STATE_NOTSET: Metadata = Metadata::_0;
-    const STATE_SET: Metadata = Metadata::_1;
-    const STATE_FREEZED: Metadata = Metadata::_2;
-
-    /// Returns a static shared reference to the vtable.
-    fn vtable(this: Ref<'_, DynBody<S, E, C>>) -> &'static DynBodyVTable {
-        unsafe {
-            this.project(|body| &raw const (*body).vtable)
-                .deref()
-                .borrow()
-                .deref()
+impl<S, E, C> DynBody<S, E, C>
+where
+    S: Store,
+{
+    fn downcast_ref<T>(this: Ref<'_, Self>) -> Option<&T>
+    where
+        T: 'static,
+    {
+        if TypeId::of::<T>() != this.deref().vtable.borrow().deref().body_id {
+            return None;
         }
+        // Safety: The types are verified to match here, so the cast is sound.
+        Some(unsafe { this.cast::<T>().deref() })
     }
-}
 
-enum StateAccess {
-    NotSet,
-    Set,
-    Freezed,
+    fn downcast_mut<T>(mut this: Mut<'_, Self>) -> Option<&mut T>
+    where
+        T: 'static,
+    {
+        if TypeId::of::<T>() != this.reborrow().deref().vtable.borrow().deref().body_id {
+            return None;
+        }
+        // Safety: The types are verified to match here, so the cast is sound.
+        Some(unsafe { this.cast::<T>().deref_mut() })
+    }
+
+    /// Shared view of the state, tracked by the vtable's discriminant.
+    fn state_ref(&self) -> StatefulState<'_, S> {
+        // Safety: `self.state` is guaranteed to be fully tracked by `self.vtable`.
+        unsafe { self.state.with_discriminator(&self.vtable) }
+    }
+
+    /// Mutable view of the state, tracked by the vtable's discriminant.
+    fn state_mut(&mut self) -> StatefulStateMut<'_, S> {
+        // Safety: `self.state` is guaranteed to be fully tracked by `self.vtable`.
+        unsafe { self.state.with_discriminator_mut(&mut self.vtable) }
+    }
 }
 
 impl<S, E, C> DynBody<S, E, C>
 where
-    S: Debug + Send + Sync + 'static,
+    S: Store,
     E: Source + Send + Sync + 'static,
     C: Debug + Display + Send + Sync + 'static,
 {
-    fn vtable_from_state(state: Option<S>) -> (Align4Ref<'static, DynBodyVTable>, MaybeUninit<S>) {
-        (
-            Align4Ref::new(
-                &const { Align4(DynBodyVTable::new::<S, E, C>()) },
-                match state {
-                    Some(_) => Self::STATE_SET,
-                    None => Self::STATE_NOTSET,
-                },
-            ),
-            match state {
-                Some(state) => MaybeUninit::new(state),
-                None => MaybeUninit::uninit(),
-            },
-        )
-    }
-
-    fn state_access(&self) -> StateAccess {
-        unsafe {
-            // # Safety: `Align4Ref` is `repr(C)` and stores the metadata at offset 0.
-            match Metadata((&raw const (self.vtable) as *const u8).read() & Metadata::MASK) {
-                Self::STATE_NOTSET => StateAccess::NotSet,
-                Self::STATE_SET => StateAccess::Set,
-                Self::STATE_FREEZED => StateAccess::Freezed,
-                _ => unreachable!(),
-            }
-        }
-    }
-
-    /// Returns a shared reference to the state, if any.
-    fn get_state(&self) -> Option<&S> {
-        match self.state_access() {
-            StateAccess::Set => Some(unsafe { self.state.assume_init_ref() }),
-            StateAccess::NotSet | StateAccess::Freezed => None,
-        }
-    }
-
-    /// Returns a shared reference to the state, if any.
-    fn get_state_for_format(&self) -> Option<&S> {
-        match self.state_access() {
-            StateAccess::Set | StateAccess::Freezed => {
-                Some(unsafe { self.state.assume_init_ref() })
-            }
-            StateAccess::NotSet => None,
-        }
-    }
-
-    fn set_state(&mut self, state: S) -> Result<(), S> {
-        match self.state_access() {
-            StateAccess::NotSet => {
-                self.state.write(state);
-                self.vtable = Align4Ref::new(self.vtable.borrow_raw().deref(), Self::STATE_SET);
-                Ok(())
-            }
-            StateAccess::Set | StateAccess::Freezed => Err(state),
-        }
-    }
-
-    fn take_state(&mut self) -> Option<S> {
-        match self.state_access() {
-            StateAccess::Set => {
-                let state = unsafe { self.state.assume_init_read() };
-                self.vtable = Align4Ref::new(self.vtable.borrow_raw().deref(), Self::STATE_NOTSET);
-                Some(state)
-            }
-            StateAccess::NotSet | StateAccess::Freezed => None,
-        }
-    }
-
-    fn freeze_state(&mut self) {
-        match self.state_access() {
-            StateAccess::Set => {
-                self.vtable = Align4Ref::new(self.vtable.borrow_raw().deref(), Self::STATE_FREEZED);
-            }
-            StateAccess::NotSet | StateAccess::Freezed => (),
-        }
-    }
-
-    /// Consumes `self` and decomposes into its raw components:
-    /// `(state, source, context)`.
-    fn destruct(mut self) -> (Option<S>, E, Option<C>) {
-        let state = self.take_state();
+    /// Consumes `self`, extracts the state into `state_extractor`, and returns `(source, context)`.
+    ///
+    /// `state_extractor` is invoked once with the state as `&mut dyn Any` (an `Option` of the
+    /// store's representation); the state is dropped even if the callback does not take it out.
+    fn destruct(mut self, state_extractor: &mut dyn FnMut(&mut dyn Any)) -> (E, Option<C>) {
+        self.state_mut().take(state_extractor);
 
         let mut this = MaybeUninit::new(self);
         let this = this.as_mut_ptr();
 
-        let context = unsafe { (&raw mut (*this).context).read() }.into_inner();
-        let source = unsafe { (&raw mut (*this).source).read() };
+        // Safety: `this` has been moved into `MaybeUninit` and is not accessed afterwards.
+        let (context, source) = unsafe {
+            let context = (&raw mut (*this).context).read().into_inner();
+            let source = (&raw mut (*this).source).read();
+            (context, source)
+        };
 
-        (state, source, context)
+        (source, context)
     }
 }
 
 impl<S, E, C> DynBody<S, E, C>
 where
-    S: Debug + Send + Sync + 'static,
+    S: Store,
     E: Source + Send + Sync + 'static,
     C: Debug + Display + Send + Sync + 'static,
 {
-    /// Drops the boxed body.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must be a valid `Align4Own` pointing to `DynBody<S, E, C>`.
-    unsafe fn drop(mut this: ManuallyDrop<Align4Own<DynBody>>) {
-        unsafe {
-            let this = ManuallyDrop::take(&mut this).cast::<Self>();
+    const CORRECT_VTABLE_CALL: &'static str =
+        "vtable functions must be invoked with the correct `DynBody` pointer";
 
-            let _ = ManuallyDrop::into_inner(this).into_boxed();
-        }
+    /// Drops the boxed body.
+    fn drop(this: ManuallyDrop<Align4Own<DynBody>>) {
+        let this = ErasedDynBody::into_inner::<S, E, C>(ErasedDynBody(this))
+            .expect(Self::CORRECT_VTABLE_CALL);
+
+        let _ = this.into_boxed();
     }
 
-    /// Extracts the source error as a trait object from the boxed body.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must be a valid `Align4Own` pointing to `DynBody<S, E, C>`.
-    unsafe fn into_source(
-        this: ErasedDynBody,
-    ) -> Option<Box<dyn error::Error + Send + Sync + 'static>> {
-        let Align4(this) = unsafe { *ErasedDynBody::into_inner::<S, E, C>(this).into_boxed() };
+    /// Extracts the source error as a boxed error.
+    fn into_source(this: ErasedDynBody) -> Option<Box<dyn error::Error + Send + Sync + 'static>> {
+        let this = ErasedDynBody::into_inner::<S, E, C>(this).expect(Self::CORRECT_VTABLE_CALL);
+        let Align4(this) = *this.into_boxed();
 
-        let (_, source, ..) = this.destruct();
+        let (source, ..) = this.destruct(&mut |_| {});
 
         source.into_boxed()
     }
 
-    /// Extracts the source error as a trait object from the boxed body.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must be a valid `Align4Own` pointing to `DynBody<S, E, C>`.
-    unsafe fn into_backtrace(this: ErasedDynBody) -> Option<WithBacktrace> {
-        let Align4(this) = unsafe { *ErasedDynBody::into_inner::<S, E, C>(this).into_boxed() };
+    /// Extracts the backtrace.
+    fn into_backtrace(this: ErasedDynBody) -> Option<WithBacktrace> {
+        let this = ErasedDynBody::into_inner::<S, E, C>(this).expect(Self::CORRECT_VTABLE_CALL);
+        let Align4(this) = *this.into_boxed();
 
-        let (_, source, ..) = this.destruct();
+        let (source, ..) = this.destruct(&mut |_| {});
 
         source.into_backtrace()
     }
 
-    /// Decomposes the boxed body: extracts source and context into caller-provided
-    /// `Option`s (if the `TypeId` matches), and returns the state.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must be a valid `Align4Own` pointing to `DynBody<S, E, C>`.
-    /// - `source_dst`, `context_dst`, `state_dst` must be valid, aligned, mutable
-    ///   pointers to `Option<E>`, `Option<C>` and `Option<S>` respectively.
+    /// Decomposes the boxed body: moves source/context into the caller's `Option`s (on `TypeId`
+    /// match) and the state into `state_extractor`.
     #[allow(clippy::too_many_arguments)]
-    unsafe fn into_parts(
+    fn into_parts(
         this: ErasedDynBody,
         source_dst: &mut dyn Any,
         context_dst: &mut dyn Any,
-        state_dst: &mut dyn Any,
+        state_extractor: &mut dyn FnMut(&mut dyn Any),
     ) {
-        let Align4(this) = unsafe { *ErasedDynBody::into_inner::<S, E, C>(this).into_boxed() };
-        let (state, source, context) = this.destruct();
+        let this = ErasedDynBody::into_inner::<S, E, C>(this).expect(Self::CORRECT_VTABLE_CALL);
+        let Align4(this) = *this.into_boxed();
+        let (source, context) = this.destruct(state_extractor);
 
-        if let Some(state) = state {
-            if let Some(dst) = state_dst.downcast_mut::<Option<S>>() {
-                dst.replace(state);
-            }
-        }
         if let Some(context) = context {
             if let Some(dst) = context_dst.downcast_mut::<Option<C>>() {
                 dst.replace(context);
@@ -1105,140 +963,85 @@ where
         source.downcast_container(source_dst).ok();
     }
 
-    /// Extracts the state from the boxed body, `state_dst` becomes `Some` iff it succeeds and returns `Ok`.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must be a valid `Align4Own` pointing to `DynBody<S, E, C>`.
-    /// - `state_dst` must be a valid, aligned, mutable pointer to `Option<StateTy>`.
-    unsafe fn extract_state(
+    /// Extracts the state from the boxed body into `state_extractor`, returning the vacant body.
+    fn extract_state(
         this: ErasedDynBody,
-        state_dst: &mut dyn Any,
-    ) -> Result<RawVacant, ErasedDynBody> {
-        let mut this = unsafe { ErasedDynBody::into_inner::<S, E, C>(this) };
+        state_extractor: &mut dyn FnMut(&mut dyn Any),
+    ) -> ErasedDynBody {
+        let mut this = ErasedDynBody::into_inner::<S, E, C>(this).expect(Self::CORRECT_VTABLE_CALL);
 
-        if let Some(dst) = state_dst.downcast_mut::<Option<S>>() {
-            *dst = this.borrow_mut().deref_mut().take_state();
+        this.borrow_mut()
+            .deref_mut()
+            .state_mut()
+            .take(state_extractor);
 
-            if dst.is_some() {
-                return Ok(RawVacant(ErasedDynBody::from_typed(this)));
-            }
-        }
-
-        Err(ErasedDynBody::from_typed(this))
+        ErasedDynBody::from_typed(this)
     }
 
-    /// Convert the thin `DynBody` pointer to `Box<Error>` without reallocation.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must be a valid `Align4Own` pointing to `DynBody<S, E, C>`.
-    unsafe fn into_boxed_error(
-        this: ErasedDynBody,
-    ) -> Box<dyn error::Error + Send + Sync + 'static> {
-        unsafe {
-            let this: Align4Own<DynBody<S, E, C>> = ErasedDynBody::into_inner::<S, E, C>(this);
-            let has_state = matches!(
-                this.borrow().deref().state_access(),
-                StateAccess::Set | StateAccess::Freezed
-            );
-            let has_context = this.borrow().deref().context.get().is_some();
+    /// Converts the boxed body into `Box<Error>`, avoiding reallocation when possible.
+    fn into_boxed_error(this: ErasedDynBody) -> Box<dyn error::Error + Send + Sync + 'static> {
+        let this = ErasedDynBody::into_inner::<S, E, C>(this).expect(Self::CORRECT_VTABLE_CALL);
+        let has_state = {
+            let this = this.borrow().deref();
+            this.state_ref().format_debug().is_some()
+        };
+        let has_context = this.borrow().deref().context.get().is_some();
 
-            match (has_state, has_context) {
-                (false, false) => {
-                    let Align4(this) = *this.into_boxed();
-                    let (_, source, _) = this.destruct();
-                    source
-                        .into_boxed()
-                        .unwrap_or(Box::from("empty erratic error")) // Note: This should never happen, but we provide a fallback to avoid any oversights. 
-                }
-                (_, _) => this.into_boxed(),
+        match (has_state, has_context) {
+            (false, false) => {
+                let Align4(this) = *this.into_boxed();
+                let (source, _) = this.destruct(&mut |_| {});
+                source
+                    .into_boxed()
+                    .unwrap_or(Box::from("empty erratic error")) // Note: Should never happen; kept as a fallback.
             }
+            (_, _) => this.into_boxed(),
         }
     }
 
-    /// Formats the boxed underlying body using the `Debug` trait.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must be a valid `Mut` pointing to `DynBody<S, E, C>`.
-    unsafe fn debug(this: Ref<'_, DynBody>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let this = unsafe { this.cast::<Self>().deref() };
+    /// Formats the underlying boxed body using the `Debug` trait.
+    fn debug(this: Ref<'_, DynBody>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let this = DynBody::downcast_ref::<Self>(this).expect(Self::CORRECT_VTABLE_CALL);
         <Self as Debug>::fmt(this, f)
     }
 
-    /// Formats the boxed underlying body using the `Display` trait.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must be a valid `Mut` pointing to `DynBody<S, E, C>`.
-    unsafe fn display(this: Ref<'_, DynBody>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let this = unsafe { this.cast::<Self>().deref() };
+    /// Formats the underlying boxed body using the `Display` trait.
+    fn display(this: Ref<'_, DynBody>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let this = DynBody::downcast_ref::<Self>(this).expect(Self::CORRECT_VTABLE_CALL);
         <Self as Display>::fmt(this, f)
     }
 
-    /// Replaces the state if the type matches. `state_src` becomes `None` iff it succeeds and returns true.
-    ///
-    /// # Panics
-    ///
-    /// If the state_src is `None`, it panics.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must be a valid `Mut` pointing to `DynBody<S, E, C>`.
-    /// - `state_src` must be a valid, aligned, mutable pointer to `Option<S>`.
-    unsafe fn try_set_state(this: Mut<'_, DynBody>, state_src: &mut dyn Any) -> bool {
-        let this = unsafe { this.cast::<Self>().deref_mut() };
+    /// Stores the state if the type matches and the body is empty. On success `state_src`'s
+    /// `Option` is taken and `true` is returned; otherwise `false` is returned and `state_src`
+    /// is left unchanged.
+    fn try_set_state(this: Mut<'_, DynBody>, state_src: &mut dyn Any) -> bool {
+        let this = DynBody::downcast_mut::<Self>(this).expect(Self::CORRECT_VTABLE_CALL);
 
-        if let Some(state_src_opt) = state_src.downcast_mut::<Option<S>>() {
-            let Some(state_src) = state_src_opt.take() else {
-                panic!("try_set_state: state_src must be `Some`");
-            };
-            if let Err(state) = this.set_state(state_src) {
-                state_src_opt.replace(state);
-                false
-            } else {
-                true
-            }
-        } else {
-            false
-        }
+        this.state_mut().try_set(state_src)
     }
 
     /// Checks if there is a state in the body.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must point to a valid `DynBody<S, E, C>`.
-    unsafe fn has_state(this: Ref<'_, DynBody>) -> bool {
-        let this = unsafe { this.cast::<Self>().deref() };
+    fn has_state(this: Ref<'_, DynBody>) -> bool {
+        let this = DynBody::downcast_ref::<Self>(this).expect(Self::CORRECT_VTABLE_CALL);
 
-        matches!(this.state_access(), StateAccess::Set)
+        this.state_ref().get().is_some()
     }
 
-    /// Erase the state in place.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must be a valid `Mut` pointing to `DynBody<S, E, C>`.
-    unsafe fn erase_state(this: Mut<'_, DynBody>) {
-        let this = unsafe { this.cast::<Self>().deref_mut() };
+    /// Erases the state in place.
+    fn erase_state(this: Mut<'_, DynBody>) {
+        let this = DynBody::downcast_mut::<Self>(this).expect(Self::CORRECT_VTABLE_CALL);
 
-        this.freeze_state();
+        this.state_mut().freeze();
     }
 
-    /// Check if the error is source-only (no state, no context, and a source).
+    /// Checks if the error is source-only (no state, no context, and a source).
     ///
-    /// A state that has been freezed still counts as state,
-    /// so an error with an erased state is never considered source-only.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must point to a valid `DynBody<S, E, C>`.
-    unsafe fn is_source_only(this: Ref<'_, DynBody>) -> bool {
-        let this = unsafe { this.cast::<Self>().deref() };
+    /// A state that has been frozen still counts, so an error with an erased state
+    /// is never considered source-only.
+    fn is_source_only(this: Ref<'_, DynBody>) -> bool {
+        let this = DynBody::downcast_ref::<Self>(this).expect(Self::CORRECT_VTABLE_CALL);
 
-        let has_state = matches!(this.state_access(), StateAccess::Set | StateAccess::Freezed);
+        let has_state = this.state_ref().format_debug().is_some();
         let has_context = this.context.get().is_some();
         let has_source = this.source.error_ref().is_some();
 
@@ -1246,125 +1049,78 @@ where
     }
 
     /// Returns a reference to the source error.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must point to a valid `DynBody<S, E, C>`.
-    unsafe fn source(
-        this: Ref<'_, DynBody>,
-    ) -> Option<&(dyn error::Error + Send + Sync + 'static)> {
-        let this = unsafe { this.cast::<Self>().deref() };
+    fn source(this: Ref<'_, DynBody>) -> Option<&(dyn error::Error + Send + Sync + 'static)> {
+        let this = DynBody::downcast_ref::<Self>(this).expect(Self::CORRECT_VTABLE_CALL);
 
         this.source.error_ref()
     }
 
     /// Returns a mutable reference to the source error.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must point to a valid `DynBody<S, E, C>`.
-    unsafe fn source_mut(
+    fn source_mut(
         this: Mut<'_, DynBody>,
     ) -> Option<&mut (dyn error::Error + Send + Sync + 'static)> {
-        let this = unsafe { this.cast::<Self>().deref_mut() };
+        let this = DynBody::downcast_mut::<Self>(this).expect(Self::CORRECT_VTABLE_CALL);
 
         this.source.error_mut()
     }
 
-    /// Returns a reference to the state.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must point to a valid `DynBody<S, E, C>`.
-    /// - `dst` must be a valid, aligned, mutable pointer to `Option<&StateTy>`.
-    unsafe fn state(this: Ref<'_, DynBody>, state_ty: TypeId, state_dst: NonNull<()>) {
-        let this = unsafe { this.cast::<Self>().deref() };
+    /// Returns an opaque reference to the state, if present.
+    fn state(this: Ref<'_, DynBody>) -> Option<&dyn Any> {
+        let this = DynBody::downcast_ref::<Self>(this).expect(Self::CORRECT_VTABLE_CALL);
 
-        if TypeId::of::<S>() == state_ty {
-            let dst = unsafe { state_dst.cast::<Option<&S>>().as_mut() };
-
-            if let Some(state) = this.get_state() {
-                dst.replace(state);
-            }
-        }
+        this.state_ref().get()
     }
 
     /// Returns a displayable reference to the context.
-    ///
-    /// # Safety
-    ///
-    /// - `this` must point to a valid `DynBody<S, E, C>`.
-    unsafe fn context(this: Ref<'_, DynBody>) -> Option<&(dyn Printable + Send + Sync + 'static)> {
-        let this = unsafe { this.cast::<Self>().deref() };
+    fn context(this: Ref<'_, DynBody>) -> Option<&(dyn Printable + Send + Sync + 'static)> {
+        let this = DynBody::downcast_ref::<Self>(this).expect(Self::CORRECT_VTABLE_CALL);
 
         this.context.get().map(|c| c as _)
     }
 
     /// Attempts to downcast the context field to the requested type `C`.
     ///
-    /// Writes `Some(&C)` into `dst` if the type matches, otherwise does nothing.
-    ///
-    /// # Safety
-    ///
-    /// Same as [`downcast_source_ref`](DynBody::downcast_source_ref) for the context field.
-    /// - `dst` must be a valid, aligned, mutable pointer to `Option<&Ty>`.
-    unsafe fn downcast_context_ref(this: Ref<'_, DynBody>, ty: TypeId, dst: NonNull<()>) {
-        let this = unsafe { this.cast::<Self>().deref() };
+    /// Returns the context as `&dyn Any` if the requested `TypeId` matches, otherwise `None`.
+    fn downcast_context_ref(this: Ref<'_, DynBody>, ty: TypeId) -> Option<&(dyn Any + 'static)> {
+        let this = DynBody::downcast_ref::<Self>(this).expect(Self::CORRECT_VTABLE_CALL);
 
-        if let Some(context) = this.context.get() {
-            if TypeId::of::<C>() == ty {
-                let dst = unsafe { dst.cast::<Option<&C>>().as_mut() };
-                *dst = Some(context);
-            }
-        }
+        let context = this.context.get()?;
+        (TypeId::of::<C>() == ty).then_some(context as &dyn Any)
     }
 
     /// Attempts to downcast the context field to the requested type `C` (mutable).
     ///
-    /// Writes `Some(&mut C)` into `dst` if the type matches, otherwise does nothing.
-    ///
-    /// # Safety
-    ///
-    /// Same as [`downcast_context_ref`](DynBody::downcast_context_ref) with mutable access.
-    /// - `dst` must be a valid, aligned, mutable pointer to `Option<&mut Ty>`.
-    unsafe fn downcast_context_mut(this: Mut<'_, DynBody>, ty: TypeId, dst: NonNull<()>) {
-        let this = unsafe { this.cast::<Self>().deref_mut() };
+    /// Returns the context as `&mut dyn Any` if the requested `TypeId` matches, otherwise `None`.
+    fn downcast_context_mut(
+        this: Mut<'_, DynBody>,
+        ty: TypeId,
+    ) -> Option<&mut (dyn Any + 'static)> {
+        let this = DynBody::downcast_mut::<Self>(this).expect(Self::CORRECT_VTABLE_CALL);
 
-        if let Some(context) = this.context.get_mut() {
-            if TypeId::of::<C>() == ty {
-                let dst = unsafe { dst.cast::<Option<&mut C>>().as_mut() };
-                *dst = Some(context);
-            }
-        }
+        let context = this.context.get_mut()?;
+        (TypeId::of::<C>() == ty).then_some(context as &mut dyn Any)
     }
 }
 
-impl<S, E, C> Drop for DynBody<S, E, C> {
+impl<S, E, C> Drop for DynBody<S, E, C>
+where
+    S: Store,
+{
     fn drop(&mut self) {
-        unsafe {
-            match Metadata((&raw const (self.vtable) as *const u8).read() & Metadata::MASK) {
-                // Note: An erased state is still initialized (it is only hidden from
-                // access), so it must be dropped just like a set state.
-                Self::STATE_SET | Self::STATE_FREEZED => {
-                    MaybeUninit::assume_init_drop(&mut self.state);
-                }
-                Self::STATE_NOTSET => {}
-                _ => unreachable!(),
-            }
-        }
+        self.state_mut().drop_in_place();
     }
 }
 
 impl<S, E, C> fmt::Debug for DynBody<S, E, C>
 where
-    S: Debug + Send + Sync + 'static,
+    S: Store,
     E: Source + Send + Sync + 'static,
     C: Debug + Display + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         render::format_debug(
             f,
-            self.get_state_for_format(),
+            self.state_ref().format_debug(),
             self.context.get(),
             self.source.error_ref().map(|e| e as _),
             WithBacktrace::search_debug(|| self.source.error_ref().map(|e| e as _)),
@@ -1374,14 +1130,14 @@ where
 
 impl<S, E, C> fmt::Display for DynBody<S, E, C>
 where
-    S: Debug + Send + Sync + 'static,
     E: Source + Send + Sync + 'static,
+    S: Store,
     C: Debug + Display + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         render::format_display(
             f,
-            self.get_state_for_format(),
+            self.state_ref().format_debug(),
             self.context.get(),
             self.source.error_ref().map(|e| e as _),
         )
@@ -1390,7 +1146,7 @@ where
 
 impl<S, E, C> error::Error for DynBody<S, E, C>
 where
-    S: Debug + Send + Sync + 'static,
+    S: Store,
     E: Source + Send + Sync + 'static,
     C: Debug + Display + Send + Sync + 'static,
 {
@@ -1402,35 +1158,43 @@ where
 pub(crate) struct RawVacant(ErasedDynBody);
 
 impl RawVacant {
-    pub fn try_with_state<S>(mut self, state: S) -> Result<RawError<S>, (Self, S)> {
-        unsafe {
-            let vt = DynBody::vtable(self.0.borrow());
-            let mut state_src = Some(state);
+    pub fn try_with_state<S>(mut self, state: S) -> Result<RawError<S>, (Self, S)>
+    where
+        S: Debug + 'static,
+    {
+        let vt = self.0.vtable();
+        let Err(state) = match_else!(Ministate::try_new(state), Ok(ministate) => {
+            let mut payload = Some(ministate);
+            (vt.try_set_state)(self.0.borrow_mut(), &mut payload);
+            match payload {
+                Some(ministate) => return Err((self, ministate.into_inner::<S>().expect("succeed with accurate type"))),
+                None => return Ok(RawError { boxed_body: ManuallyDrop::new(self.0) }),
+            }
+        });
 
-            if (vt.try_set_state)(self.0.borrow_mut(), &mut state_src as &mut dyn Any) {
-                Ok(RawError {
+        let mut payload = Some(state);
+        (vt.try_set_state)(self.0.borrow_mut(), &mut payload);
+        match payload {
+            Some(state) => Err((self, state)),
+            None => {
+                return Ok(RawError {
                     boxed_body: ManuallyDrop::new(self.0),
-                })
-            } else {
-                // Note: This `unwrap` will not panic as `state_src` is `None` iff try_set_state returns true.
-                Err((self, state_src.unwrap()))
+                });
             }
         }
     }
 
     pub fn try_into_stateless(self) -> Result<RawError, Self> {
-        let vt = DynBody::vtable(self.0.borrow());
+        let vt = self.0.vtable();
 
-        unsafe {
-            let body_ref = self.0.borrow();
-            let has_context = (vt.context)(body_ref);
-            let has_source = (vt.source)(body_ref);
-            match (has_context, has_source) {
-                (None, None) => Err(self),
-                _ => Ok(RawError {
-                    boxed_body: ManuallyDrop::new(self.0),
-                }),
-            }
+        let body_ref = self.0.borrow();
+        let has_context = (vt.context)(body_ref);
+        let has_source = (vt.source)(body_ref);
+        match (has_context, has_source) {
+            (None, None) => Err(self),
+            _ => Ok(RawError {
+                boxed_body: ManuallyDrop::new(self.0),
+            }),
         }
     }
 
@@ -1441,30 +1205,28 @@ impl RawVacant {
         S: Debug + Send + Sync + 'static,
         C: Context,
     {
-        let vt = DynBody::vtable(self.0.borrow());
+        let vt = self.0.vtable();
 
-        unsafe {
-            let body_ref = self.0.borrow();
-            let has_context = (vt.context)(body_ref).is_some();
-            let has_source = (vt.source)(body_ref).is_some();
-            match (has_context, has_source) {
-                (false, false) => match (vt.into_backtrace)(self.0) {
-                    Some(backtrace) => {
-                        RawError::new(state, Some(WithBacktraceSource(backtrace)), context)
+        let body_ref = self.0.borrow();
+        let has_context = (vt.context)(body_ref).is_some();
+        let has_source = (vt.source)(body_ref).is_some();
+        match (has_context, has_source) {
+            (false, false) => match (vt.into_backtrace)(self.0) {
+                Some(backtrace) => {
+                    RawError::new(state, Some(WithBacktraceSource(backtrace)), context)
+                }
+                None => RawError::new(state, None::<Infallible>, context),
+            },
+            _ => RawError::new(
+                state,
+                Some(ErasedSource(
+                    RawError::<Infallible> {
+                        boxed_body: ManuallyDrop::new(self.0),
                     }
-                    None => RawError::new(state, None::<Infallible>, context),
-                },
-                _ => RawError::new(
-                    state,
-                    Some(ErasedSource(
-                        RawError::<Infallible> {
-                            boxed_body: ManuallyDrop::new(self.0),
-                        }
-                        .into_erased(),
-                    )),
-                    context,
-                ),
-            }
+                    .into_erased(),
+                )),
+                context,
+            ),
         }
     }
 }
@@ -1472,46 +1234,64 @@ impl RawVacant {
 impl Debug for RawVacant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let body_ref = self.0.borrow();
-        let vt = DynBody::vtable(body_ref);
+        let vt = self.0.vtable();
         let show_less = f.sign_minus();
 
-        unsafe {
-            let context = (vt.context)(body_ref);
-            let source = (vt.source)(body_ref);
-            let backtrace = WithBacktrace::search_debug(|| {
-                (vt.source)(body_ref).map(|v| v as &(dyn error::Error + 'static))
-            });
+        let context = (vt.context)(body_ref);
+        let source = (vt.source)(body_ref);
+        let backtrace = WithBacktrace::search_debug(|| {
+            (vt.source)(body_ref).map(|v| v as &(dyn error::Error + 'static))
+        });
 
-            render::format_debug_struct::<Infallible>(
-                f,
-                "Vacant",
-                None,
-                context,
-                source.map(|v| v as _),
-                backtrace.filter(|_| !show_less),
-            )
-        }
+        render::format_debug_struct(
+            f,
+            "Vacant",
+            None,
+            context,
+            source.map(|v| v as _),
+            backtrace.filter(|_| !show_less),
+        )
     }
 }
 
+#[repr(transparent)]
 struct ErasedDynBody(ManuallyDrop<Align4Own<DynBody>>);
 
 impl ErasedDynBody {
-    fn from_typed<S, E, C>(body: Align4Own<DynBody<S, E, C>>) -> Self {
+    fn from_typed<S, E, C>(body: Align4Own<DynBody<S, E, C>>) -> Self
+    where
+        S: Store,
+    {
+        // Safety: Erases the `DynBody` is ABI compatible.
         Self(unsafe { body.cast::<DynBody>() })
     }
-    /// Restore the original `Align4Own<DynBody<S, E, C>>` from this `ErasedDynBody`.
+
+    /// Returns a static shared reference to the vtable.
+    fn vtable(&self) -> &'static DynBodyVTable {
+        self.0.borrow().deref().vtable.borrow().deref()
+    }
+
+    /// Recovers the typed owned body `Align4Own<DynBody<S, E, C>>`.
     ///
-    /// # Safety
-    ///
-    /// - `this` must be a valid `ErasedDynBody` pointing to `DynBody<S, E, C>`.
-    unsafe fn into_inner<S, E, C>(this: Self) -> Align4Own<DynBody<S, E, C>> {
+    /// Returns `None` if the type does not match.
+    fn into_inner<S, E, C>(this: Self) -> Option<Align4Own<DynBody<S, E, C>>>
+    where
+        S: Store,
+        E: 'static,
+        C: 'static,
+    {
+        let body_id = this.borrow().deref().vtable.borrow().deref().body_id;
+        if TypeId::of::<DynBody<S, E, C>>() != body_id {
+            return None;
+        }
+
         let mut this = ManuallyDrop::new(this);
+        // Safety: The types are verified to match here, so the cast is sound.
         unsafe {
             let mut this: ManuallyDrop<Align4Own<DynBody<S, E, C>>> =
                 ManuallyDrop::take(&mut this.0).cast();
 
-            ManuallyDrop::take(&mut this)
+            Some(ManuallyDrop::take(&mut this))
         }
     }
 }
@@ -1532,10 +1312,10 @@ impl DerefMut for ErasedDynBody {
 
 impl Drop for ErasedDynBody {
     fn drop(&mut self) {
-        let vtable = DynBody::vtable(self.0.borrow());
+        // Safety: The body is taken out of the `ManuallyDrop` exactly once and handed to the
+        // vtable's drop glue, which consumes it.
         unsafe {
-            // Safety: The body pointer is confirmed valid.
-            (vtable.drop)(ManuallyDrop::new(ManuallyDrop::take(&mut self.0)));
+            (self.vtable().drop)(ManuallyDrop::new(ManuallyDrop::take(&mut self.0)));
         }
     }
 }
@@ -1656,8 +1436,7 @@ mod tests {
     }
 
     #[test]
-    fn boxed_variant_nae_source_is_none() {
-        // When source is `Nae`, `.source()` should return `None`.
+    fn boxed_variant_without_source_is_none() {
         let err = RawError::new(Some(42u32), None::<Infallible>, Contextless::new());
         assert!(err.source().is_none());
         assert_matches!(err.state(), Some(42));
@@ -1673,7 +1452,7 @@ mod tests {
     }
 
     #[test]
-    fn boxed_variant_into_source_nae_returns_none() {
+    fn boxed_variant_into_source_returns_none() {
         let err = RawError::new(None::<Infallible>, None::<Infallible>, Contextless::new());
         assert!(err.into_source().is_none());
     }
@@ -1800,6 +1579,60 @@ mod tests {
         }
     }
 
+    #[test]
+    fn vacant_reuses_allocation_for_ministate_capable_types() {
+        // A `RawError<u8>` with only a state would be stored inline. Adding a source forces
+        // the boxed variant, where the state lives in a `Ministate`.
+        let err = RawError::new(Some(42u8), Some(TestError::FOO), Contextless::new());
+        let fingerprint = err
+            .get_alloc_fingerprint()
+            .expect("a state + source error should be boxed");
+
+        // Extract the state, leaving a `RawVacant` that still holds the source.
+        let (state, vacant) = err.extract_state().expect("state should be extractable");
+        assert_eq!(state, 42u8);
+        let vacant = vacant.expect("u8 fits a Ministate, so extraction should yield a vacant");
+
+        // Reuse the same allocation to store a `u16` state: converting `RawError<u8>` to
+        // `RawError<u16>` must not trigger a reallocation.
+        let err = vacant
+            .try_with_state(16u16)
+            .expect("u16 fits a Ministate, so the vacant should be reused");
+        assert_eq!(
+            err.get_alloc_fingerprint(),
+            Some(fingerprint),
+            "RawError<u8> -> RawError<u16> via RawVacant must reuse the allocation"
+        );
+        assert_eq!(err.state(), Some(&16u16));
+        assert_eq!(err.source().unwrap().to_string(), "foo");
+    }
+
+    #[test]
+    fn vacant_reuses_allocation_for_same_large_type() {
+        // `i128` exceeds a `Ministate`'s capacity.
+        let err = RawError::new(Some(42i128), Some(TestError::FOO), Contextless::new());
+        let fingerprint = err
+            .get_alloc_fingerprint()
+            .expect("a state-only RawError<i128> should be boxed");
+
+        let (state, vacant) = err.extract_state().expect("state should be extractable");
+        assert_eq!(state, 42i128);
+        let vacant = vacant.expect("a boxed body should yield a vacant");
+
+        // `try_with_state` cannot use a `Ministate` here (i128 is too large), but since the
+        // new state type matches the body's store type, `try_set` succeeds and the same allocation
+        // is reused.
+        let err = vacant
+            .try_with_state(42i128)
+            .expect("same type should be stored back without allocating");
+        assert_eq!(
+            err.get_alloc_fingerprint(),
+            Some(fingerprint),
+            "RawError<i128> -> RawError<i128> via RawVacant must reuse the allocation"
+        );
+        assert_eq!(err.state(), Some(&42i128));
+    }
+
     // --- Layer elimination ---
 
     #[test]
@@ -1878,8 +1711,85 @@ mod tests {
         }
     }
 
-    const _: () = const {
-        assert!(RawError::<i8>::is_state_inlinable());
-        assert!(!RawError::<u128>::is_state_inlinable());
-    };
+    #[test]
+    fn erase_preserves_display() {
+        // Const variant: displays the static context.
+        {
+            let err = RawError::try_new_const::<TestContext>().unwrap();
+            let before = err.to_string();
+            let erased = err.into_erased();
+            assert_eq!(
+                erased.error_ref().to_string(),
+                before,
+                "erasing a const error must preserve its display"
+            );
+        }
+        // Inline variant: displays the inline state.
+        {
+            let err = RawError::try_new_inline(42u16).unwrap();
+            let before = err.to_string();
+            let erased = err.into_erased();
+            assert_eq!(
+                erased.error_ref().to_string(),
+                before,
+                "erasing an inline error must preserve its display"
+            );
+        }
+        // Boxed variant with context: displays source + context.
+        {
+            let err = RawError::new(
+                None::<Infallible>,
+                Some(TestError::FOO),
+                TestContextLiteral::LITERAL,
+            );
+            let before = err.to_string();
+            let erased = err.into_erased();
+            assert_eq!(
+                erased.error_ref().to_string(),
+                before,
+                "erasing a boxed error must preserve its display"
+            );
+        }
+        // Boxed variant with large state.
+        {
+            let err = RawError::new(Some(42u128), Some(TestError::FOO), Contextless::new());
+            let before = err.to_string();
+            let erased = err.into_erased();
+            assert_eq!(
+                erased.error_ref().to_string(),
+                before,
+                "erasing a boxed error with state must preserve its display"
+            );
+        }
+        // Boxed variant with small state.
+        {
+            let err = RawError::new(Some(42u8), Some(TestError::FOO), Contextless::new());
+            let before = err.to_string();
+            let erased = err.into_erased();
+            assert_eq!(
+                erased.error_ref().to_string(),
+                before,
+                "erasing a boxed error with state must preserve its display"
+            );
+        }
+        // Source-only boxed variant: `error_ref` returns the source directly.
+        {
+            let err = RawError::new(None::<Infallible>, Some(TestError::BAR), Contextless::new());
+            let before = err.to_string();
+            let erased = err.into_erased();
+            assert_eq!(
+                erased.error_ref().to_string(),
+                before,
+                "erasing a source-only error must preserve its display"
+            );
+        }
+    }
+
+    #[test]
+    fn state_inlinability_by_size() {
+        const _: () = {
+            assert!(RawError::<u8>::is_state_inlinable());
+            assert!(!RawError::<u128>::is_state_inlinable());
+        };
+    }
 }

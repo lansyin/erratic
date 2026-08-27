@@ -8,6 +8,7 @@ use core::{
 use crate::{
     Error,
     context::{Context, Contextless},
+    match_else,
     raw::{RawError, RawVacant},
 };
 
@@ -207,6 +208,24 @@ where
             .expect("Vacant must be created with correct state storage type");
 
         Error(err)
+    }
+
+    /// Tries to store a state of a different type, reusing the existing error storage.
+    ///
+    /// It's guaranteed that reuse will succeed when the types are identical, or when both the
+    /// original and target types are at most `usize` in size (assuming the alignment also fits).
+    pub fn try_with_state<S2>(self, state: S2) -> Result<Error<S2>, (Self, S2)>
+    where
+        S2: State,
+    {
+        let Some(vacant) = self.inner else {
+            return Err((Self::new(None), state));
+        };
+        let state = S2::into_repr(state);
+        let Ok(err) = match_else!(vacant.try_with_state(state), Err((vacant, state)) => {
+            return Err((Self::new(Some(vacant)), S2::from_repr(state)));
+        });
+        Ok(Error(err))
     }
 
     /// Converts into a stateless error. Returns `Err` if no error details remain.

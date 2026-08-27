@@ -1,7 +1,12 @@
 use core::{
     any::{Any, TypeId},
-    mem::ManuallyDrop,
+    mem::{self, ManuallyDrop},
 };
+
+/// Returns the size of a struct field.
+pub const fn size_of_field<T, F>(_: fn(T) -> F) -> usize {
+    mem::size_of::<F>()
+}
 
 /// Attempts to concretize `value` into type `U` if `T == U` at the type-id level.
 ///
@@ -37,27 +42,6 @@ where
     U: 'static,
 {
     (ref_ as &dyn Any).downcast_ref().ok_or(ref_)
-}
-
-/// Attempts to concretize `ref_mut` into type `&mut U` if `T == U` at the type-id level.
-///
-/// Returns `Ok(ref_mut as &mut U)` on match, or `Err(ref_mut)` otherwise.
-#[allow(dead_code)]
-pub fn concretize_mut<T, U>(ref_mut: &mut T) -> Result<&mut U, &mut T>
-where
-    T: 'static,
-    U: 'static,
-{
-    // Note: We don't use `downcast_mut` here because it triggers NLL problem case #3.
-    if TypeId::of::<T>() == TypeId::of::<U>() {
-        // # Safety
-        //
-        // It is sound only when `TypeId::of::<T>() == TypeId::of::<U>()`, which guarantees
-        // that `&mut T` and `&mut U` have the same layout.
-        unsafe { Ok(&mut *(ref_mut as *mut T as *mut U)) }
-    } else {
-        Err(ref_mut)
-    }
 }
 
 /// Returns `true` if `T` and `U` have the same [`TypeId`].

@@ -160,7 +160,7 @@ impl WithBacktrace {
         this.into_boxed()
     }
 
-    /// Take the error from this backtrace and put it in the dst.
+    /// Takes the error from this backtrace and puts it in `dst`.
     pub fn take_source(self, dst: &mut dyn Any) -> Result<(), Self> {
         (self.take_err)(self, dst)
     }

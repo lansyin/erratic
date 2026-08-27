@@ -34,17 +34,14 @@ fn format_state_context(
     Ok(true)
 }
 
-pub(crate) fn format_debug_struct<S>(
+pub(crate) fn format_debug_struct(
     f: &mut fmt::Formatter<'_>,
     container_name: &'static str,
-    state: Option<&S>,
+    state: Option<&dyn Debug>,
     context: Option<impl Debug>,
     source: Option<&(dyn error::Error + 'static)>,
     backtrace: Option<(impl Debug + Display, Origin)>,
-) -> fmt::Result
-where
-    S: Debug + 'static,
-{
+) -> fmt::Result {
     let ds = &mut f.debug_struct(container_name);
 
     if let Some(state) = state {
@@ -68,15 +65,12 @@ where
     ds.finish()
 }
 
-fn format_chain<S>(
+fn format_chain(
     f: &mut fmt::Formatter<'_>,
-    state: Option<&S>,
+    state: Option<&dyn Debug>,
     context: Option<impl Display>,
     source: Option<&(dyn error::Error + 'static)>,
-) -> fmt::Result
-where
-    S: Debug + 'static,
-{
+) -> fmt::Result {
     const SOURCE_PREFIX: &str = "\n  -> ";
 
     let mut source = source;
@@ -98,16 +92,13 @@ where
     Ok(())
 }
 
-pub(crate) fn format_debug<S>(
+pub(crate) fn format_debug(
     f: &mut fmt::Formatter<'_>,
-    state: Option<&S>,
+    state: Option<&dyn Debug>,
     context: Option<impl Debug + Display>,
     source: Option<&(dyn error::Error + 'static)>,
     backtrace: Option<(impl Debug + Display, Origin)>,
-) -> fmt::Result
-where
-    S: Debug + 'static,
-{
+) -> fmt::Result {
     let show_less = f.sign_minus();
 
     if f.alternate() {
@@ -130,15 +121,12 @@ where
     }
 }
 
-pub(crate) fn format_display<S>(
+pub(crate) fn format_display(
     f: &mut fmt::Formatter<'_>,
-    state: Option<&S>,
+    state: Option<&dyn Debug>,
     context: Option<impl Display>,
     source: Option<&(dyn error::Error + 'static)>,
-) -> fmt::Result
-where
-    S: Debug + 'static,
-{
+) -> fmt::Result {
     if f.alternate() {
         format_chain(f, state, context, source)?;
     } else {

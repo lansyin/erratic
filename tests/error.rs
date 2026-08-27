@@ -349,6 +349,23 @@ fn extract_state() -> Result<()> {
 }
 
 #[test]
+fn vacant_try_with_state_converts_i8_to_i16() {
+    // A state-only `Error<i8>` would be stored inline, so attach a `TestError` source to
+    // force the boxed variant, where the `i8` state lives in a reusable `Ministate`.
+    let err: Error<i8> = mkerr!(state = 42i8, error = TestError::FOO);
+
+    let (state, vacant) = err.extract_state().expect("state extraction should succeed");
+    assert_eq!(state, 42i8);
+
+    // Convert `Error<i8>` into `Error<i16>` by reusing the existing storage.
+    let err: Error<i16> = vacant
+        .try_with_state(16i16)
+        .expect("i16 fits the same Ministate storage, so the conversion should succeed");
+    assert_eq!(err.state(), Some(&16i16));
+    assert_eq!(err.source().unwrap().to_string(), "foo");
+}
+
+#[test]
 fn dedup_repeated_message_in_chain() {
     {
         let inner = TestError::BAR;
