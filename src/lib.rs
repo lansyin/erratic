@@ -673,23 +673,15 @@ pub trait BuilderExt: Sized {
     type S: State + ?Sized;
     type C: ContextFn;
 
-    /// Attaches any value that implements [`Context`] as the error context.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use erratic::*;
-    /// # fn foo() -> Result<()> {
-    /// # let foo = || -> Result<(), std::io::Error> { unimplemented!() };
-    /// # let stream_id = 1;
-    /// # let filename = "";
-    /// foo().with_context("file not found")?;
-    /// foo().with_context(filename.to_string())?;
-    /// foo().with_context(mkctx!("cannot read {stream_id}"))?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
+    /// Attaches a lazily-evaluated context.
+    fn with_context_fn<F>(
+        self,
+        context_fn: F,
+    ) -> Self::Result<Builder<Self::E, Self::Sf, Self::S, F>>
+    where
+        F: ContextFn;
+
+    /// Attaches a context value.
     fn with_context<C>(
         self,
         context: C,
@@ -700,21 +692,13 @@ pub trait BuilderExt: Sized {
         self.with_context_fn(context::Identity::new(context))
     }
 
-    /// Attaches a lazily-evaluated context.
-    fn with_context_fn<F>(
-        self,
-        context_fn: F,
-    ) -> Self::Result<Builder<Self::E, Self::Sf, Self::S, F>>
-    where
-        F: ContextFn;
-
-    /// Lazily attaches a state.
+    /// Attaches a lazily-evaluated state.
     fn with_state_fn<F, S>(self, f: F) -> Self::Result<Builder<Self::E, Lazy<F, S>, S, Self::C>>
     where
         F: FnOnce() -> S,
         S: State;
 
-    /// Attaches a typed state.
+    /// Attaches a state.
     fn with_state<S>(
         self,
         state: S,
