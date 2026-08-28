@@ -13,6 +13,15 @@ use crate::{
 };
 
 /// A placeholder type for builders without a source error.
+///
+// Note: `Infallible` was used to denote the absence of a source error, since it implements
+// `error::Error` and thus satisfies the generic `Builder`'s `E: Error` bound. But with the
+// introduction of `DeriveExt::with_state_derived`, it became possible to create an empty builder:
+// ```
+// let _empty = None::<()>.with_state(0).with_state_derived(|_| None);
+// ```
+// To prevent that, we introduced `Errorless`, which deliberately excludes errorless builders
+// from implementing `DeriveExt`.
 pub enum Errorless {}
 
 /// An intermediate builder for constructing an [`Error`].
