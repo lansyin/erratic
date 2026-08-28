@@ -60,7 +60,7 @@ where
     }
 }
 
-/// Marker type indicating no meaningful state.
+/// A marker type indicating no meaningful state.
 pub struct Stateless(#[allow(unused)] [()]);
 
 impl Debug for Stateless {
@@ -73,7 +73,10 @@ impl State for Stateless {
     type Repr = Infallible;
 }
 
-/// A potentially lazily evaluated or derived state.
+/// A potentially lazily-evaluated or derived state.
+///
+/// See [`with_state`][crate::BuilderExt::with_state], [`with_state_fn`][crate::BuilderExt::with_state_fn],
+/// and [`with_state_derived`][crate::DeriveExt::with_state_derived].
 pub trait StateFn<E, S>
 where
     S: State + ?Sized,
@@ -81,7 +84,9 @@ where
     fn call(self, derive_from: Option<&E>) -> Option<<S as State>::Repr>;
 }
 
-/// A wrapper that wraps values as [`StateFn`]. See [`with_state`][crate::BuilderExt::with_state].
+/// A wrapper that wraps values as [`StateFn`].
+///
+/// See [`with_state`][crate::BuilderExt::with_state].
 pub struct Identity<S>(Option<S::Repr>)
 where
     S: State + ?Sized;
@@ -113,7 +118,9 @@ where
     }
 }
 
-/// A lazily evaluated state. See [`with_state_fn`][crate::BuilderExt::with_state_fn].
+/// A lazily-evaluated state.
+///
+/// See [`with_state_fn`][crate::BuilderExt::with_state_fn].
 pub struct Lazy<F, S>
 where
     S: State,
@@ -142,7 +149,9 @@ where
     }
 }
 
-/// Derives a state from an error, if any. See [`with_state_derived`][crate::DeriveExt::with_state_derived].
+/// Derives a state from an error, if any.
+///
+/// See [`with_state_derived`][crate::DeriveExt::with_state_derived].
 pub struct Derive<F, E, S>
 where
     S: State,
@@ -175,9 +184,9 @@ where
     }
 }
 
-/// An [`Error<S>`] with its state temporarily extracted.
+/// A variant of [`Error<S>`] with its state temporarily extracted.
 ///
-/// It maintains a compatible storage layout to support reattachment.
+/// It maintains a compatible storage slot so that the error can be restored.
 pub struct Vacant<S>
 where
     S: State,

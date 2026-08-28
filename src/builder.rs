@@ -87,7 +87,7 @@ impl Builder<Errorless, state::Identity<Stateless>, Stateless, context::Identity
         }
     }
 
-    /// Starts building an `Error` with a lazily evaluated context.
+    /// Starts building an `Error` with a lazily-evaluated context.
     ///
     /// The closure `context_fn` is called only when the error is materialized.
     pub fn with_context_fn<F>(

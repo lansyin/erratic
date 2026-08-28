@@ -20,7 +20,7 @@ pub enum Value<C: Context> {
 
 /// A trait for types that can be used as an error context.
 ///
-/// Most types implement `Context::Repr = Self` via blanket impl.
+/// Most types implement `Context::Repr = Self` via the built-in impl.
 pub trait Context: Sized {
     type Alt: Context<Alt = Infallible>;
     type Repr: Debug + Display + Send + Sync + 'static;
@@ -85,12 +85,14 @@ impl Context for Contextless {
     const VALUE: Value<Self> = Value::None;
 }
 
-/// A trait for types representing string literals.
+/// A trait for types representing a string literal.
 pub trait Literal {
     const LITERAL: &'static str;
 }
 
-/// A lazily evaluated context produced by [`mkctx!`](crate::mkctx).
+/// A lazily-evaluated and literal-aware context.
+///
+/// See [`mkctx!`](crate::mkctx).
 pub struct Mkctx<L, F = ()> {
     context: MaybeEvaluated<F>,
     _literal: PhantomData<L>,
@@ -175,7 +177,9 @@ where
     }
 }
 
-/// A trait for types that can [produce a context][crate::BuilderExt::with_context_fn].
+/// A potentially lazily-evaluated context.
+///
+/// See [`with_context_fn`][crate::BuilderExt::with_context_fn].
 pub trait ContextFn {
     type Output: Context;
 
@@ -194,7 +198,9 @@ where
     }
 }
 
-/// A wrapper that wraps values as [`ContextFn`]. See [`with_context`][crate::BuilderExt::with_context].
+/// A wrapper that wraps values as [`ContextFn`].
+///
+/// See [`with_context`][crate::BuilderExt::with_context].
 #[derive(Debug)]
 pub struct Identity<C>(C)
 where
