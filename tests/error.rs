@@ -634,3 +634,37 @@ fn regression_20260825_split_impls_break_inference() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn lift_state_via_question_mark() {
+    #[derive(Debug, PartialEq)]
+    enum LowState {
+        Missing,
+    }
+
+    #[derive(Debug, PartialEq)]
+    enum HighState {
+        NotFound,
+        _Forbidden,
+    }
+
+    impl From<LowState> for HighState {
+        fn from(state: LowState) -> Self {
+            match state {
+                LowState::Missing => HighState::NotFound,
+            }
+        }
+    }
+
+    fn low_level() -> Result<(), Error<LowState>> {
+        mkres!(state = LowState::Missing)
+    }
+
+    fn high_level() -> Result<(), Error<HighState>> {
+        low_level().lift_state()?;
+        Ok(())
+    }
+
+    let err = high_level().unwrap_err();
+    assert_eq!(err.state(), Some(&HighState::NotFound));
+}

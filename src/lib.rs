@@ -101,7 +101,7 @@
 //! | :-------------- | :-------------------------------------------- | :----------------------------------------------- |
 //! | `extract_state` | `Error<S>` -> `Result<(S, Vacant<S>), Error>` | Takes the state out, or propagates the error.    |
 //! | `map_state`     | `Error<S>` -> `Error<S2>`                     | Transforms the state with a closure.             |
-//! | `lift_state`    | `Error<S>` -> `Error<S2>` where `S2: From<S>` | Transforms the state via `From`.                 |
+//! | `lift_state`    | `Error<S>` -> `Error<S2>`                     | Transforms the state via the `From` trait.       |
 //! | `erase_state`   | `Error<S>` -> `Error<Stateless>`              | Erases the state, keeping the message unchanged. |
 //!
 //! # Formatting
@@ -173,7 +173,7 @@ use crate::{
     builder::Builder,
     context::{Context, ContextFn, Contextless, Printable},
     raw::{ErasedRawError, RawError},
-    state::{Derive, Lazy, State, StateFn, Stateless, Vacant},
+    state::{Derive, Lazy, Lift, State, StateFn, Stateless, Vacant},
 };
 
 pub type Result<T, E = Error> = core::result::Result<T, E>;
@@ -490,6 +490,16 @@ where
     }
 }
 
+impl<S, S2> From<Lift<S>> for Error<S2>
+where
+    S: State,
+    S2: State + From<S>,
+{
+    fn from(value: Lift<S>) -> Self {
+        value.into_inner().map_state(S2::from)
+    }
+}
+
 impl<S> From<Error<S>> for Box<dyn error::Error + 'static>
 where
     S: State + ?Sized,
@@ -562,7 +572,7 @@ pub trait StateExt {
     type S: State;
     type Result<T, E>;
 
-    ///  Extracts the state if it has been set.
+    /// Extracts the state if it has been set.
     fn extract_state(self) -> Result<Self::Result<Self::T, (Self::S, Vacant<Self::S>)>, Error>
     where
         Self::S: Sized;
@@ -575,17 +585,13 @@ pub trait StateExt {
         F: FnOnce(Self::S) -> S,
         S: State;
 
-    /// Converts to another state via the `From` trait.
+    /// Converts to an intermediate type that can be lifted to an error with another state via `?`.
+    ///
+    /// This is a workaround for the orphan rule, which prevents implementing `From<S>` for `Error<S2>`
+    /// where `S2: From<S>`.
     ///
     /// The underlying state storage is reused when possible. See [`try_with_state`][state::Vacant::try_with_state].
-    fn lift_state<S>(self) -> Self::Result<Self::T, Error<S>>
-    where
-        S: State,
-        S: From<Self::S>,
-        Self: Sized,
-    {
-        self.map_state(S::from)
-    }
+    fn lift_state(self) -> Self::Result<Self::T, Lift<Self::S>>;
 
     /// Erases the state type, while keeping the error message unchanged.
     fn erase_state(self) -> Self::Result<Self::T, Error>;
@@ -612,6 +618,10 @@ where
         S: State,
     {
         self.map_state(f)
+    }
+
+    fn lift_state(self) -> Self::Result<Self::T, Lift<Self::S>> {
+        Lift::from_error(self)
     }
 
     fn erase_state(self) -> Self::Result<Self::T, Error> {
@@ -643,6 +653,10 @@ where
         S2: State,
     {
         self.map_err(|err| err.map_state(f))
+    }
+
+    fn lift_state(self) -> Self::Result<Self::T, Lift<Self::S>> {
+        self.map_err(Lift::from_error)
     }
 
     fn erase_state(self) -> Self::Result<Self::T, Error> {

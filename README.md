@@ -91,7 +91,7 @@ States are meant to be handled explicitly. Several utility methods are provided:
 | :-------------- | :-------------------------------------------- | :----------------------------------------------- |
 | `extract_state` | `Error<S>` -> `Result<(S, Vacant<S>), Error>` | Takes the state out, or propagates the error.    |
 | `map_state`     | `Error<S>` -> `Error<S2>`                     | Transforms the state with a closure.             |
-| `lift_state`    | `Error<S>` -> `Error<S2>` where `S2: From<S>` | Transforms the state via `From`.                 |
+| `lift_state`    | `Error<S>` -> `Error<S2>`                     | Transforms the state via the `From` trait.       |
 | `erase_state`   | `Error<S>` -> `Error<Stateless>`              | Erases the state, keeping the message unchanged. |
 
 ## Formatting

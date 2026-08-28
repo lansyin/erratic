@@ -294,3 +294,24 @@ where
         Debug::fmt(vacant, f)
     }
 }
+
+/// An intermediate error wrapper to transform the error state via `?`.
+///
+/// See [`lift_state`][crate::StateExt::lift_state].
+#[derive(Debug)]
+pub struct Lift<S>(Error<S>)
+where
+    S: State;
+
+impl<S> Lift<S>
+where
+    S: State,
+{
+    pub(crate) fn from_error(err: Error<S>) -> Self {
+        Self(err)
+    }
+
+    pub(crate) fn into_inner(self) -> Error<S> {
+        self.0
+    }
+}
