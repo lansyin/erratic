@@ -20,8 +20,12 @@ pub struct Ministate {
     /// # Safety Invariants
     ///
     /// All functions in `vtable` receive the state value inside `self.store`.
-    vtable: MinistateVtable,
+    vtable: &'static MinistateVtable,
 }
+
+const _: () = const {
+    assert!(mem::size_of::<Ministate>() == 2 * mem::size_of::<usize>());
+};
 
 pub struct MinistateVtable {
     /// # Safety
@@ -52,7 +56,7 @@ impl Ministate {
     const STORE_ALIGN: usize = mem::align_of::<Self>();
 
     /// Returns a vtable for type `S` if the type `S` fits [`Ministate::store`].
-    const fn try_get_vtable_for<S>() -> Option<MinistateVtable>
+    const fn try_get_vtable_for<S>() -> Option<&'static MinistateVtable>
     where
         S: Debug + 'static,
     {
@@ -63,7 +67,7 @@ impl Ministate {
             return None;
         }
 
-        Some(MinistateVtable {
+        Some(&MinistateVtable {
             assume_init_drop: |store| unsafe {
                 // Safety: By `assume_init_drop`'s invariants, `store` is guaranteed to contain a valid value.
                 let this = store.cast::<MaybeUninit<S>>().deref_mut();
