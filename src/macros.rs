@@ -70,15 +70,23 @@ macro_rules! match_else {
 ///
 /// ```
 /// # use erratic::*;
-/// # fn foo() -> Result<()> {
-/// # let foo = || -> Result<(), std::io::Error> { unimplemented!() };
-/// # let stream_id = 1;
-/// // A plain literal, no allocation.
-/// foo().with_context(mkctx!("file not found"))?;
-/// // A runtime value, one allocation for the error.
-/// foo().with_context(stream_id)?;
-/// // With format args, the format string adds a second allocation when materializing the error.
-/// foo().with_context(mkctx!("failed to read from stream {stream_id}"))?;
+/// # fn bar() -> Result<()> {
+/// # use std::env;
+/// # let username = 1;
+/// // A plain literal; no allocation.
+/// let home = env::home_dir()
+///     .with_context(mkctx!("failed to get the home directory"))?;
+///
+/// // A runtime value; materializing the error costs one allocation.
+/// // It's a pity this case can't be optimized without a macro,
+/// // but since we usually work with `Result`, such cases are rare.
+/// let home = env::home_dir() // -> Option<PathBuf>
+///     .with_context("failed to get the home directory")?;
+///
+/// // With format arguments, the format string adds a second allocation
+/// // when the error is materialized.
+/// let home = env::home_dir()
+///     .with_context(mkctx!("failed to get the home directory for {username}"))?;
 /// # Ok(())
 /// # }
 /// ```
@@ -105,9 +113,21 @@ macro_rules! mkctx {
 
 /// Constructs an error from a variety of input types, with its state type inferred.
 ///
-/// If the only component is a string literal or a small state, no allocation occurs. A state is
-/// considered "small" when its size is under a pointer and its alignment is relaxed enough to fit
-/// within the inline storage.
+/// If the only component is a string literal or a [small][small] state, no allocation occurs.
+///
+/// [small]: crate::Error::from_state
+///
+/// # Allowed Keys
+///
+/// - [`context`][crate::BuilderExt::with_context]
+/// - [`state`][crate::BuilderExt::with_state]
+/// - [`error`][crate::builder::Builder::with_error]
+///
+/// Key-value pairs can be provided in any order, but must appear **before** the format string.
+///
+/// # Format String
+///
+/// The format string is mutually exclusive with the `context` key.
 ///
 /// # Examples
 ///
@@ -130,14 +150,6 @@ macro_rules! mkctx {
 /// );
 /// # }
 /// ```
-///
-/// # Format String
-///
-/// The format string is mutually exclusive with the context.
-///
-/// # Argument Order
-///
-/// Key-value pairs can be provided in any order, but must appear **before** the format string.
 #[macro_export]
 macro_rules! mkerr {
     ($($key:ident=$value:expr),+ $(, $($fmt:literal $($args:tt)*)?)?) => {
@@ -236,8 +248,10 @@ pub mod __priv_mksure {
 
 /// Returns an error if the given expression evaluates to false.
 ///
-/// For comparison expressions, the default message shows the values of both operands.
-/// The default message is suppressed when any of a state, source, context, or a format string is provided.
+/// Except the first argument (the condition), it accepts the same argument patterns as [`mkerr!`].
+///
+/// For comparison expressions, the default error message shows the values of both operands.
+/// This default is omitted when a state, source error, context, or format string is provided.
 ///
 /// # Examples
 ///
@@ -270,7 +284,6 @@ pub mod __priv_mksure {
 /// )?;
 /// // UnsupportedFormat: expected a PNG file, found `foo.jpg`
 ///
-/// // ..
 /// # todo!()
 /// # }
 /// ```

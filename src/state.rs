@@ -1,4 +1,15 @@
-//! State helpers and traits.
+//! Auxiliary types and traits for state.
+//!
+//! You rarely need to use any type in this module directly: to attach, extract, or transform
+//! an error's state, just use the following extension methods:
+//!
+//! - [`with_state`][crate::BuilderExt::with_state]
+//! - [`with_state_fn`][crate::BuilderExt::with_state_fn]
+//! - [`with_state_derived`][crate::DeriveExt::with_state_derived]
+//! - [`extract_state`][crate::StateExt::extract_state]
+//! - [`map_state`][crate::StateExt::map_state]
+//! - [`lift_state`][crate::StateExt::lift_state]
+//! - [`erase_state`][crate::StateExt::erase_state]
 use core::{
     convert::Infallible,
     fmt::{self, Debug},
@@ -14,7 +25,9 @@ use crate::{
 
 /// Associates an error state type with its stored representation.
 ///
-/// Most types implement `State::Repr = Self` via blanket impl.
+/// Most types implement `State::Repr = Self` via the built-in impl.
+///
+/// See [`state`][self].
 pub trait State: Debug + Send + Sync + 'static {
     /// The type used to store the state inside [`Error`].
     type Repr: Debug + Send + Sync + 'static;
@@ -75,8 +88,11 @@ impl State for Stateless {
 
 /// A potentially lazily-evaluated or derived state.
 ///
-/// See [`with_state`][crate::BuilderExt::with_state], [`with_state_fn`][crate::BuilderExt::with_state_fn],
-/// and [`with_state_derived`][crate::DeriveExt::with_state_derived].
+/// # See also
+///
+/// - [`with_state`][crate::BuilderExt::with_state]
+/// - [`with_state_fn`][crate::BuilderExt::with_state_fn]
+/// - [`with_state_derived`][crate::DeriveExt::with_state_derived]
 pub trait StateFn<E, S>
 where
     S: State + ?Sized,
@@ -187,6 +203,8 @@ where
 /// A variant of [`Error<S>`] with its state temporarily extracted.
 ///
 /// It maintains a compatible storage slot so that the error can be restored.
+///
+/// See [`extract_state`][crate::StateExt::extract_state].
 pub struct Vacant<S>
 where
     S: State,

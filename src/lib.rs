@@ -138,6 +138,13 @@
 //!
 //! [backtrace-conf]: https://doc.rust-lang.org/std/backtrace/index.html#environment-variables
 //!
+//! # Representation
+//!
+//! Type-wise, `Error<S>` is an internally tagged union, and it requires pointers to be aligned to 4 bytes,
+//! freeing up the lower 2 bits to encode its discriminant. Pointer tagging in this crate fully follows
+//! [strict provenance][strict-provenance], and is tested by Miri.
+//!
+//! [strict-provenance]: https://doc.rust-lang.org/1.89.0/std/ptr/index.html#strict-provenance
 #![no_std]
 #![allow(clippy::type_complexity)]
 #![allow(clippy::collapsible_if)] // Suggested by Rust 1.96 clippy, but our MSRV is 1.89.
@@ -179,6 +186,19 @@ use crate::{
 pub type Result<T, E = Error> = core::result::Result<T, E>;
 
 /// An error type that can carry optional state, source, and context.
+///
+/// Compared to `Box<dyn Error>`, `Error<S>` is only one `usize` in size, which makes
+/// the happy path faster. Moreover, building an error from a string literal or
+/// a small state incurs no allocation.
+///
+/// The state is strongly typed. Converting between state types is cheap when
+/// [no state is actually stored][phantom]. Even when a state is stored in an allocation,
+/// the allocation can be [reused][reuse] as long as the state fits in a `usize`.
+/// [Erasing][erase] the state is cheap as well.
+///
+/// [phantom]: crate::Error::with_phantom_state
+/// [reuse]: crate::StateExt::map_state
+/// [erase]: crate::StateExt::erase_state
 #[repr(transparent)]
 pub struct Error<S = Stateless>(RawError<S::Repr>)
 where
@@ -336,6 +356,9 @@ where
     S: State,
 {
     /// Creates an `Error` from a state value.
+    ///
+    /// A small state incurs no heap allocation. A state is considered "small" when its size is
+    /// under a pointer and its alignment is relaxed enough to fit within the inline storage.
     pub fn from_state(state: S) -> Self {
         Error(RawError::from_error(
             Some(S::into_repr(state)),
@@ -376,6 +399,8 @@ where
     }
 
     /// Converts to another state via the `From` trait.
+    ///
+    /// The underlying state storage is reused when possible. See [`try_with_state`][state::Vacant::try_with_state].
     pub fn lift_state<S2>(self) -> Error<S2>
     where
         S2: From<S> + State,
@@ -573,6 +598,25 @@ pub trait StateExt {
     type Result<T, E>;
 
     /// Extracts the state if it has been set.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use std::thread;
+    /// # use erratic::*;
+    /// # #[derive(Debug)]
+    /// # enum State { RetryLater }
+    /// # struct Writer;
+    /// # fn try_write(_: &mut Writer, chunk: &[u8]) -> Result<(), Error<State>> { unimplemented!() }
+    /// fn write(w: &mut Writer, chunk: &[u8]) -> Result<()> {
+    ///     while let Err((state, _)) = try_write(w, chunk).extract_state()? {
+    ///         match state {
+    ///             State::RetryLater => thread::yield_now(),
+    ///         }
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
     fn extract_state(self) -> Result<Self::Result<Self::T, (Self::S, Vacant<Self::S>)>, Error>
     where
         Self::S: Sized;
@@ -580,6 +624,34 @@ pub trait StateExt {
     /// Converts to another state via a closure.
     ///
     /// The underlying state storage is reused when possible. See [`try_with_state`][state::Vacant::try_with_state].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use erratic::*;
+    /// # fn main() {}
+    /// # #[derive(Debug)]
+    /// # enum LoginState { Unauthorized }
+    /// # #[derive(Debug)]
+    /// # enum ClientState { LoginRequired }
+    /// # type UserInfo = ();
+    /// # const USER_INFO_URL: &str = "https://example.com/user-info";
+    /// # mod http {
+    /// #     pub struct Request;
+    /// #     impl Request {
+    /// #         pub fn auth(self, _token: &str) -> Request { self }
+    /// #         pub fn send(self) -> Result<(), erratic::Error<super::LoginState>> { unimplemented!() }
+    /// #     }
+    /// #     pub fn get(_url: &str) -> Request { Request }
+    /// # }
+    /// fn get_user_info(token: &str) -> Result<UserInfo, Error<ClientState>> {
+    ///     let resp = http::get(USER_INFO_URL).auth(token).send()
+    ///         .map_state(|state| match state {
+    ///             LoginState::Unauthorized => ClientState::LoginRequired,
+    ///         })?;
+    ///     todo!()
+    /// }
+    /// ```
     fn map_state<F, S>(self, f: F) -> Self::Result<Self::T, Error<S>>
     where
         F: FnOnce(Self::S) -> S,
@@ -591,9 +663,67 @@ pub trait StateExt {
     /// where `S2: From<S>`.
     ///
     /// The underlying state storage is reused when possible. See [`try_with_state`][state::Vacant::try_with_state].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use erratic::*;
+    /// # fn main() {}
+    /// #[derive(Debug)]
+    /// enum LoginState { Unauthorized }
+    ///
+    /// #[derive(Debug)]
+    /// enum ClientState { LoginRequired }
+    ///
+    /// impl From<LoginState> for ClientState {
+    ///     fn from(state: LoginState) -> Self {
+    ///         match state {
+    ///             LoginState::Unauthorized => ClientState::LoginRequired,
+    ///         }
+    ///     }
+    /// }
+    ///
+    /// # type UserInfo = ();
+    /// # const USER_INFO_URL: &str = "https://example.com/user-info";
+    /// # mod http {
+    /// #     pub struct Request;
+    /// #     impl Request {
+    /// #         pub fn auth(self, _token: &str) -> Request { self }
+    /// #         pub fn send(self) -> Result<(), erratic::Error<super::LoginState>> { unimplemented!() }
+    /// #     }
+    /// #     pub fn get(_url: &str) -> Request { Request }
+    /// # }
+    /// fn get_user_info(token: &str) -> Result<UserInfo, Error<ClientState>> {
+    ///     let resp = http::get(USER_INFO_URL).auth(token).send().lift_state()?;
+    ///     todo!()
+    /// }
+    /// ```
     fn lift_state(self) -> Self::Result<Self::T, Lift<Self::S>>;
 
     /// Erases the state type, while keeping the error message unchanged.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use erratic::*;
+    /// # fn main() {}
+    /// # #[derive(Debug)]
+    /// # enum LoginState { Unauthorized }
+    /// # type UserInfo = ();
+    /// # const USER_INFO_URL: &str = "https://example.com/user-info";
+    /// # mod http {
+    /// #     pub struct Request;
+    /// #     impl Request {
+    /// #         pub fn auth(self, _token: &str) -> Request { self }
+    /// #         pub fn send(self) -> Result<(), erratic::Error<super::LoginState>> { unimplemented!() }
+    /// #     }
+    /// #     pub fn get(_url: &str) -> Request { Request }
+    /// # }
+    /// fn get_user_info(token: &str) -> Result<UserInfo, Error> {
+    ///     let resp = http::get(USER_INFO_URL).auth(token).send().erase_state()?;
+    ///     todo!()
+    /// }
+    /// ```
     fn erase_state(self) -> Self::Result<Self::T, Error>;
 }
 
@@ -674,6 +804,22 @@ pub trait BuilderExt: Sized {
     type C: ContextFn;
 
     /// Attaches a lazily-evaluated context.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use erratic::*;
+    /// # use std::{fs, path::Path};
+    /// # type Config = ();
+    /// fn load_config(path: &Path) -> Result<Config> {
+    ///     let contents = fs::read_to_string(&path)
+    ///         .with_context_fn(|| {
+    ///             let path = path.display().to_string();
+    ///             format!("unable to load {path}")
+    ///         })?;
+    ///     todo!()
+    /// }
+    /// ```
     fn with_context_fn<F>(
         self,
         context_fn: F,
@@ -682,6 +828,21 @@ pub trait BuilderExt: Sized {
         F: ContextFn;
 
     /// Attaches a context value.
+    ///
+    /// To attach a format string, use [`mkctx!`][crate::mkctx].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use erratic::*;
+    /// # use std::{fs, path::Path};
+    /// # type Config = ();
+    /// fn load_config(path: &Path) -> Result<Config> {
+    ///     let contents = fs::read_to_string(path)
+    ///         .with_context("failed to load the application config")?;
+    ///     todo!()
+    /// }
+    /// ```
     fn with_context<C>(
         self,
         context: C,
@@ -693,12 +854,54 @@ pub trait BuilderExt: Sized {
     }
 
     /// Attaches a lazily-evaluated state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use erratic::*;
+    /// # #[derive(Debug)]
+    /// # enum State { Unavailable(String) }
+    /// # type Html = ();
+    /// # mod http {
+    /// #     pub struct Request;
+    /// #     impl Request {
+    /// #         pub fn send(self) -> Result<(), erratic::Error> { unimplemented!() }
+    /// #     }
+    /// #     pub fn get(_url: &str) -> Request { Request }
+    /// # }
+    /// fn load_page(url: &str) -> Result<Html, Error<State>> {
+    ///     let resp = http::get(url).send()
+    ///         .with_state_fn(|| State::Unavailable(url.to_owned()))?;
+    ///     todo!()
+    /// }
+    /// ```
     fn with_state_fn<F, S>(self, f: F) -> Self::Result<Builder<Self::E, Lazy<F, S>, S, Self::C>>
     where
         F: FnOnce() -> S,
         S: State;
 
     /// Attaches a state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use erratic::*;
+    /// # #[derive(Debug)]
+    /// # enum State { Unavailable }
+    /// # type Html = ();
+    /// # mod http {
+    /// #     pub struct Request;
+    /// #     impl Request {
+    /// #         pub fn send(self) -> Result<(), erratic::Error> { unimplemented!() }
+    /// #     }
+    /// #     pub fn get(_url: &str) -> Request { Request }
+    /// # }
+    /// fn load_page(url: &str) -> Result<Html, Error<State>> {
+    ///     let contents = http::get(url).send()
+    ///         .with_state(State::Unavailable)?;
+    ///     todo!()
+    /// }
+    /// ```
     fn with_state<S>(
         self,
         state: S,
@@ -760,6 +963,44 @@ pub trait DeriveExt {
     type C: ContextFn;
 
     /// Lazily derives a state from the error.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use erratic::*;
+    /// # #[derive(Debug)]
+    /// # enum State { Unauthorized }
+    /// # const LOGIN_URL: &str = "https://example.com/login";
+    /// # mod http {
+    /// #     #[derive(Debug)]
+    /// #     pub struct Error;
+    /// #     impl std::fmt::Display for Error {
+    /// #         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    /// #             unimplemented!()
+    /// #         }
+    /// #     }
+    /// #     impl std::error::Error for Error {}
+    /// #     impl Error {
+    /// #         pub fn status(&self) -> u16 {
+    /// #             unimplemented!()
+    /// #         }
+    /// #     }
+    /// #     pub struct Request;
+    /// #     impl Request {
+    /// #         pub fn body(self, _body: &str) -> Request { self }
+    /// #         pub fn send(self) -> Result<(), Error> { unimplemented!() }
+    /// #     }
+    /// #     pub fn post(_url: &str) -> Request { Request }
+    /// # }
+    /// fn login(credential: &str) -> Result<(), Error<State>> {
+    ///     http::post(LOGIN_URL).body(credential).send()
+    ///         .with_state_derived(|err| match err.status() {
+    ///             401 => Some(State::Unauthorized),
+    ///             _ => None,
+    ///         })?;
+    ///     todo!()
+    /// }
+    /// ```
     fn with_state_derived<F, S>(
         self,
         f: F,
@@ -769,7 +1010,7 @@ pub trait DeriveExt {
         F: FnOnce(&Self::E) -> Option<S>;
 }
 
-/// Extension trait for materializing or erasing an error.
+/// Extension trait for materializing an error.
 pub trait ErrorExt: Sized {
     type Result<E>;
     type S: State + ?Sized;

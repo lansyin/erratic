@@ -1,7 +1,8 @@
-//! Auxiliary types and traits for combinators.
+//! Auxiliary types and traits for builder combinators.
 //!
-//! Disclaimer: Types in this module should not be used directly. They are auxiliary and may change
-//! without a major version bump.
+//! You rarely need to use any type in this module directly: call the [`BuilderExt`] or
+//! [`DeriveExt`] methods on an `Option` or `Result` to start building, and use `?` to
+//! build and propagate the error.
 use core::{convert::Infallible, error, fmt::Debug, marker::PhantomData};
 
 use crate::{
@@ -66,6 +67,7 @@ impl Builder<Errorless, state::Identity<Stateless>, Stateless, context::Identity
         }
     }
 
+    /// Starts building an `Error` with a lazily-evaluated state.
     pub fn with_state_fn<F, S>(
         f: F,
     ) -> Builder<Errorless, Lazy<F, S>, S, context::Identity<Contextless>>
@@ -97,8 +99,6 @@ impl Builder<Errorless, state::Identity<Stateless>, Stateless, context::Identity
     }
 
     /// Starts building an `Error` with a lazily-evaluated context.
-    ///
-    /// The closure `context_fn` is called only when the error is materialized.
     pub fn with_context_fn<F>(
         context_fn: F,
     ) -> Builder<Errorless, state::Identity<Stateless>, Stateless, F>

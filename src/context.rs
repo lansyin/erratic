@@ -1,7 +1,10 @@
 //! Auxiliary types and traits for context.
 //!
-//! Disclaimer: Types in this module should not be used directly. They are auxiliary and may change
-//! without a major version bump.
+//! You rarely need to use any type in this module directly: to attach a context to an error,
+//! just use the following extension methods:
+//!
+//! - [`with_context`][crate::BuilderExt::with_context]
+//! - [`with_context_fn`][crate::BuilderExt::with_context_fn]
 use core::{
     convert::{self, Infallible},
     fmt::{Debug, Display},
@@ -12,6 +15,8 @@ use core::{
 use alloc::{borrow::ToOwned, string::String};
 
 /// A compile-time context recipe.
+///
+/// See [`Context`].
 pub enum Value<C: Context> {
     None,
     Literal(&'static str),
@@ -21,6 +26,11 @@ pub enum Value<C: Context> {
 /// A trait for types that can be used as an error context.
 ///
 /// Most types implement `Context::Repr = Self` via the built-in impl.
+///
+/// # See also
+///
+/// - [`with_context`][crate::BuilderExt::with_context]
+/// - [`with_context_fn`][crate::BuilderExt::with_context_fn]
 pub trait Context: Sized {
     type Alt: Context<Alt = Infallible>;
     type Repr: Debug + Display + Send + Sync + 'static;
@@ -33,6 +43,8 @@ pub trait Context: Sized {
 }
 
 /// A context with its alternatives explicitly excluded.
+///
+/// See [`Context`].
 pub struct Unique<C: Context>(C);
 
 impl<C> Context for Unique<C>
@@ -66,7 +78,9 @@ where
     const VALUE: Value<Self> = Value::Lazy(convert::identity);
 }
 
-/// A zero-sized context placeholder for [Builder][crate::builder::Builder].
+/// A zero-sized context placeholder.
+///
+/// See [`BuilderExt`][crate::BuilderExt].
 #[derive(Debug)]
 pub struct Contextless {
     _priv: (),
@@ -86,6 +100,12 @@ impl Context for Contextless {
 }
 
 /// A trait for types representing a string literal.
+///
+/// # See also
+/// - [`mkctx!`](crate::mkctx)
+/// - [`mkerr!`](crate::mkerr)
+/// - [`mkres!`](crate::mkres)
+/// - [`mksure!`](crate::mksure)
 pub trait Literal {
     const LITERAL: &'static str;
 }
@@ -233,6 +253,8 @@ where
 }
 
 /// A value implementing both `Debug` and `Display`.
+///
+/// See [`context`][crate::Error::context].
 pub trait Printable: Debug + Display {}
 
 impl<T> Printable for T where T: Debug + Display {}
