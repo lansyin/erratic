@@ -333,14 +333,24 @@ where
         self.0.chain()
     }
 
-    /// Checks if the state type is small enough to be stored inline.
+    /// Checks if the state type is [small] enough to be stored inline.
     ///
     /// Note: Allocations can still occur even when this function returns `true`, in the following cases:
     ///
-    /// - The `backtrace` feature is enabled and runtime backtrace capture is active.
+    /// - The `backtrace` feature is enabled and backtrace capture is configured via [environment variables][backtrace-conf].
     /// - The error contains additional context or a source error.
+    ///
+    /// [small]: Self::from_state
+    /// [backtrace-conf]: https://doc.rust-lang.org/std/backtrace/index.html#environment-variables
     pub const fn is_state_inlinable() -> bool {
         RawError::<S::Repr>::is_state_inlinable()
+    }
+
+    /// Checks if the state type is small enough to reuse the existing allocation when [mapping][map] states.
+    ///
+    /// [map]: StateExt::map_state
+    pub const fn is_state_compact() -> bool {
+        RawError::<S::Repr>::is_state_compact()
     }
 
     /// Returns the backtrace, if any.

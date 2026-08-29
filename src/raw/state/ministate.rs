@@ -132,6 +132,13 @@ impl Ministate {
         }
         output
     }
+
+    pub const fn is_state_compact<S>() -> bool
+    where
+        S: Debug + 'static,
+    {
+        Self::try_get_vtable_for::<S>().is_some()
+    }
 }
 
 impl Drop for Ministate {

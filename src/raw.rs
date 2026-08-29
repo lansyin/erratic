@@ -655,6 +655,13 @@ impl<S> RawError<S> {
         Align4PtrCompat::<S>::is_inlinable()
     }
 
+    pub const fn is_state_compact() -> bool
+    where
+        S: Debug + 'static,
+    {
+        Ministate::is_state_compact::<S>()
+    }
+
     #[cfg(feature = "backtrace")]
     pub fn backtrace(&self) -> Option<&std::backtrace::Backtrace> {
         WithBacktrace::search(|| self.source().map(|v| v as _)).map(|(backtrace, _)| backtrace)
