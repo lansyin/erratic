@@ -128,6 +128,13 @@ formatting, unless the minus sign, e.g. `{:-?}`, is specified to suppress it.
 
 [backtrace-conf]: https://doc.rust-lang.org/std/backtrace/index.html#environment-variables
 
+## Representation
+
+Type-wise, `Error<S>` is an internally tagged union, and it requires pointers to be aligned to 4 bytes,
+freeing up the lower 2 bits to encode its discriminant. Pointer tagging in this crate fully follows
+[strict provenance][strict-provenance], and is tested by Miri.
+
+[strict-provenance]: https://doc.rust-lang.org/1.89.0/std/ptr/index.html#strict-provenance
 
 ## Contributing
 Contributions are warmly welcomed! Whether you have a bug report, feature request, or 
