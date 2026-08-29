@@ -641,23 +641,25 @@ pub trait StateExt {
     /// # use erratic::*;
     /// # fn main() {}
     /// # #[derive(Debug)]
-    /// # enum LoginState { Unauthorized }
+    /// # enum HttpState { Unauthorized }
     /// # #[derive(Debug)]
-    /// # enum ClientState { LoginRequired }
+    /// # enum State { LoginRequired }
     /// # type UserInfo = ();
     /// # const USER_INFO_URL: &str = "https://example.com/user-info";
     /// # mod http {
     /// #     pub struct Request;
     /// #     impl Request {
     /// #         pub fn auth(self, _token: &str) -> Request { self }
-    /// #         pub fn send(self) -> Result<(), erratic::Error<super::LoginState>> { unimplemented!() }
+    /// #         pub fn send(self) -> Result<(), erratic::Error<super::HttpState>> { unimplemented!() }
     /// #     }
     /// #     pub fn get(_url: &str) -> Request { Request }
     /// # }
-    /// fn get_user_info(token: &str) -> Result<UserInfo, Error<ClientState>> {
-    ///     let resp = http::get(USER_INFO_URL).auth(token).send()
+    /// fn get_user_info(token: &str) -> Result<UserInfo, Error<State>> {
+    ///     let resp = http::get(USER_INFO_URL)
+    ///         .auth(token)
+    ///         .send() // -> Result<Resp, Error<HttpState>>
     ///         .map_state(|state| match state {
-    ///             LoginState::Unauthorized => ClientState::LoginRequired,
+    ///             HttpState::Unauthorized => State::LoginRequired,
     ///         })?;
     ///     todo!()
     /// }
@@ -679,16 +681,15 @@ pub trait StateExt {
     /// ```
     /// # use erratic::*;
     /// # fn main() {}
+    /// # #[derive(Debug)]
+    /// # enum HttpState { Unauthorized }
     /// #[derive(Debug)]
-    /// enum LoginState { Unauthorized }
+    /// enum State { LoginRequired }
     ///
-    /// #[derive(Debug)]
-    /// enum ClientState { LoginRequired }
-    ///
-    /// impl From<LoginState> for ClientState {
-    ///     fn from(state: LoginState) -> Self {
+    /// impl From<HttpState> for State {
+    ///     fn from(state: HttpState) -> Self {
     ///         match state {
-    ///             LoginState::Unauthorized => ClientState::LoginRequired,
+    ///             HttpState::Unauthorized => State::LoginRequired,
     ///         }
     ///     }
     /// }
@@ -699,12 +700,15 @@ pub trait StateExt {
     /// #     pub struct Request;
     /// #     impl Request {
     /// #         pub fn auth(self, _token: &str) -> Request { self }
-    /// #         pub fn send(self) -> Result<(), erratic::Error<super::LoginState>> { unimplemented!() }
+    /// #         pub fn send(self) -> Result<(), erratic::Error<super::HttpState>> { unimplemented!() }
     /// #     }
     /// #     pub fn get(_url: &str) -> Request { Request }
     /// # }
-    /// fn get_user_info(token: &str) -> Result<UserInfo, Error<ClientState>> {
-    ///     let resp = http::get(USER_INFO_URL).auth(token).send().lift_state()?;
+    /// fn get_user_info(token: &str) -> Result<UserInfo, Error<State>> {
+    ///     let resp = http::get(USER_INFO_URL)
+    ///         .auth(token)
+    ///         .send() // -> Result<Resp, Error<HttpState>>
+    ///         .lift_state()?;
     ///     todo!()
     /// }
     /// ```
@@ -718,19 +722,22 @@ pub trait StateExt {
     /// # use erratic::*;
     /// # fn main() {}
     /// # #[derive(Debug)]
-    /// # enum LoginState { Unauthorized }
+    /// # enum HttpState { Unauthorized }
     /// # type UserInfo = ();
     /// # const USER_INFO_URL: &str = "https://example.com/user-info";
     /// # mod http {
     /// #     pub struct Request;
     /// #     impl Request {
     /// #         pub fn auth(self, _token: &str) -> Request { self }
-    /// #         pub fn send(self) -> Result<(), erratic::Error<super::LoginState>> { unimplemented!() }
+    /// #         pub fn send(self) -> Result<(), erratic::Error<super::HttpState>> { unimplemented!() }
     /// #     }
     /// #     pub fn get(_url: &str) -> Request { Request }
     /// # }
     /// fn get_user_info(token: &str) -> Result<UserInfo, Error> {
-    ///     let resp = http::get(USER_INFO_URL).auth(token).send().erase_state()?;
+    ///     let resp = http::get(USER_INFO_URL)
+    ///         .auth(token)
+    ///         .send() // -> Result<Resp, Error<HttpState>>
+    ///         .erase_state()?;
     ///     todo!()
     /// }
     /// ```
@@ -880,7 +887,8 @@ pub trait BuilderExt: Sized {
     /// #     pub fn get(_url: &str) -> Request { Request }
     /// # }
     /// fn load_page(url: &str) -> Result<Html, Error<State>> {
-    ///     let resp = http::get(url).send()
+    ///     let resp = http::get(url)
+    ///         .send() // -> Result<Resp, http::Error>
     ///         .with_state_fn(|| State::Unavailable(url.to_owned()))?;
     ///     todo!()
     /// }
@@ -907,7 +915,8 @@ pub trait BuilderExt: Sized {
     /// #     pub fn get(_url: &str) -> Request { Request }
     /// # }
     /// fn load_page(url: &str) -> Result<Html, Error<State>> {
-    ///     let contents = http::get(url).send()
+    ///     let contents = http::get(url)
+    ///         .send() // -> Result<Resp, http::Error>
     ///         .with_state(State::Unavailable)?;
     ///     todo!()
     /// }
@@ -1003,7 +1012,9 @@ pub trait DeriveExt {
     /// #     pub fn post(_url: &str) -> Request { Request }
     /// # }
     /// fn login(credential: &str) -> Result<(), Error<State>> {
-    ///     http::post(LOGIN_URL).body(credential).send()
+    ///     http::post(LOGIN_URL)
+    ///         .body(credential)
+    ///         .send() // -> Result<Resp, http::Error>
     ///         .with_state_derived(|err| match err.status() {
     ///             401 => Some(State::Unauthorized),
     ///             _ => None,

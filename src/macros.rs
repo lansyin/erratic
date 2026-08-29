@@ -18,22 +18,48 @@ pub mod __priv {
 
 /// Like `let-else`, with access to variant bindings in other branches, for `Result` only.
 ///
+/// It's useful for flattening nested `match`es, and pairs well with
+/// [`extract_state`][crate::StateExt::extract_state].
+///
 /// # Examples
 ///
 /// ```
-/// # use erratic::match_else;
-/// # fn try_send(_: ()) -> Result<i32, ()> { unimplemented!() }
-/// # fn enqueue_local(_: ()) -> Result<i32, ()> { unimplemented!() }
-/// # fn foo(packet: ()) -> i32 {
-/// let Err(packet) = match_else!(try_send(packet), Ok(n) => {
-///     return n;
+/// # use erratic::*;
+/// # #[derive(Debug)]
+/// # struct Opaque;
+/// # struct Foo;
+/// # struct Bar;
+/// # enum Typed { Foo(Foo), Bar(Bar) }
+/// # fn try_into_foo(obj: Opaque) -> Result<Foo, Opaque> { Err(obj) }
+/// # fn try_into_bar(obj: Opaque) -> Result<Bar, Opaque> { Err(obj) }
+/// # fn parse_object(obj: Opaque) -> Typed {
+/// let Err(obj) = match_else!(try_into_foo(obj), Ok(foo) => {
+///     return Typed::Foo(foo);
 /// });
-/// let Ok(count) = match_else!(enqueue_local(packet), Err(err) => {
-///     eprintln!("failed to enqueue: {err:?}");
-///     return 0;
+/// let Err(obj) = match_else!(try_into_bar(obj), Ok(bar) => {
+///     return Typed::Bar(bar);
 /// });
-/// // ..
-/// # 0i32
+/// panic!("expect a `Foo` or a `Bar`, found: {obj:?}");
+/// # }
+/// ```
+///
+/// ```
+/// # use erratic::*;
+/// # #[derive(Debug)]
+/// # enum State { Unauthorized }
+/// # struct Token;
+/// # mod cli {
+/// #     pub fn inquiry_credential() -> &'static str { "user" }
+/// # }
+/// # fn login(_: &str) -> Result<Token, Error<State>> { unimplemented!() }
+/// # fn authenticate() -> Result<Token, Error<State>> {
+/// loop {
+///     let cred = cli::inquiry_credential();
+///     let Ok(token) = match_else!(login(cred).extract_state()?, Err((state, _)) => match state {
+///         State::Unauthorized => continue,
+///     });
+///     todo!()
+/// }
 /// # }
 /// ```
 #[macro_export]
