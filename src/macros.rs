@@ -685,7 +685,7 @@ mod tests {
         let err = mksure!(magic_number > 0, state = -1i32).unwrap_err();
 
         assert_eq!(err.chain().count(), 1);
-        assert_eq!(err.to_string(), format!("-1"));
+        assert_eq!(err.to_string(), "-1");
     }
 
     #[test]
@@ -694,7 +694,7 @@ mod tests {
         let err = mksure!(magic_number > 0, context = 670).unwrap_err();
 
         assert_eq!(err.chain().count(), 1);
-        assert_eq!(err.to_string(), format!("670"));
+        assert_eq!(err.to_string(), "670");
     }
 
     #[test]
