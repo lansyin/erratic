@@ -14,7 +14,8 @@ use super::Metadata;
 ///
 /// # ABI
 ///
-/// This type guarantees that the least significant 2 bits of its first byte encode a [`Metadata`].
+/// This type guarantees that the least significant 2 bits of its first byte encode a [`Metadata`]
+/// and that it has exactly the layout of `usize`.
 //
 // Note: The repr/align attribute is required because it is used to compute the offset
 // that satisfies T's alignment.
@@ -31,7 +32,13 @@ pub struct Align4PtrCompat<T> {
     _marker: PhantomData<T>,
 }
 
+/// To uphold [`Align4PtrCompat`]'s ABI guarantee, the following invariants must hold:
+///
+/// - [`Align4PtrCompat::meta`] is the first field.
+/// - [`Align4PtrCompat`] has the same size as `usize`.
+/// - [`Align4PtrCompat`] has the same alignment as `usize`.
 const _: () = const {
+    assert!(mem::offset_of!(Align4PtrCompat<()>, meta) == 0);
     assert!(
         mem::size_of::<Align4PtrCompat::<()>>() == mem::size_of::<usize>(),
         "`Align4PtrCompat::<T>()` should be the same size as `usize`"

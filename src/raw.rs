@@ -23,7 +23,7 @@ use crate::{
         align4::{Align4, Align4Own, Align4PtrCompat, Align4Ref, Metadata},
         ptr::{Mut, Ref},
         source::{BoxedSource, ErasedSource, NoSource, Source, WithBacktraceSource},
-        state::{Metastate, Ministate, StatefulState, StatefulStateMut, Store},
+        state::{Discriminator, Metastate, Ministate, StatefulState, StatefulStateMut, Store},
     },
     render, rtti,
 };
@@ -55,6 +55,11 @@ where
     /// The least significant 2 bits of the first byte must be `10`.
     inline_body: ManuallyDrop<Align4PtrCompat<S>>,
 }
+
+const _: () = {
+    assert!(mem::size_of::<RawError<()>>() == mem::size_of::<usize>());
+    assert!(mem::size_of::<RawError<u128>>() == mem::size_of::<usize>());
+};
 
 enum SelectRef<'a, S>
 where
@@ -214,7 +219,7 @@ impl<S> RawError<S> {
             );
             unsafe {
                 // Safety: By the invariants of `staged_0_build_state`, `metastate` is the correct state of `state`.
-                state::Discriminator::set(&mut vtable, metastate);
+                Discriminator::set(&mut vtable, metastate);
             }
 
             RawError::<S> {
@@ -743,6 +748,12 @@ struct ConstBody {
 }
 
 /// Heap-allocated error body with type-erased state, source and context.
+///
+/// # ABI
+///
+/// It's safe to temporarily work on a [`DynBody`] with its state `S`, source `E`, and context `C`
+/// erased (replaced by ZSTs), but it must be restored to the original `DynBody<S, E, C>` before
+/// being dropped.
 #[repr(C)]
 struct DynBody<S = MaybeUninit<Infallible>, E = (), C = ()>
 where
@@ -750,17 +761,23 @@ where
 {
     /// # Safety Invariants
     ///
-    /// [`Self::vtable`] must be the first field, since the remaining fields are replaced
-    /// by ZSTs during type erasure. [`Self::vtable`] must be the exclusive [`Discriminator`]
-    /// for [`Self::state`].
+    /// - [`DynBody::vtable`] must be the first field, since the remaining fields are replaced
+    ///   by ZSTs during type erasure.
+    /// - [`DynBody::vtable`] must be the exclusive [`Discriminator`]
+    ///   for [`DynBody::state`].
     vtable: Align4Ref<'static, DynBodyVTable>,
     /// # Safety Invariants
     ///
-    /// [`Self::state`] should be tracked by [`Self::vtable`] exclusively.
+    /// [`DynBody::state`] should be tracked by [`DynBody::vtable`] exclusively.
     state: S,
     source: E,
     context: exclude::Exclude<C, NoContext>,
 }
+
+/// To uphold [`DynBody`]'s ABI guarantee, [`DynBody::vtable`] must be the first field.
+const _: () = const {
+    assert!(mem::offset_of!(DynBody, vtable) == 0);
+};
 
 /// A zero-sized type used as a context placeholder.
 #[derive(Debug)]

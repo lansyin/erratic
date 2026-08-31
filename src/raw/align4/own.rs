@@ -1,5 +1,8 @@
 use alloc::boxed::Box;
-use core::{marker::PhantomData, mem::ManuallyDrop};
+use core::{
+    marker::PhantomData,
+    mem::{self, ManuallyDrop},
+};
 
 use crate::raw::ptr::{Mut, Ref};
 
@@ -18,6 +21,11 @@ pub struct Align4Own<T> {
     ptr: Align4Ptr,
     _marker: PhantomData<Align4<T>>,
 }
+
+/// To uphold [`Align4Own`]'s ABI guarantee, [`Align4Own::ptr`] must be the first field.
+const _: () = const {
+    assert!(mem::offset_of!(Align4Own<()>, ptr) == 0);
+};
 
 impl<T> Align4Own<T> {
     pub fn from_boxed(ptr: Box<Align4<T>>, meta: Metadata) -> Self {

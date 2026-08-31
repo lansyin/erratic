@@ -1,4 +1,4 @@
-use core::marker::PhantomData;
+use core::{marker::PhantomData, mem};
 
 use crate::raw::ptr::Ref;
 
@@ -18,6 +18,11 @@ pub struct Align4Ref<'a, T> {
     ptr: Align4Ptr,
     _marker: PhantomData<&'a Align4<T>>,
 }
+
+/// To uphold [`Align4Ref`]'s ABI guarantee, [`Align4Ref::ptr`] must be the first field.
+const _: () = const {
+    assert!(mem::offset_of!(Align4Ref<'static, ()>, ptr) == 0);
+};
 
 impl<'a, T> Align4Ref<'a, T> {
     pub fn new(ref_: &'a Align4<T>, meta: Metadata) -> Align4Ref<'a, T> {
