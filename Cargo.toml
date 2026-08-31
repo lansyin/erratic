@@ -11,7 +11,7 @@ license = "MIT"
 readme = "README.md"
 homepage = "https://github.com/lansyin/erratic"
 repository = "https://github.com/lansyin/erratic"
-exclude = ["/.github"]
+exclude = ["/.github", "/splash.svg"]
 
 [dependencies]
 
