@@ -42,6 +42,16 @@ pub trait Context: Sized {
     }
 }
 
+impl<C> Context for C
+where
+    C: Debug + Display + Send + Sync + 'static,
+{
+    type Alt = Infallible;
+    type Repr = Self;
+
+    const VALUE: Value<Self> = Value::Lazy(convert::identity);
+}
+
 /// A context with its alternatives explicitly excluded.
 ///
 /// See [`Context`].
@@ -66,16 +76,6 @@ where
             f(context.0)
         }),
     };
-}
-
-impl<C> Context for C
-where
-    C: Debug + Display + Send + Sync + 'static,
-{
-    type Alt = Infallible;
-    type Repr = Self;
-
-    const VALUE: Value<Self> = Value::Lazy(convert::identity);
 }
 
 /// A zero-sized context placeholder.
