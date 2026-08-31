@@ -9,7 +9,6 @@ description = "Composable, minimal-overhead error handling with typed state. "
 keywords = ["error", "error-handling"]
 license = "MIT"
 readme = "README.md"
-homepage = "https://github.com/lansyin/erratic"
 repository = "https://github.com/lansyin/erratic"
 exclude = ["/.github", "/splash.svg"]
 
