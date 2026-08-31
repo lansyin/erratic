@@ -147,7 +147,7 @@
 //! [strict-provenance]: https://doc.rust-lang.org/1.89.0/std/ptr/index.html#strict-provenance
 #![no_std]
 #![allow(clippy::type_complexity)]
-#![allow(clippy::collapsible_if)] // Suggested by Rust 1.96 clippy, but our MSRV is 1.89.
+#![allow(clippy::collapsible_if)] // Suggested by Rust 1.96 clippy, but our MSRV is 1.91.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 extern crate alloc;
