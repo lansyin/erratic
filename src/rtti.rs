@@ -17,9 +17,7 @@ where
     U: 'static,
 {
     if TypeId::of::<T>() == TypeId::of::<U>() {
-        // # Safety
-        //
-        // It is sound only when `TypeId::of::<T>() == TypeId::of::<U>()`, which guarantees
+        // Safety: It is sound only when `TypeId::of::<T>() == TypeId::of::<U>()`, which guarantees
         // that `T` and `U` have the same layout.
         unsafe {
             Ok(ManuallyDrop::take(

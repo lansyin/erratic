@@ -52,7 +52,11 @@ const _: () = const {
 impl<T> Align4PtrCompat<T> {
     const CORRECT_OFFSET: &'static str = "offset was checked at compile-time";
 
-    /// [`Self::OFFSET`] is `Some` if an instance of `Align4PtrCompat<T>` can be created.
+    /// The byte offset from the start of [`Self::store`] to the concrete value it holds.
+    ///
+    /// # Safety invariants
+    ///
+    /// [`Self::OFFSET`] is `Some` if and only if an instance of `Align4PtrCompat<T>` can be created.
     const OFFSET: Option<isize> = 'ret: {
         let target_size = mem::size_of::<T>();
         let target_align = mem::align_of::<T>();
@@ -78,12 +82,10 @@ impl<T> Align4PtrCompat<T> {
         let Some(offset) = Self::OFFSET else {
             return Err(value);
         };
-        let mut this = unsafe {
-            Self {
-                meta: meta.0,
-                store: mem::zeroed(),
-                _marker: PhantomData,
-            }
+        let mut this = Self {
+            meta: meta.0,
+            store: MaybeUninit::zeroed(),
+            _marker: PhantomData,
         };
 
         unsafe {
@@ -149,7 +151,15 @@ impl<T> Drop for Align4PtrCompat<T> {
 }
 
 pub struct ErasedAlign4PtrCompat {
+    /// # Safety Invariants
+    ///
+    /// [`ErasedAlign4PtrCompat::inner`] holds an erased [`Align4PtrCompat<T>`] before
+    /// [`ErasedAlign4PtrCompat::drop`] is invoked.
     inner: MaybeUninit<Align4PtrCompat<()>>,
+    /// # Safety Invariants
+    ///
+    /// [`ErasedAlign4PtrCompat::vtable`] is initialized for the concrete [`Align4PtrCompat<T>`] that
+    /// [`ErasedAlign4PtrCompat::inner`] was created with.
     vtable: &'static Align4PtrCompatVTable,
     _marker: PhantomData<*mut ()>,
 }
@@ -187,6 +197,7 @@ impl ErasedAlign4PtrCompat {
         if self.vtable.type_id != TypeId::of::<T>() {
             return None;
         }
+        // Safety: The types are verified to match here, so the cast is sound.
         Some(unsafe { &*(self.inner.as_ptr() as *const Align4PtrCompat<T>) })
     }
 

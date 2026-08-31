@@ -117,7 +117,7 @@ mod tests {
     fn align4_own_cast_preserves_data() {
         let value = Box::new(Align4(0xABCD_EF01u32));
         let owned = Align4Own::from_boxed(value, Metadata::_2);
-        // Cast to the same-layout type `[u8; 4]`
+        // Safety: `u32` has the same layout as `[u8; 4]`.
         let casted = unsafe { owned.cast::<[u8; 4]>() };
         assert_eq!(casted.borrow().deref(), &[0x01, 0xEF, 0xCD, 0xAB]);
 

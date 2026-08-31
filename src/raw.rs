@@ -761,14 +761,16 @@ where
 {
     /// # Safety Invariants
     ///
-    /// - [`DynBody::vtable`] must be the first field, since the remaining fields are replaced
+    /// - [`DynBody::vtable`] is the first field, since the remaining fields are replaced
     ///   by ZSTs during type erasure.
-    /// - [`DynBody::vtable`] must be the exclusive [`Discriminator`]
+    /// - [`DynBody::vtable`] is the exclusive [`Discriminator`]
     ///   for [`DynBody::state`].
+    /// - [`DynBody::vtable`] is initialized for the concrete [`DynBody<S, E, C>`] it was created
+    ///   with.
     vtable: Align4Ref<'static, DynBodyVTable>,
     /// # Safety Invariants
     ///
-    /// [`DynBody::state`] should be tracked by [`DynBody::vtable`] exclusively.
+    /// [`DynBody::state`] is tracked by [`DynBody::vtable`] exclusively.
     state: S,
     source: E,
     context: exclude::Exclude<C, NoContext>,
