@@ -1,0 +1,33 @@
+name: main
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  guard:
+    name: detect release tag on the commit
+    runs-on: ubuntu-latest
+    outputs:
+      skip_ci: ${{ steps.tag-check.outputs.skip_ci }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: tag-check
+        name: Skip CI if the pushed commit carries a release tag
+        run: |
+          if git tag --points-at HEAD | grep -qE '^erratic-[0-9]+'; then
+            echo "skip_ci=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip_ci=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  ci:
+    needs: guard
+    if: ${{ needs.guard.outputs.skip_ci == 'false' }}
+    uses: ./.github/workflows/ci.yaml
