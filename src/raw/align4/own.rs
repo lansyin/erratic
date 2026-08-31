@@ -12,6 +12,9 @@ use super::{Align4, Align4Ptr, Metadata};
 /// This type guarantees that the least significant 2 bits of its first byte encode a [`Metadata`].
 #[repr(C)]
 pub struct Align4Own<T> {
+    /// # Safety Invariants
+    ///
+    /// `ptr` always points to a valid value allocated by the global allocator.
     ptr: Align4Ptr,
     _marker: PhantomData<Align4<T>>,
 }
@@ -34,6 +37,7 @@ impl<T> Align4Own<T> {
 
     /// Consumes `self` and returns the boxed value.
     pub fn into_boxed(self) -> Box<Align4<T>> {
+        // Safety: By the invariant on `ptr`, `ptr` is guaranteed to point to a valid value allocated by the global allocator.
         unsafe { Box::from_raw(self.into_raw()) }
     }
 
@@ -57,7 +61,7 @@ impl<T> Align4Own<T> {
     pub fn borrow(&self) -> Ref<'_, T> {
         let (addr, _) = self.ptr.to_parts();
         let ptr = addr.cast::<Align4<T>>();
-        // Safety: `Align4Own` keeps the pointer valid while alive.
+        // Safety: By the invariant on `ptr`, `ptr` is guaranteed to point to a valid value.
         unsafe { Ref::from_ptr(&raw const (*ptr).0) }
     }
 
@@ -65,7 +69,7 @@ impl<T> Align4Own<T> {
     pub fn borrow_mut(&mut self) -> Mut<'_, T> {
         let (addr, _) = self.ptr.to_parts();
         let ptr = addr.cast::<Align4<T>>();
-        // Safety: `Align4Own` keeps the pointer valid while alive.
+        // Safety: By the invariant on `ptr`, `ptr` is guaranteed to point to a valid value.
         unsafe { Mut::from_ptr(&raw mut (*ptr).0) }
     }
 }
@@ -73,7 +77,7 @@ impl<T> Align4Own<T> {
 impl<T> Drop for Align4Own<T> {
     fn drop(&mut self) {
         unsafe {
-            // Safety: The pointer was created from a `Box`.
+            // Safety: By the invariant on `ptr`, `ptr` is guaranteed to point to a valid value allocated by the global allocator.
             let _ = Box::from_raw(self.ptr.to_parts().0 as *mut Align4<T>);
         }
     }

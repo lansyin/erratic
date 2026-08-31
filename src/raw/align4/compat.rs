@@ -16,8 +16,8 @@ use super::Metadata;
 ///
 /// This type guarantees that the least significant 2 bits of its first byte encode a [`Metadata`].
 //
-// Note: The repr/align attribute is required as it is used to compute the offset
-// that satisfies the alignment of T.
+// Note: The repr/align attribute is required because it is used to compute the offset
+// that satisfies T's alignment.
 #[cfg_attr(target_pointer_width = "16", repr(C, align(2)))]
 #[cfg_attr(target_pointer_width = "32", repr(C, align(4)))]
 #[cfg_attr(target_pointer_width = "64", repr(C, align(8)))]

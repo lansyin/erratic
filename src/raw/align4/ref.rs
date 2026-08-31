@@ -12,6 +12,9 @@ use super::{Align4, Align4Ptr, Metadata};
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Align4Ref<'a, T> {
+    /// # Safety Invariants
+    ///
+    /// `ptr` always points to a valid value.
     ptr: Align4Ptr,
     _marker: PhantomData<&'a Align4<T>>,
 }
@@ -32,7 +35,7 @@ impl<'a, T> Align4Ref<'a, T> {
     pub fn borrow(&self) -> Ref<'a, T> {
         let (addr, _) = self.ptr.to_parts();
         let ptr = addr.cast::<Align4<T>>();
-        // Safety: `Align4Ref` keeps the pointer valid while alive.
+        // Safety: By the invariant on `ptr`, `ptr` is guaranteed to point to a valid value.
         unsafe { Ref::from_ptr(&raw const (*ptr).0) }
     }
 
@@ -40,7 +43,7 @@ impl<'a, T> Align4Ref<'a, T> {
     pub fn borrow_raw(&self) -> Ref<'a, Align4<T>> {
         let (addr, _) = self.ptr.to_parts();
         let ptr = addr.cast::<Align4<T>>();
-        // Safety: `Align4Ref` keeps the pointer valid while alive.
+        // Safety: By the invariant on `ptr`, `ptr` is guaranteed to point to a valid value.
         unsafe { Ref::from_ptr(ptr) }
     }
 }

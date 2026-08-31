@@ -94,8 +94,8 @@ impl<S> RawError<S> {
     ///
     /// The returned [`Metadata`] indicates the correct variant of `self`
     fn kind(&self) -> Metadata {
-        // Safety: By [`Self`]'s invariants, the least significant 2 bits of the first byte
-        // contains a [`Metadata`].
+        // Safety: By the invariants of [`Self`], the least significant 2 bits of the first byte
+        // contain a [`Metadata`].
         unsafe { Metadata((&raw const (*self) as *const u8).read() & Metadata::MASK) }
     }
 
@@ -213,7 +213,7 @@ impl<S> RawError<S> {
                 Metadata::_0,
             );
             unsafe {
-                // Safety: By `staged_0_build_state`'s invariants, `metastate` is the correct state of `state`.
+                // Safety: By the invariants of `staged_0_build_state`, `metastate` is the correct state of `state`.
                 state::Discriminator::set(&mut vtable, metastate);
             }
 

@@ -6,7 +6,7 @@
 //! # Quick Start
 //!
 //! In most cases, `Error` can serve as a drop-in replacement for `Box<dyn Error>`,
-//! with the `?` operator converting any standard error into `Error` automatically.
+//! automatically converting any standard error via the `?` operator.
 //!
 //! ```
 //! # use std::{fs::File, io::Write};

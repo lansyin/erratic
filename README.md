@@ -13,7 +13,7 @@ enabling applications to handle errors uniformly across different scenarios.
 ## Quick Start
 
 In most cases, `Error` can serve as a drop-in replacement for `Box<dyn Error>`,
-with the `?` operator converting any standard error into `Error` automatically.
+automatically converting any standard error via the `?` operator.
 
 ```rust
 fn say_hi(filename: &str) -> erratic::Result<()> {

@@ -318,7 +318,7 @@ macro_rules! mksure {
     ($($exp:tt)*) => {
         $crate::__priv_mksure!(@conv [$($exp)*])
     };
-    ($exp:expr, $fmt:literal $($args:tt)*) => {
+    ($exp:expr $(, $($key:ident=$value:expr),+ $(, $($fmt:literal $($args:tt)*)?)?)?) => {
         $crate::macros::__priv::compile_error!("for docs only, an equivalent impl is inside the first branch");
     };
 }

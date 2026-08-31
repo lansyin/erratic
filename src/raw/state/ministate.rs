@@ -9,6 +9,8 @@ use crate::rtti;
 
 use super::Store;
 
+// Note: The repr/align attribute is required because it is used to compute the offset
+// that satisfies T's alignment.
 #[cfg_attr(target_pointer_width = "16", repr(C, align(2)))]
 #[cfg_attr(target_pointer_width = "32", repr(C, align(4)))]
 #[cfg_attr(target_pointer_width = "64", repr(C, align(8)))]
@@ -69,20 +71,20 @@ impl Ministate {
 
         Some(&MinistateVtable {
             assume_init_drop: |store| unsafe {
-                // Safety: By `assume_init_drop`'s invariants, `store` is guaranteed to contain a valid value.
+                // Safety: By the invariants of `assume_init_drop`, `store` is guaranteed to contain a valid value.
                 let this = store.cast::<MaybeUninit<S>>().deref_mut();
                 this.assume_init_drop();
             },
             assume_init_debug: |store| unsafe {
-                // Safety: By `assume_init_debug`'s invariants, `store` is guaranteed to contain a valid value.
+                // Safety: By the invariants of `assume_init_debug`, `store` is guaranteed to contain a valid value.
                 store.cast::<S>().deref()
             },
             assume_init_get: |store| unsafe {
-                // Safety: By `assume_init_get`'s invariants, `store` is guaranteed to contain a valid value.
+                // Safety: By the invariants of `assume_init_get`, `store` is guaranteed to contain a valid value.
                 store.cast::<S>().deref()
             },
             assume_init_take: |store, callback| unsafe {
-                // Safety: By `assume_init_take`'s invariants, `store` is guaranteed to contain a valid value.
+                // Safety: By the invariants of `assume_init_take`, `store` is guaranteed to contain a valid value.
                 let this = store.cast::<MaybeUninit<S>>().deref_mut();
                 let mut value = Some(this.assume_init_read());
 
@@ -154,17 +156,17 @@ impl Drop for Ministate {
 
 impl Store for ManuallyDrop<Ministate> {
     unsafe fn assume_init_debug(&self) -> &dyn Debug {
-        // Safety: By `assume_init_debug`'s invariants, `store` is guaranteed to contain a valid value.
+        // Safety: By the invariants of `assume_init_debug`, `store` is guaranteed to contain a valid value.
         unsafe { (self.vtable.assume_init_debug)(Ref::from_ptr(self.store.as_ptr() as *mut ())) }
     }
 
     unsafe fn assume_init_get(&self) -> &dyn Any {
-        // Safety: By `assume_init_get`'s invariants, `store` is guaranteed to contain a valid value.
+        // Safety: By the invariants of `assume_init_get`, `store` is guaranteed to contain a valid value.
         unsafe { (self.vtable.assume_init_get)(Ref::from_ptr(self.store.as_ptr() as *mut ())) }
     }
 
     unsafe fn assume_init_drop(&mut self) {
-        // Safety: By `assume_init_drop`'s invariants, `store` is guaranteed to contain a valid value.
+        // Safety: By the invariants of `assume_init_drop`, `store` is guaranteed to contain a valid value.
         unsafe {
             (self.vtable.assume_init_drop)(Mut::from_ptr(
                 self.store.as_mut_ptr() as *mut MaybeUninit<()>
@@ -173,7 +175,7 @@ impl Store for ManuallyDrop<Ministate> {
     }
 
     unsafe fn assume_init_take(&mut self, callback: &mut dyn FnMut(&mut dyn Any)) {
-        // Safety: By `assume_init_take`'s invariants, `store` is guaranteed to contain a valid value.
+        // Safety: By the invariants of `assume_init_take`, `store` is guaranteed to contain a valid value.
         unsafe {
             (self.vtable.assume_init_take)(
                 Mut::from_ptr(self.store.as_mut_ptr() as *mut MaybeUninit<()>),

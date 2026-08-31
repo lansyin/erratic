@@ -118,22 +118,22 @@ where
     S: State,
 {
     unsafe fn assume_init_debug(&self) -> &dyn Debug {
-        // Safety: By `assume_init_debug`'s invariants, `self` is guaranteed to contain a valid value.
+        // Safety: By the invariants of `assume_init_debug`, `self` is guaranteed to contain a valid value.
         unsafe { self.assume_init_ref() }
     }
 
     unsafe fn assume_init_get(&self) -> &dyn Any {
-        // Safety: By `assume_init_get`'s invariants, `self` is guaranteed to contain a valid value.
+        // Safety: By the invariants of `assume_init_get`, `self` is guaranteed to contain a valid value.
         unsafe { self.assume_init_ref() }
     }
 
     unsafe fn assume_init_drop(&mut self) {
-        // Safety: By `assume_init_drop`'s invariants, `self` is guaranteed to contain a valid value.
+        // Safety: By the invariants of `assume_init_drop`, `self` is guaranteed to contain a valid value.
         unsafe { self.assume_init_drop() }
     }
 
     unsafe fn assume_init_take(&mut self, callback: &mut dyn FnMut(&mut dyn Any)) {
-        // Safety: By `assume_init_take`'s invariants, `self` is guaranteed to contain a valid value.
+        // Safety: By the invariants of `assume_init_take`, `self` is guaranteed to contain a valid value.
         unsafe {
             let mut state = Some(self.assume_init_read());
             callback(&mut state);
@@ -213,7 +213,7 @@ where
             Metastate::Empty | Metastate::Frozen => {}
             Metastate::Present => {
                 unsafe {
-                    // Safety: By `Self::discriminator`'s invariants, `self.discriminator` is exclusively for `self.store`.
+                    // Safety: By the invariant on `Self::discriminator`, `self.discriminator` is exclusively for `self.store`.
                     self.discriminator.set(Metastate::Empty);
                     // Safety: We are in the branch with state `present`, the store contains a valid state.
                     self.store.assume_init_take(callback);
@@ -235,7 +235,7 @@ where
                 // Safety: The discriminator confirmed the store is empty.
                 if unsafe { self.store.try_set(state) } {
                     unsafe {
-                        // Safety: By `Self::discriminator`'s invariants, `self.discriminator` is exclusively for `self.store`.
+                        // Safety: By the invariant on `Self::discriminator`, `self.discriminator` is exclusively for `self.store`.
                         self.discriminator.set(Metastate::Present);
                     }
                     true
@@ -253,7 +253,7 @@ where
             Metastate::Frozen => true,
             Metastate::Present => {
                 unsafe {
-                    // Safety: By `Self::discriminator`'s invariants, `self.discriminator` is exclusively for `self.store`.
+                    // Safety: By the invariant on `Self::discriminator`, `self.discriminator` is exclusively for `self.store`.
                     self.discriminator.set(Metastate::Frozen);
                 }
                 true
@@ -267,7 +267,7 @@ where
             Metastate::Empty => {}
             Metastate::Present | Metastate::Frozen => {
                 unsafe {
-                    // Safety: By `Self::discriminator`'s invariants, `self.discriminator` is exclusively for `self.store`.
+                    // Safety: By the invariant on `Self::discriminator`, `self.discriminator` is exclusively for `self.store`.
                     self.discriminator.set(Metastate::Empty);
                     // Safety: We are in the branch with state `Present` or `Frozen`, the store contains a valid state.
                     self.store.assume_init_drop();
