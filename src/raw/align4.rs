@@ -145,8 +145,8 @@ mod tests {
     #[should_panic]
     fn align4_ptr_panics_on_unaligned() {
         let bytes: [u8; 2] = [0, 0];
-        for i in 0..2 {
-            let unaligned = &raw const bytes[i] as *mut ();
+        for byte in &bytes {
+            let unaligned = byte as *const u8 as *mut ();
             Align4Ptr::from_parts(unaligned, Metadata::_0);
         }
     }

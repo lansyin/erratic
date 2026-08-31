@@ -255,7 +255,7 @@ fn from_std_error_via_into() {
 #[test]
 fn from_same_type_id_does_not_double_wrap() {
     let inner: Error = mkerr!(error = TestError::BAR);
-    let outer: Error = inner.erase_state().into();
+    let outer: Error = inner.erase_state();
     assert_eq!(outer.into_source().unwrap().to_string(), "bar",);
 }
 
@@ -546,7 +546,7 @@ enum IoState {
 
 #[test]
 fn with_state_fn_attaches_state() {
-    let res: Result<(), io::Error> = Err(io::Error::new(ErrorKind::Other, "boom"));
+    let res: Result<(), io::Error> = Err(io::Error::other("boom"));
     let built: Result<(), Error<IoState>> = res.with_state_fn(|| IoState::NotFound).build_error();
     let err = built.unwrap_err();
     assert_eq!(err.state(), Some(&IoState::NotFound));
@@ -556,7 +556,7 @@ fn with_state_fn_attaches_state() {
 #[test]
 fn with_state_fn_evaluates_lazily() {
     let calls = Cell::new(0u32);
-    let res: Result<(), io::Error> = Err(io::Error::new(ErrorKind::Other, "boom"));
+    let res: Result<(), io::Error> = Err(io::Error::other("boom"));
     let builder = res.with_state_fn(|| {
         calls.set(calls.get() + 1);
         IoState::NotFound
@@ -576,7 +576,7 @@ fn with_state_fn_ok_short_circuits() {
 
 #[test]
 fn with_state_fn_keeps_context() {
-    let res: Result<(), io::Error> = Err(io::Error::new(ErrorKind::Other, "boom"));
+    let res: Result<(), io::Error> = Err(io::Error::other("boom"));
     let built: Result<(), Error<IoState>> = res
         .with_state_fn(|| IoState::NotFound)
         .with_context(TestMessage::HOGE)

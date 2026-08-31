@@ -30,7 +30,7 @@ pub(super) struct WithBacktrace {
 
 #[cfg(feature = "backtrace")]
 std::thread_local! {
-    static SEARCHING: Cell<bool> = Cell::new(false);
+    static SEARCHING: Cell<bool> = const { Cell::new(false) };
 }
 
 #[cfg(feature = "backtrace")]

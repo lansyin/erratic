@@ -453,12 +453,8 @@ mod tests {
     // Ensure the macros do not require type annotations in the most common cases
     #[test]
     fn type_reference_check() {
-        let _ = || -> Result<()> {
-            return mkres!("test");
-        };
-        let _ = || -> Result<(), Error<i32>> {
-            return mkres!("test");
-        };
+        let _ = || -> Result<()> { mkres!("test") };
+        let _ = || -> Result<(), Error<i32>> { mkres!("test") };
     }
 
     // Test that the macros can be used with various types of input.
@@ -528,9 +524,7 @@ mod tests {
     #[test]
     fn infer_default_state_if_state_is_not_specified() {
         let _: Error<i32> = mkerr!(context = TestMessage::HOGE);
-        let _ = || -> Result<(), Error<i32>> {
-            return mkres!(context = TestMessage::HOGE);
-        };
+        let _ = || -> Result<(), Error<i32>> { mkres!(context = TestMessage::HOGE) };
     }
 
     #[test]
@@ -734,23 +728,23 @@ mod tests {
     fn mksure_evaluates_expression_once() -> crate::Result<()> {
         // No comparison expression, no explicit context.
         {
-            let value = Some(1i32);
-            mksure!(value.unwrap().is_positive())?;
+            let value = 1i32;
+            mksure!(value.is_positive())?;
         }
         // Comparison expression, no explicit context.
         {
-            let value = Some(1i32);
-            mksure!(value.unwrap() > 0)?;
+            let value = 1i32;
+            mksure!(value > 0)?;
         }
         // No comparison expression, explicit context.
         {
-            let value = Some(1i32);
-            mksure!(value.unwrap().is_positive(), context = TestMessage::HOGE)?;
+            let value = 1i32;
+            mksure!(value.is_positive(), context = TestMessage::HOGE)?;
         }
         // Comparison expression, explicit context.
         {
-            let value = Some(1i32);
-            mksure!(value.unwrap() > 0, context = TestMessage::HOGE)?;
+            let value = 1i32;
+            mksure!(value > 0, context = TestMessage::HOGE)?;
         }
         Ok(())
     }
