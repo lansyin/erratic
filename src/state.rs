@@ -241,6 +241,10 @@ where
     ///
     /// It's guaranteed that reuse will succeed when the types are identical, or when both the
     /// original and target types are at most `usize` in size (assuming the alignment also fits).
+    ///
+    /// # See also
+    ///
+    /// - [`is_state_compact`][crate::Error::is_state_compact]
     pub fn try_with_state<S2>(self, state: S2) -> Result<Error<S2>, (Self, S2)>
     where
         S2: State,

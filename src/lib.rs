@@ -369,6 +369,10 @@ where
     ///
     /// A small state incurs no heap allocation. A state is considered "small" when its size is
     /// under a pointer and its alignment is relaxed enough to fit within the inline storage.
+    ///
+    /// # See also
+    ///
+    /// - [`is_state_inlinable`][Self::is_state_inlinable]
     pub fn from_state(state: S) -> Self {
         Error(RawError::from_error(
             Some(S::into_repr(state)),
