@@ -194,7 +194,7 @@ pub type Result<T, E = Error> = core::result::Result<T, E>;
 /// The state is strongly typed. Converting between state types is cheap when
 /// [no state is actually stored][phantom]. Even when a state is stored in an allocation,
 /// the allocation can be [reused][reuse] as long as the state fits in a `usize`.
-/// [Erasing][erase] the state is cheap as well.
+/// [Erasing][erase] the state on an allocation is cheap as well.
 ///
 /// [phantom]: crate::Error::with_phantom_state
 /// [reuse]: crate::StateExt::map_state
