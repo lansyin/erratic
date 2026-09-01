@@ -66,6 +66,10 @@ pub trait Store: Send + Sync + 'static {
     /// # Safety
     ///
     /// `self` must be initialized.
+    ///
+    /// # Argument Types
+    ///
+    /// - `callback`: `&mut impl FnMut(&mut Option<impl State>)` // [`State`]
     unsafe fn assume_init_take(&mut self, callback: &mut dyn FnMut(&mut dyn Any));
     /// Attempts to store the value taken from `value` (expects an `Option<S>` behind `Any`).
     ///
@@ -74,6 +78,10 @@ pub trait Store: Send + Sync + 'static {
     /// - `self` already contains a value.
     /// - The provided `Option<S>` behind `Any` is `None`.
     /// - The provided `Option<S>` behind `Any` is `Some` but the type `S` is not compatible.
+    ///
+    /// # Argument Types
+    ///
+    /// - `value`: `Option<impl Store>` // [`Store`]
     unsafe fn try_set(&mut self, value: &mut dyn Any) -> bool;
 
     /// Returns a shared view of the state storage, tracked by `discriminator`.
@@ -208,6 +216,10 @@ where
     /// Takes the state out via a callback with `Option<S>` behind the opaque `&mut dyn Any`.
     ///
     /// Note that even if you don't move the state out in the callback, it is still dropped.
+    ///
+    /// # Argument Types
+    ///
+    /// - `callback`: `&mut impl FnMut(&mut Option<impl State>)` // [`State`]
     pub fn take(&mut self, callback: &mut dyn FnMut(&mut dyn Any)) {
         match self.discriminator.get() {
             Metastate::Empty | Metastate::Frozen => {}
@@ -228,6 +240,10 @@ where
     ///
     /// - There is a state inside the store.
     /// - The underlying store is not compatible.
+    ///
+    /// # Argument Types
+    ///
+    /// - state: `Option<impl Store>` // [`Store`]
     pub fn try_set(&mut self, state: &mut dyn Any) -> bool {
         match self.discriminator.get() {
             Metastate::Frozen | Metastate::Present => false,

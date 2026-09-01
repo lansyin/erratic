@@ -49,6 +49,10 @@ pub struct MinistateVtable {
     /// value out in the callback (that value will be dropped). Since `Ministate` will drop the
     /// stored value when it is dropped, any instance that invoked this function must be forgotten
     /// eventually (e.g. put into a `ManuallyDrop`).
+    ///
+    /// # Argument Types
+    ///
+    /// - `callback`: `&mut impl FnMut(&mut Option<State>)` // [`State`][crate::state::State]
     assume_init_take:
         unsafe fn(this: Mut<'_, MaybeUninit<()>>, callback: &mut dyn FnMut(&mut dyn Any)),
 }

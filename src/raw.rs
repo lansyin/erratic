@@ -913,6 +913,10 @@ where
     ///
     /// `state_extractor` is invoked once with the state as `&mut dyn Any` (an `Option` of the
     /// store's representation); the state is dropped even if the callback does not take it out.
+    ///
+    /// # Argument Types
+    ///
+    /// - `state_extractor`: `&mut impl FnMut(&mut Option<impl State>)` // [`State`][crate::state::State]
     fn destruct(mut self, state_extractor: &mut dyn FnMut(&mut dyn Any)) -> (E, Option<C>) {
         self.state_mut().take(state_extractor);
 
@@ -969,7 +973,12 @@ where
 
     /// Decomposes the boxed body: moves source/context into the caller's `Option`s (on `TypeId`
     /// match) and the state into `state_extractor`.
-    #[allow(clippy::too_many_arguments)]
+    ///
+    /// # Argument Types
+    ///
+    /// - `source_dst`: `Option<_>` // [`ErasedRawError`] | [`Error`][error::Error] | [`Box<dyn Error + Send + Sync + 'static>`]
+    /// - `context_dst`: `Option<impl Context>` // [`Context`]
+    /// - `state_extractor`: `&mut impl FnMut(&mut Option<impl State>)` // [`State`][crate::state::State]
     fn into_parts(
         this: ErasedDynBody,
         source_dst: &mut dyn Any,
@@ -990,6 +999,10 @@ where
     }
 
     /// Extracts the state from the boxed body into `state_extractor`, returning the vacant body.
+    ///
+    /// # Argument Types
+    ///
+    /// - `state_extractor`: `&mut impl FnMut(&mut Option<S>)`
     fn extract_state(
         this: ErasedDynBody,
         state_extractor: &mut dyn FnMut(&mut dyn Any),
@@ -1040,6 +1053,10 @@ where
     /// Stores the state if the type matches and the body is empty. On success `state_src`'s
     /// `Option` is taken and `true` is returned; otherwise `false` is returned and `state_src`
     /// is left unchanged.
+    ///
+    /// # Argument Types
+    ///
+    /// - `state_src`: `Option<impl Store>` // [`Store`]
     fn try_set_state(this: Mut<'_, DynBody>, state_src: &mut dyn Any) -> bool {
         let this = DynBody::downcast_mut::<Self>(this).expect(Self::CORRECT_VTABLE_CALL);
 

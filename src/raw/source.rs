@@ -3,14 +3,17 @@ use core::{any::Any, error::Error};
 
 use super::{ErasedRawError, backtrace::WithBacktrace};
 
-/// An error container that can be used as the source of [`RawError`].
+/// An error container that can be used as the source of [`RawError`][super::RawError].
 pub(super) trait Source: Any + Send + Sync + 'static {
     fn error_ref(&self) -> Option<&(dyn Error + Send + Sync + 'static)>;
     fn error_mut(&mut self) -> Option<&mut (dyn Error + Send + Sync + 'static)>;
     fn into_boxed(self) -> Option<Box<dyn Error + Send + Sync + 'static>>;
 
-    /// Downcasts the source to its container type, e.g. `std::io::Error`, `ErasedRawError`,
-    /// or `Box<dyn Error + Send + Sync + 'static>`.
+    /// Downcasts the source to its container type.
+    ///
+    /// # Argument Types
+    ///
+    /// - `dst`: `Option<_>` // [`ErasedRawError`] | [`Error`] | [`Box<dyn Error + Send + Sync + 'static>`]
     fn downcast_container(self, dst: &mut dyn Any) -> Result<(), Self>
     where
         Self: Sized;
