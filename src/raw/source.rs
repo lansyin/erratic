@@ -7,6 +7,8 @@ use super::{ErasedRawError, backtrace::WithBacktrace};
 pub(super) trait Source: Any + Send + Sync + 'static {
     fn error_ref(&self) -> Option<&(dyn Error + Send + Sync + 'static)>;
     fn error_mut(&mut self) -> Option<&mut (dyn Error + Send + Sync + 'static)>;
+
+    /// Invariant: It must returns `Some` if and only if `error_ref` returns `Some`.
     fn into_boxed(self) -> Option<Box<dyn Error + Send + Sync + 'static>>;
 
     /// Downcasts the source to its container type.
